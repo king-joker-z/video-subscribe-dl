@@ -121,10 +121,14 @@ type Person struct {
 func Init(dataDir string) (*DB, error) {
 	dbPath := filepath.Join(dataDir, "video-subscribe-dl.db")
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-8192)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// 连接池: 串行化写入，消除 SQLITE_BUSY 锁竞争
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	_, err = db.Exec(schema)
 	if err != nil {

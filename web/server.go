@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -64,6 +65,7 @@ type Server struct {
 	onSyncSource      func(int64)
 	onProcessPending  func()
 	version        string
+	buildTime      string
 	startTime      time.Time
 
 	// 缓存 rate limit 设置值，避免每次请求读 DB
@@ -159,8 +161,12 @@ func (s *Server) SetNotifier(n *notify.Notifier) {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: s.rateLimitMiddleware(s.authMiddleware(s.mux)),
+		Addr:              addr,
+		Handler:           s.rateLimitMiddleware(s.authMiddleware(s.mux)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB
 	}
 	log.Printf("Web server listening on http://localhost%s", addr)
 	return s.httpServer.ListenAndServe()
@@ -318,12 +324,16 @@ func (s *Server) SetVersion(v string) { s.version = v }
 // SetStartTime sets the server start time for uptime calculation
 func (s *Server) SetStartTime(t time.Time) { s.startTime = t }
 
+// SetBuildTime sets the build time string
+func (s *Server) SetBuildTime(t string) { s.buildTime = t }
+
 // GET /api/version — version and build information
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]interface{}{
-		"version":   s.version,
-		"uptime":    time.Since(s.startTime).String(),
-		"go":        "go1.22",
+		"version":    s.version,
+		"uptime":     time.Since(s.startTime).String(),
+		"go":         runtime.Version(),
+		"build_time": s.buildTime,
 	})
 }
 
