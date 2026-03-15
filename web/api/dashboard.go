@@ -35,6 +35,7 @@ func (h *DashboardHandler) HandleDashboard(w http.ResponseWriter, r *http.Reques
 		result["failed"] = detailed.Failed
 		result["pending"] = detailed.Pending
 		result["total_size"] = detailed.TotalSize
+		result["charge_blocked"] = detailed.ChargeBlocked
 		if detailed.Total > 0 {
 			result["success_rate"] = float64(detailed.Completed) / float64(detailed.Total) * 100
 		} else {

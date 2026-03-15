@@ -91,6 +91,13 @@ type VideoItem struct {
 	IsSeason    bool   `json:"is_season_display"`
 }
 
+// VideoRights 视频权限标记
+type VideoRights struct {
+	IsChargePlus int `json:"is_charge_plus"` // 1=充电专属
+	ArcPay       int `json:"arc_pay"`        // 1=付费
+	UGCPay       int `json:"ugc_pay"`        // 1=UGC付费
+}
+
 type VideoDetail struct {
 	BvID      string    `json:"bvid"`
 	Title     string    `json:"title"`
@@ -100,6 +107,7 @@ type VideoDetail struct {
 	PubDate   int64     `json:"pubdate"`
 	Owner     UPInfo    `json:"owner"`
 	Stat      VideoStat `json:"stat"`
+	Rights    VideoRights `json:"rights"`
 	SeasonID  int64     `json:"season_id"`
 	UGCSeason *struct {
 		ID    int64  `json:"id"`
@@ -122,6 +130,11 @@ func (v *VideoDetail) IsBangumi() bool {
 // IsUnavailable 检测视频不可用状态（已删除/审核中/隐藏等）
 func (v *VideoDetail) IsUnavailable() bool {
 	return v.State != 0
+}
+
+// IsChargePlus 检测充电专属/付费视频
+func (v *VideoDetail) IsChargePlus() bool {
+	return v.Rights.IsChargePlus == 1 || v.Rights.ArcPay == 1 || v.Rights.UGCPay == 1
 }
 
 type VideoStat struct {

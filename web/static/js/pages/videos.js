@@ -167,7 +167,7 @@ export function VideosPage() {
                       h('td', { className: 'py-3 pr-3 text-xs text-slate-500 hidden lg:table-cell' }, formatTime(v.created_at)),
                       h('td', { className: 'py-3' },
                         h('div', { className: 'flex items-center gap-1' },
-                          (v.status === 'failed' || v.status === 'permanent_failed') && h('button', {
+                          ((v.status === 'failed' || v.status === 'permanent_failed') && v.status !== 'charge_blocked') && h('button', {
                             onClick: async () => { try { await api.retryVideo(v.id); toast.success('已重试'); load(); } catch (e) { toast.error(e.message); } },
                             className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '重试'
                           }, h(Icon, { name: 'refresh', size: 14 })),

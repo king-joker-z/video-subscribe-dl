@@ -163,8 +163,9 @@ func (d *DB) UpdateThumbPath(id int64, thumbPath string) error {
 
 func (d *DB) IsVideoDownloaded(sourceID int64, videoID string) (bool, error) {
 	var exists int
-	// 按 source 去重：同一订阅源内已有记录（pending/downloading/completed/failed）则不重复创建
+	// 按 source 去重：同一订阅源内已有记录则不重复创建
 	// 排除 permanent_failed 让用户可以通过清理后重新触发
+	// charge_blocked 也保留（充电视频无法下载）
 	err := d.QueryRow(`
 		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status != 'permanent_failed'
 	`, sourceID, videoID).Scan(&exists)
@@ -379,6 +380,7 @@ type UploaderStats struct {
 	Pending        int    `json:"pending"`
 	Failed         int    `json:"failed"`
 	Skipped        int    `json:"skipped"`
+	ChargeBlocked  int    `json:"charge_blocked"`
 	LastDownloadAt string `json:"last_download_at"`
 }
 
@@ -408,6 +410,7 @@ func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]
 			SUM(CASE WHEN d.status = 'pending' THEN 1 ELSE 0 END) as pending,
 			SUM(CASE WHEN d.status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) as failed,
 			SUM(CASE WHEN d.status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+			SUM(CASE WHEN d.status = 'charge_blocked' THEN 1 ELSE 0 END) as charge_blocked,
 			MAX(d.created_at) as last_download_at
 		FROM downloads d
 		%s AND d.uploader != ''
@@ -428,7 +431,7 @@ func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]
 	var uploaders []UploaderStats
 	for rows.Next() {
 		var u UploaderStats
-		if err := rows.Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.LastDownloadAt); err != nil {
+		if err := rows.Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.ChargeBlocked, &u.LastDownloadAt); err != nil {
 			return nil, 0, err
 		}
 		uploaders = append(uploaders, u)
@@ -511,11 +514,12 @@ func (d *DB) GetDownloadStatsByUploader(uploader string) (*UploaderStats, error)
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
 			SUM(CASE WHEN status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) as failed,
 			SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+			SUM(CASE WHEN status = 'charge_blocked' THEN 1 ELSE 0 END) as charge_blocked,
 			MAX(created_at) as last_download_at
 		FROM downloads WHERE uploader = ?
 	`
 	var u UploaderStats
-	err := d.QueryRow(query, uploader).Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.LastDownloadAt)
+	err := d.QueryRow(query, uploader).Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.ChargeBlocked, &u.LastDownloadAt)
 	if err != nil {
 		return nil, err
 	}

@@ -40,10 +40,11 @@ export function DashboardPage() {
     { label: '下载中', value: data?.downloading || 0, color: 'text-blue-400' },
     { label: '失败', value: data?.failed || 0, color: 'text-red-400' },
     { label: '待处理', value: data?.pending || 0, color: 'text-amber-400' },
+    { label: '充电专属', value: data?.charge_blocked || 0, color: 'text-yellow-500' },
   ];
 
   return h('div', { className: 'page-enter space-y-6' },
-    h('div', { className: 'grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4' },
+    h('div', { className: 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4' },
       stats.map((s, i) => h(Card, { key: i },
         h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
         h('div', { className: cn('text-2xl font-bold', s.color) }, s.value.toLocaleString())

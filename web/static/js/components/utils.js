@@ -91,6 +91,7 @@ export function StatusBadge({ status }) {
     permanent_failed: { label: '永久失败', variant: 'error' },
     cancelled: { label: '已取消', variant: 'outline' },
     skipped: { label: '已跳过', variant: 'outline' },
+    charge_blocked: { label: '充电专属', variant: 'warning' },
   };
   const s = map[status] || { label: status || '未知', variant: 'outline' };
   return h(Badge, { variant: s.variant }, s.label);

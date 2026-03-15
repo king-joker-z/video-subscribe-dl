@@ -319,6 +319,21 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		return
 	}
 
+	// 充电专属/付费视频检查
+	if detail.IsChargePlus() {
+		log.Printf("视频 %s (%s) 为充电专属/付费内容，跳过下载", title, bvid)
+		// 创建 charge_blocked 记录（不算失败）
+		exists, _ := s.db.IsVideoDownloaded(src.ID, bvid)
+		if !exists {
+			dl := &db.Download{
+				SourceID: src.ID, VideoID: bvid, Title: title,
+				Uploader: uploaderName, Thumbnail: pic, Status: "charge_blocked",
+			}
+			s.db.CreateDownload(dl)
+		}
+		return
+	}
+
 	pages := bilibili.GetAllPages(detail)
 	if len(pages) == 0 {
 		log.Printf("No pages for %s, skipping", bvid)

@@ -15,32 +15,35 @@ type UploaderStat struct {
 
 // DetailedStats 完整统计信息
 type DetailedStats struct {
-	Total     int   `json:"total"`
-	Completed int   `json:"completed"`
-	Failed    int   `json:"failed"`
-	Pending   int   `json:"pending"`
-	TotalSize int64 `json:"total_size"` // bytes
-	Sources   int   `json:"sources"`
+	Total         int   `json:"total"`
+	Completed     int   `json:"completed"`
+	Failed        int   `json:"failed"`
+	Pending       int   `json:"pending"`
+	ChargeBlocked int   `json:"charge_blocked"`
+	TotalSize     int64 `json:"total_size"` // bytes
+	Sources       int   `json:"sources"`
 }
 
 func (d *DB) GetStats() (map[string]int, error) {
 	stats := map[string]int{
-		"sources":     0,
-		"pending":     0,
-		"downloading": 0,
-		"completed":   0,
-		"failed":      0,
-		"relocated":   0,
-		"total":       0,
+		"sources":        0,
+		"pending":        0,
+		"downloading":    0,
+		"completed":      0,
+		"failed":         0,
+		"relocated":      0,
+		"charge_blocked": 0,
+		"total":          0,
 	}
 
-	var sources, pending, downloading, completed, failed, relocated, total int
+	var sources, pending, downloading, completed, failed, relocated, chargeBlocked, total int
 	d.QueryRow("SELECT COUNT(*) FROM sources WHERE enabled = 1").Scan(&sources)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'pending'").Scan(&pending)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'downloading'").Scan(&downloading)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('completed', 'relocated')").Scan(&completed)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('failed', 'permanent_failed')").Scan(&failed)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'relocated'").Scan(&relocated)
+	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'charge_blocked'").Scan(&chargeBlocked)
 	d.QueryRow("SELECT COUNT(*) FROM downloads").Scan(&total)
 	stats["sources"] = sources
 	stats["pending"] = pending
@@ -48,6 +51,7 @@ func (d *DB) GetStats() (map[string]int, error) {
 	stats["completed"] = completed
 	stats["failed"] = failed
 	stats["relocated"] = relocated
+	stats["charge_blocked"] = chargeBlocked
 	stats["total"] = total
 
 	return stats, nil
@@ -61,6 +65,7 @@ func (d *DB) GetStatsDetailed() (*DetailedStats, error) {
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('failed','permanent_failed')").Scan(&s.Failed)
 	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'pending'").Scan(&s.Pending)
 	d.QueryRow("SELECT COALESCE(SUM(file_size),0) FROM downloads WHERE status IN ('completed','relocated')").Scan(&s.TotalSize)
+	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'charge_blocked'").Scan(&s.ChargeBlocked)
 	d.QueryRow("SELECT COUNT(*) FROM sources WHERE enabled = 1").Scan(&s.Sources)
 	return s, nil
 }
