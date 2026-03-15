@@ -7,6 +7,7 @@ import { VideosPage } from './pages/videos.js';
 import { UploadersPage } from './pages/uploaders.js';
 import { SettingsPage } from './pages/settings.js';
 import { LogsPage } from './pages/logs.js';
+import { QuickDownloadDialog, QuickDownloadFAB } from './components/quick-download.js';
 
 const { createElement: h, useState, useEffect, useCallback } = React;
 
@@ -108,6 +109,19 @@ function App() {
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
+  const [quickDlOpen, setQuickDlOpen] = useState(false);
+
+  // 全局快捷键 Ctrl+D 打开快速下载
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        setQuickDlOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Hash 路由
   useEffect(() => {
@@ -154,6 +168,8 @@ function App() {
 
   return h('div', { className: 'min-h-screen bg-slate-950 text-slate-100' },
     h(ToastContainer),
+    h(QuickDownloadDialog, { open: quickDlOpen, onClose: () => setQuickDlOpen(false) }),
+    h(QuickDownloadFAB, { onClick: () => setQuickDlOpen(true) }),
     // 侧边栏（PC）
     h('div', { className: 'hidden lg:block' },
       h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: sidebarCollapsed, onToggle: () => setSidebarCollapsed(c => !c) })

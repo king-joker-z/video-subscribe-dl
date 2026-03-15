@@ -687,7 +687,87 @@ var (
 	reFID      = regexp.MustCompile(`fid=(\d+)`)
 	reListsID  = regexp.MustCompile(`/lists/(\d+)`)
 	reSID      = regexp.MustCompile(`sid=(\d+)`)
+	reBVID     = regexp.MustCompile(`(BV[a-zA-Z0-9]{10})`)
+	reAVID     = regexp.MustCompile(`(?i)av(\d+)`)
 )
+
+// ExtractBVID 从各种 B 站 URL 格式或裸 BV 号中提取 BV ID
+// 支持格式:
+//   - BV1xx411c7mD (裸 BV 号)
+//   - https://www.bilibili.com/video/BV1xx411c7mD
+//   - https://b23.tv/xxxxxx (短链 - 会自动解析重定向)
+//   - https://www.bilibili.com/video/av12345 (AV 号)
+//   - av12345 (裸 AV 号)
+func ExtractBVID(input string) (bvid string, avid int64, err error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", 0, fmt.Errorf("empty input")
+	}
+
+	// 0. 短链接先解析
+	if strings.Contains(input, "b23.tv") {
+		if resolved, resolveErr := ResolveShortURL(input); resolveErr == nil {
+			input = resolved
+		}
+	}
+
+	// 1. 尝试提取 BV 号
+	if m := reBVID.FindStringSubmatch(input); len(m) > 1 {
+		return m[1], 0, nil
+	}
+
+	// 2. 尝试提取 AV 号
+	if m := reAVID.FindStringSubmatch(input); len(m) > 1 {
+		aid, parseErr := strconv.ParseInt(m[1], 10, 64)
+		if parseErr == nil && aid > 0 {
+			return "", aid, nil
+		}
+	}
+
+	return "", 0, fmt.Errorf("cannot extract BV/AV ID from: %s", input)
+}
+
+// AV2BV 将 AV 号转换为 BV 号（通过 API）
+func (c *Client) AV2BV(avid int64) (string, error) {
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			BvID string `json:"bvid"`
+		} `json:"data"`
+	}
+	err := c.get(fmt.Sprintf("https://api.bilibili.com/x/web-interface/view?aid=%d", avid), &resp)
+	if err != nil {
+		return "", err
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	if resp.Data.BvID == "" {
+		return "", fmt.Errorf("empty bvid for av%d", avid)
+	}
+	return resp.Data.BvID, nil
+}
+
+// ResolveShortURL 解析 b23.tv 短链接，返回最终 URL
+func ResolveShortURL(shortURL string) (string, error) {
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // 不跟随重定向
+		},
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get(shortURL)
+	if err != nil {
+		return "", fmt.Errorf("resolve short URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return loc, nil
+	}
+	return shortURL, fmt.Errorf("no redirect found for: %s", shortURL)
+}
 
 var uas = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",

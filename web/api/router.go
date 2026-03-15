@@ -20,6 +20,7 @@ type Router struct {
 	credential *CredentialHandler
 	events     *EventsHandler
 	me         *MeHandler
+	quickdl    *QuickDownloadHandler
 	onSyncAll  func()
 }
 
@@ -34,6 +35,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		credential: NewCredentialHandler(database),
 		events:     NewEventsHandler(dl),
 		me:         NewMeHandler(database),
+		quickdl:    NewQuickDownloadHandler(database, dl, downloadDir),
 	}
 }
 
@@ -71,6 +73,7 @@ func (rt *Router) SetFullScanSourceFunc(fn func(int64)) {
 // SetBiliClientFunc 设置获取 bilibili client 的回调
 func (rt *Router) SetBiliClientFunc(fn func() *bilibili.Client) {
 	rt.me.SetBiliClientFunc(fn)
+	rt.quickdl.SetBiliClientFunc(fn)
 }
 
 func (rt *Router) SetConfigReloadFunc(fn func()) {
@@ -164,6 +167,10 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/me/favorites", rt.me.HandleFavorites)
 	mux.HandleFunc("/api/me/uppers", rt.me.HandleUppers)
 	mux.HandleFunc("/api/me/subscribe", rt.me.HandleSubscribe)
+
+	// Quick Download
+	mux.HandleFunc("/api/download", rt.quickdl.HandleQuickDownload)
+	mux.HandleFunc("/api/download/preview", rt.quickdl.HandlePreview)
 
 	// Auth — token 登录
 	mux.HandleFunc("/api/login/token", rt.settings.HandleTokenLogin)

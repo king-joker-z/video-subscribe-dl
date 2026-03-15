@@ -102,6 +102,10 @@ export const api = {
   },
   batchSubscribe: (body) => request('/api/me/subscribe', { method: 'POST', body: JSON.stringify(body) }),
 
+   // Quick Download
+  quickDownload: (url) => request('/api/download', { method: 'POST', body: JSON.stringify({ url }) }),
+  previewDownload: (url) => request('/api/download/preview', { method: 'POST', body: JSON.stringify({ url }) }),
+
   };
 
 // SSE 事件源

@@ -295,3 +295,78 @@ func TestSanitizePath_LineSeparator(t *testing.T) {
 		t.Errorf("expected 'helloworld', got '%s'", result)
 	}
 }
+
+// === TestExtractBVID ===
+
+func TestExtractBVID_RawBV(t *testing.T) {
+	bvid, avid, err := ExtractBVID("BV1xx411c7mD")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bvid != "BV1xx411c7mD" {
+		t.Errorf("expected BV1xx411c7mD, got %s", bvid)
+	}
+	if avid != 0 {
+		t.Errorf("expected avid 0, got %d", avid)
+	}
+}
+
+func TestExtractBVID_FullURL(t *testing.T) {
+	bvid, _, err := ExtractBVID("https://www.bilibili.com/video/BV1GJ411x7h7")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bvid != "BV1GJ411x7h7" {
+		t.Errorf("expected BV1GJ411x7h7, got %s", bvid)
+	}
+}
+
+func TestExtractBVID_WithParams(t *testing.T) {
+	bvid, _, err := ExtractBVID("https://www.bilibili.com/video/BV1GJ411x7h7?p=2&vd_source=abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bvid != "BV1GJ411x7h7" {
+		t.Errorf("expected BV1GJ411x7h7, got %s", bvid)
+	}
+}
+
+func TestExtractBVID_AV(t *testing.T) {
+	bvid, avid, err := ExtractBVID("av12345")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bvid != "" {
+		t.Errorf("expected empty bvid, got %s", bvid)
+	}
+	if avid != 12345 {
+		t.Errorf("expected avid 12345, got %d", avid)
+	}
+}
+
+func TestExtractBVID_AVURL(t *testing.T) {
+	bvid, avid, err := ExtractBVID("https://www.bilibili.com/video/av99887766")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bvid != "" {
+		t.Errorf("expected empty bvid, got %s", bvid)
+	}
+	if avid != 99887766 {
+		t.Errorf("expected avid 99887766, got %d", avid)
+	}
+}
+
+func TestExtractBVID_Empty(t *testing.T) {
+	_, _, err := ExtractBVID("")
+	if err == nil {
+		t.Error("expected error for empty input")
+	}
+}
+
+func TestExtractBVID_InvalidURL(t *testing.T) {
+	_, _, err := ExtractBVID("https://www.youtube.com/watch?v=abc")
+	if err == nil {
+		t.Error("expected error for YouTube URL")
+	}
+}

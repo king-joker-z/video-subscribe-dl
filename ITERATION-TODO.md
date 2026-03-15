@@ -118,3 +118,18 @@
 - [x] 重试逻辑同步支持多P episodedetails NFO 生成（retry.go）
 - [x] handleDownloadResult 区分单P（movie NFO）和多P（episodedetails NFO）
 - [x] go build + go vet + go test 全量通过
+
+## 迭代 #16 (v2.6.0) — 单视频快速下载
+- [x] 新增 ExtractBVID 函数：支持解析 BV 号、AV 号、完整 URL、b23.tv 短链接
+- [x] 新增 AV2BV API 转换函数（通过 bilibili API 将 AV 号转为 BV 号）
+- [x] 新增 ResolveShortURL 函数（解析 b23.tv 短链接重定向）
+- [x] 新增 POST /api/download 端点：一键下载单个视频（自动处理单P/多P）
+- [x] 新增 POST /api/download/preview 端点：预览视频信息（不下载）
+- [x] 前端快速下载 FAB 按钮（右下角悬浮按钮）
+- [x] 前端快速下载弹窗：URL 输入 → 视频预览（封面+标题+UP主+播放量）→ 一键下载
+- [x] 支持 Ctrl+D 快捷键打开快速下载弹窗
+- [x] 已下载视频重复检测（避免重复下载）
+- [x] 充电专属/番剧/不可用视频前置校验
+- [x] source_id=0 标识快速下载记录，与订阅源记录区分
+- [x] 7 个单元测试覆盖 ExtractBVID 各种输入场景
+- [x] go build + go vet + go test 全量通过
