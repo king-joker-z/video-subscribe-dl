@@ -157,6 +157,18 @@ export function SourcesPage({ onNavigate }) {
   const [newURL, setNewURL] = useState('');
   const [adding, setAdding] = useState(false);
   const [editSource, setEditSource] = useState(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseResult, setParseResult] = useState(null);
+  const [addForm, setAddForm] = useState({
+    name: '',
+    enabled: true,
+    download_quality: 'best',
+    download_codec: 'all',
+    download_filter: '',
+    skip_nfo: false,
+    skip_poster: false,
+    check_interval: 1800,
+  });
 
   const load = useCallback(async () => {
     try { const res = await api.getSources(); setSources(res.data || []); }
@@ -166,15 +178,45 @@ export function SourcesPage({ onNavigate }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleParse = async () => {
+    if (!newURL.trim()) return;
+    setParsing(true);
+    try {
+      const res = await api.parseSource(newURL.trim());
+      const d = res.data || {};
+      setParseResult(d);
+      setAddForm(prev => ({ ...prev, name: d.name || '' }));
+    } catch (e) { toast.error(e.message); setParseResult(null); }
+    finally { setParsing(false); }
+  };
+
+  const updateAddForm = (key, value) => setAddForm(prev => ({ ...prev, [key]: value }));
+
   const handleAdd = async () => {
     if (!newURL.trim()) return;
     setAdding(true);
     try {
-      const res = await api.createSource({ url: newURL.trim() });
+      const body = { url: newURL.trim() };
+      if (addForm.name) body.name = addForm.name;
+      body.enabled = addForm.enabled;
+      body.download_quality = addForm.download_quality;
+      body.download_codec = addForm.download_codec;
+      body.download_filter = addForm.download_filter;
+      body.skip_nfo = addForm.skip_nfo;
+      body.skip_poster = addForm.skip_poster;
+      body.check_interval = addForm.check_interval;
+      const res = await api.createSource(body);
       toast.success('已添加: ' + (res.data.name || '新订阅源'));
-      setNewURL(''); setShowAdd(false); load();
+      setNewURL(''); setShowAdd(false); setParseResult(null);
+      setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 1800 });
+      load();
     } catch (e) { toast.error(e.message); }
     finally { setAdding(false); }
+  };
+
+  const resetAddModal = () => {
+    setShowAdd(false); setNewURL(''); setParseResult(null);
+    setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 1800 });
   };
 
   const handleDelete = async (id, name) => {
@@ -201,18 +243,99 @@ export function SourcesPage({ onNavigate }) {
       h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm' },
         h(Icon, { name: 'plus', size: 14 }), '新增')
     ),
-    // 新增表单
-    showAdd && h(Card, { className: 'space-y-3' },
-      h('div', { className: 'text-sm text-slate-400 mb-2' }, '输入 B 站链接，自动识别类型'),
-      h('div', { className: 'flex gap-2' },
-        h('input', {
-          type: 'text', value: newURL, placeholder: 'https://space.bilibili.com/xxx 或 合集/收藏夹链接',
-          onChange: (e) => setNewURL(e.target.value),
-          onKeyDown: (e) => e.key === 'Enter' && handleAdd(),
-          className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'
-        }),
-        h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '添加'),
-        h(Button, { onClick: () => { setShowAdd(false); setNewURL(''); }, variant: 'ghost', size: 'md' }, '取消')
+    // 新增订阅弹窗
+    showAdd && h('div', { className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50', onClick: (e) => { if (e.target === e.currentTarget) resetAddModal(); } },
+      h('div', { className: 'bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-4' },
+        h('div', { className: 'flex items-center justify-between' },
+          h('h3', { className: 'text-lg font-semibold text-slate-200' }, '新增订阅源'),
+          h('button', { onClick: resetAddModal, className: 'p-1 rounded hover:bg-slate-700 text-slate-400' }, h(Icon, { name: 'x', size: 18 }))
+        ),
+
+        // URL 输入 + 解析按钮
+        h('div', null,
+          h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站链接（必填）'),
+          h('div', { className: 'flex gap-2' },
+            h('input', {
+              type: 'text', value: newURL, placeholder: 'https://space.bilibili.com/xxx',
+              onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+              onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+              className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'
+            }),
+            h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
+          )
+        ),
+
+        // 解析结果展示
+        parseResult && h('div', { className: 'bg-slate-900/50 border border-slate-700/50 rounded-lg px-4 py-3 space-y-3' },
+          h('div', { className: 'flex items-center gap-2' },
+            h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
+            parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+          ),
+
+          // 显示名称（可编辑）
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, '显示名称'),
+            h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+          ),
+
+          // 启用开关
+          h('div', { className: 'flex items-center justify-between' },
+            h('label', { className: 'text-sm text-slate-400' }, '启用'),
+            h('button', {
+              onClick: () => updateAddForm('enabled', !addForm.enabled),
+              className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-600')
+            }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+          ),
+
+          // 画质偏好
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, '画质偏好'),
+            h('select', { value: addForm.download_quality, onChange: (e) => updateAddForm('download_quality', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
+              qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
+            )
+          ),
+
+          // 编码偏好
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, '视频编码'),
+            h('select', { value: addForm.download_codec, onChange: (e) => updateAddForm('download_codec', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
+              h('option', { value: 'all' }, '自动'),
+              h('option', { value: 'avc' }, 'H.264 (AVC)'),
+              h('option', { value: 'hevc' }, 'H.265 (HEVC)'),
+              h('option', { value: 'av1' }, 'AV1')
+            )
+          ),
+
+          // 标题过滤关键词
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, '标题过滤关键词（匹配才下载，留空不过滤）'),
+            h('input', { type: 'text', value: addForm.download_filter, onChange: (e) => updateAddForm('download_filter', e.target.value), placeholder: '关键词1|关键词2', className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+          ),
+
+          // 检查间隔
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, '检查间隔（秒）'),
+            h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+          ),
+
+          // 开关组
+          h('div', { className: 'grid grid-cols-2 gap-3' },
+            h('div', { className: 'flex items-center gap-2' },
+              h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
+              h('label', { className: 'text-sm text-slate-400' }, '跳过 NFO')
+            ),
+            h('div', { className: 'flex items-center gap-2' },
+              h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
+              h('label', { className: 'text-sm text-slate-400' }, '跳过封面')
+            )
+          )
+        ),
+
+        // 底部按钮
+        h('div', { className: 'flex justify-end gap-2 pt-2' },
+          h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+          h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+        )
       )
     ),
     // 列表

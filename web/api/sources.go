@@ -341,6 +341,111 @@ func (h *SourcesHandler) HandleSync(w http.ResponseWriter, r *http.Request, id i
 	apiOK(w, map[string]interface{}{"id": id, "message": "同步已触发"})
 }
 
+
+// POST /api/sources/parse — 解析 URL，返回类型和名称
+func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := parseJSON(r, &req); err != nil || req.URL == "" {
+		apiError(w, CodeInvalidParam, "请提供 url 参数")
+		return
+	}
+
+	// 构建 client
+	var client *bilibili.Client
+	if credJSON, _ := h.db.GetSetting("credential_json"); credJSON != "" {
+		if cred := bilibili.CredentialFromJSON(credJSON); cred != nil && !cred.IsEmpty() {
+			client = bilibili.NewClientWithCredential(cred)
+		}
+	}
+	if client == nil {
+		cp, _ := h.db.GetSetting("cookie_path")
+		cookie := bilibili.ReadCookieFile(cp)
+		client = bilibili.NewClient(cookie)
+	}
+
+	rawURL := req.URL
+	result := map[string]interface{}{}
+
+	// 1. 收藏夹: space.bilibili.com/xxx/favlist?fid=yyy
+	if strings.Contains(rawURL, "favlist") {
+		mid, mediaID, err := bilibili.ExtractFavoriteInfo(rawURL)
+		if err == nil && mid > 0 {
+			result["type"] = "favorite"
+			result["mid"] = mid
+			result["media_id"] = mediaID
+			if info, err := client.GetUPInfo(mid); err == nil && info.Name != "" {
+				result["name"] = info.Name + " - 收藏夹"
+				result["uploader"] = info.Name
+			}
+			apiOK(w, result)
+			return
+		}
+	}
+
+	// 2. 合集 Season: collectiondetail 或 lists/xxx?type=season
+	if strings.Contains(rawURL, "collectiondetail") || (strings.Contains(rawURL, "/lists/") && strings.Contains(rawURL, "type=season")) {
+		mid, seasonID, err := bilibili.ExtractSeasonInfo(rawURL)
+		if err == nil && mid > 0 && seasonID > 0 {
+			result["type"] = "season"
+			result["mid"] = mid
+			result["season_id"] = seasonID
+			if info, err := client.GetUPInfo(mid); err == nil && info.Name != "" {
+				result["uploader"] = info.Name
+				archives, meta, err := client.GetSeasonVideos(mid, seasonID, 1, 1)
+				_ = archives
+				if err == nil && meta != nil && meta.Title != "" {
+					result["name"] = meta.Title
+				} else {
+					result["name"] = info.Name + " - 合集"
+				}
+			}
+			apiOK(w, result)
+			return
+		}
+	}
+
+	// 3. Series: seriesdetail 或 lists/xxx?type=series
+	if strings.Contains(rawURL, "seriesdetail") || (strings.Contains(rawURL, "/lists/") && strings.Contains(rawURL, "type=series")) {
+		info, err := bilibili.ExtractCollectionInfo(rawURL)
+		if err == nil && info.Type == bilibili.CollectionSeries {
+			result["type"] = "series"
+			result["mid"] = info.MID
+			result["series_id"] = info.ID
+			if upInfo, err := client.GetUPInfo(info.MID); err == nil && upInfo.Name != "" {
+				result["uploader"] = upInfo.Name
+				if seriesMeta, err := client.GetSeriesInfo(info.MID, info.ID); err == nil && seriesMeta.Name != "" {
+					result["name"] = seriesMeta.Name
+				} else {
+					result["name"] = upInfo.Name + " - 系列"
+				}
+			}
+			apiOK(w, result)
+			return
+		}
+	}
+
+	// 4. UP 主主页: space.bilibili.com/xxx
+	mid, err := bilibili.ExtractMID(rawURL)
+	if err == nil && mid > 0 {
+		result["type"] = "up"
+		result["mid"] = mid
+		if info, err := client.GetUPInfo(mid); err == nil && info.Name != "" {
+			result["name"] = info.Name
+			result["uploader"] = info.Name
+		}
+		apiOK(w, result)
+		return
+	}
+
+	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站链接")
+}
+
 // HandleByID 路由分发 /api/sources/:id
 func (h *SourcesHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/sources/")

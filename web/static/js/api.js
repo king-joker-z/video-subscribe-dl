@@ -22,6 +22,7 @@ export const api = {
   // Sources
   getSources: (type) => request('/api/sources' + (type ? `?type=${type}` : '')),
   createSource: (body) => request('/api/sources', { method: 'POST', body: JSON.stringify(body) }),
+  parseSource: (url) => request('/api/sources/parse', { method: 'POST', body: JSON.stringify({ url }) }),
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSource: (id) => request(`/api/sources/${id}`, { method: 'DELETE' }),

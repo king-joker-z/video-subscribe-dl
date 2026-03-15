@@ -71,6 +71,13 @@ func (rt *Router) Register(mux *http.ServeMux) {
 			apiError(w, CodeMethodNotAllow, "method not allowed")
 		}
 	})
+	mux.HandleFunc("/api/sources/parse", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			rt.sources.HandleParse(w, r)
+		} else {
+			apiError(w, CodeMethodNotAllow, "method not allowed")
+		}
+	})
 	mux.HandleFunc("/api/sources/", rt.sources.HandleByID)
 
 	// Videos
