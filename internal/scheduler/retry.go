@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
@@ -119,17 +118,17 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 
 	capturedDlID := dl.ID
 	s.dl.Submit(&downloader.Job{
-		BvID:        actualBvID,
-		CID:         cid,
-		Title:       dl.Title,
-		OutputDir:   outputDir,
-		Quality:     src.DownloadQuality,
-		QualityMin:  src.DownloadQualityMin,
-		Codec:       src.DownloadCodec,
-		Danmaku:     src.DownloadDanmaku,
-		Subtitle:    src.DownloadSubtitle,
-		SkipNFO:     src.SkipNFO,
-		SkipPoster:  src.SkipPoster,
+		BvID:             actualBvID,
+		CID:              cid,
+		Title:            dl.Title,
+		OutputDir:        outputDir,
+		Quality:          src.DownloadQuality,
+		QualityMin:       src.DownloadQualityMin,
+		Codec:            src.DownloadCodec,
+		Danmaku:          src.DownloadDanmaku,
+		Subtitle:         src.DownloadSubtitle,
+		SkipNFO:          src.SkipNFO,
+		SkipPoster:       src.SkipPoster,
 		Flat:             flat,
 		UploaderName:     dl.Uploader,
 		FilenameTemplate: s.getFilenameTemplate(),

@@ -222,17 +222,17 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
-		BvID:        strings.SplitN(videoID, "_P", 2)[0],
-		CID:         cid,
-		Title:       title,
-		OutputDir:   outputDir,
-		Quality:     src.DownloadQuality,
-		Codec:       src.DownloadCodec,
-		Danmaku:     src.DownloadDanmaku,
-		Subtitle:    src.DownloadSubtitle,
-		QualityMin:  src.DownloadQualityMin,
-		SkipNFO:     src.SkipNFO,
-		SkipPoster:  src.SkipPoster,
+		BvID:             strings.SplitN(videoID, "_P", 2)[0],
+		CID:              cid,
+		Title:            title,
+		OutputDir:        outputDir,
+		Quality:          src.DownloadQuality,
+		Codec:            src.DownloadCodec,
+		Danmaku:          src.DownloadDanmaku,
+		Subtitle:         src.DownloadSubtitle,
+		QualityMin:       src.DownloadQualityMin,
+		SkipNFO:          src.SkipNFO,
+		SkipPoster:       src.SkipPoster,
 		Flat:             true,
 		UploaderName:     uploaderName,
 		FilenameTemplate: s.getFilenameTemplate(),
@@ -278,17 +278,17 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
-		BvID:        strings.SplitN(videoID, "_P", 2)[0],
-		CID:         cid,
-		Title:       title,
-		OutputDir:   outputDir,
-		Quality:     src.DownloadQuality,
-		Codec:       src.DownloadCodec,
-		Danmaku:     src.DownloadDanmaku,
-		Subtitle:    src.DownloadSubtitle,
-		QualityMin:  src.DownloadQualityMin,
-		SkipNFO:     src.SkipNFO,
-		SkipPoster:  src.SkipPoster,
+		BvID:             strings.SplitN(videoID, "_P", 2)[0],
+		CID:              cid,
+		Title:            title,
+		OutputDir:        outputDir,
+		Quality:          src.DownloadQuality,
+		Codec:            src.DownloadCodec,
+		Danmaku:          src.DownloadDanmaku,
+		Subtitle:         src.DownloadSubtitle,
+		QualityMin:       src.DownloadQualityMin,
+		SkipNFO:          src.SkipNFO,
+		SkipPoster:       src.SkipPoster,
 		UploaderName:     uploaderName,
 		FilenameTemplate: s.getFilenameTemplate(),
 		CookiesFile:      cookiesFile,
@@ -510,28 +510,28 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 			log.Printf("  NFO skipped (skip_nfo=true)")
 		}
 	} else {
-	uploaderFace := ""
-	if upInfo != nil {
-		uploaderFace = upInfo.Face
-	}
-	if uploaderFace == "" {
-		uploaderFace = detail.Owner.Face
-	}
-	meta := &nfo.VideoMeta{
-		BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
-		UploaderName: uploaderName, UploaderFace: uploaderFace,
-		UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,
-		Tags: tags, ViewCount: detail.Stat.View, LikeCount: detail.Stat.Like,
-		CoinCount: detail.Stat.Coin, DanmakuCount: detail.Stat.Danmaku,
-		ReplyCount: detail.Stat.Reply, FavoriteCount: detail.Stat.Favorite,
-		ShareCount: detail.Stat.Share,
-		Thumbnail:  detail.Pic,
-		WebpageURL: fmt.Sprintf("https://www.bilibili.com/video/%s", actualBvID),
-		TName:      detail.TName,
-	}
-	if err := nfo.GenerateVideoNFO(meta, result.FilePath); err != nil {
-		log.Printf("NFO failed: %v", err)
-	}
+		uploaderFace := ""
+		if upInfo != nil {
+			uploaderFace = upInfo.Face
+		}
+		if uploaderFace == "" {
+			uploaderFace = detail.Owner.Face
+		}
+		meta := &nfo.VideoMeta{
+			BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
+			UploaderName: uploaderName, UploaderFace: uploaderFace,
+			UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,
+			Tags: tags, ViewCount: detail.Stat.View, LikeCount: detail.Stat.Like,
+			CoinCount: detail.Stat.Coin, DanmakuCount: detail.Stat.Danmaku,
+			ReplyCount: detail.Stat.Reply, FavoriteCount: detail.Stat.Favorite,
+			ShareCount: detail.Stat.Share,
+			Thumbnail:  detail.Pic,
+			WebpageURL: fmt.Sprintf("https://www.bilibili.com/video/%s", actualBvID),
+			TName:      detail.TName,
+		}
+		if err := nfo.GenerateVideoNFO(meta, result.FilePath); err != nil {
+			log.Printf("NFO failed: %v", err)
+		}
 	} // end skipNFO
 
 	// 下载封面图并记录路径 (受 SkipOption 控制)

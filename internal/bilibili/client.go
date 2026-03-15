@@ -130,25 +130,25 @@ type VideoRights struct {
 }
 
 type VideoDetail struct {
-	BvID      string    `json:"bvid"`
-	Title     string    `json:"title"`
-	Desc      string    `json:"desc"`
-	Pic       string    `json:"pic"`
-	Duration  int       `json:"duration"`
-	PubDate   int64     `json:"pubdate"`
-	Owner     UPInfo    `json:"owner"`
-	Stat      VideoStat `json:"stat"`
+	BvID      string      `json:"bvid"`
+	Title     string      `json:"title"`
+	Desc      string      `json:"desc"`
+	Pic       string      `json:"pic"`
+	Duration  int         `json:"duration"`
+	PubDate   int64       `json:"pubdate"`
+	Owner     UPInfo      `json:"owner"`
+	Stat      VideoStat   `json:"stat"`
 	Rights    VideoRights `json:"rights"`
-	SeasonID  int64     `json:"season_id"`
+	SeasonID  int64       `json:"season_id"`
 	UGCSeason *struct {
 		ID    int64  `json:"id"`
 		Title string `json:"title"`
 	} `json:"ugc_season"`
 	RedirectURL string `json:"redirect_url"`
-	Tid         int    `json:"tid"`         // 分区 ID
-	TName       string `json:"tname"`       // 分区名称
+	Tid         int    `json:"tid"`   // 分区 ID
+	TName       string `json:"tname"` // 分区名称
 	State       int    `json:"state"` // -1=待审 -2=退回 -4=未过审 -6=删除
-	Pages []struct {
+	Pages       []struct {
 		CID  int64  `json:"cid"`
 		Page int    `json:"page"`
 		Part string `json:"part"`
@@ -196,7 +196,6 @@ type SeasonArchive struct {
 	PubDate  int64  `json:"pubdate"`
 }
 
-
 // CollectionType 合集类型
 type CollectionType string
 
@@ -207,9 +206,9 @@ const (
 
 // CollectionInfo 统一合集信息
 type CollectionInfo struct {
-	Type     CollectionType
-	MID      int64
-	ID       int64 // SeasonID 或 SeriesID
+	Type CollectionType
+	MID  int64
+	ID   int64 // SeasonID 或 SeriesID
 }
 
 // SeriesMeta Series（视频列表）元数据
@@ -230,7 +229,6 @@ type SeriesArchive struct {
 	Duration int    `json:"duration"`
 	PubDate  int64  `json:"pubdate"`
 }
-
 
 // === 动态 API 数据结构 ===
 
@@ -371,7 +369,7 @@ func (c *Client) GetSeasonVideos(mid, seasonID int64, page, pageSize int) ([]Sea
 // GetVideoTags 获取视频标签
 func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 	var resp struct {
-		Code int    `json:"code"`
+		Code int `json:"code"`
 		Data []struct {
 			TagName string `json:"tag_name"`
 		} `json:"data"`
@@ -385,7 +383,6 @@ func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 	}
 	return tags, nil
 }
-
 
 // GetDynamicVideos 获取 UP 主动态中的视频（单页）
 func (c *Client) GetDynamicVideos(mid int64, offset string) (*DynamicResponse, error) {
@@ -686,10 +683,10 @@ func DownloadFile(rawURL, dest string) error {
 
 // 预编译正则表达式
 var (
-	reSpaceMID  = regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
-	reFID       = regexp.MustCompile(`fid=(\d+)`)
-	reListsID   = regexp.MustCompile(`/lists/(\d+)`)
-	reSID       = regexp.MustCompile(`sid=(\d+)`)
+	reSpaceMID = regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
+	reFID      = regexp.MustCompile(`fid=(\d+)`)
+	reListsID  = regexp.MustCompile(`/lists/(\d+)`)
+	reSID      = regexp.MustCompile(`sid=(\d+)`)
 )
 
 var uas = []string{
@@ -724,8 +721,8 @@ type FavoriteVideoItem struct {
 	Pic      string `json:"pic"`
 	Duration int    `json:"duration"`
 	PubDate  int64  `json:"pubdate"`
-	Attr     int    `json:"attr"`   // 收藏夹属性, 9=失效
-	Type     int    `json:"type"`   // 类型
+	Attr     int    `json:"attr"` // 收藏夹属性, 9=失效
+	Type     int    `json:"type"` // 类型
 	Owner    struct {
 		MID  int64  `json:"mid"`
 		Name string `json:"name"`
@@ -799,7 +796,7 @@ func (c *Client) GetFavoriteVideos(mediaID int64, page, pageSize int) ([]Favorit
 // API: https://api.bilibili.com/x/v2/history/toview/web
 func (c *Client) GetWatchLater() ([]WatchLaterVideoItem, error) {
 	var resp struct {
-		Code int `json:"code"`
+		Code int    `json:"code"`
 		Msg  string `json:"message"`
 		Data struct {
 			List []WatchLaterVideoItem `json:"list"`
@@ -851,7 +848,8 @@ func ExtractWatchLaterInfo(rawURL string) (mid int64, err error) {
 
 // ExtractSeasonInfo 从 URL 提取合集信息
 // 支持: https://space.bilibili.com/{mid}/lists/{seasonID}?type=season
-//        https://space.bilibili.com/{mid}/channel/collectiondetail?sid={seasonID}
+//
+//	https://space.bilibili.com/{mid}/channel/collectiondetail?sid={seasonID}
 func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
 	reMid := reSpaceMID
 	m := reMid.FindStringSubmatch(rawURL)
@@ -927,7 +925,7 @@ func (c *Client) GetSeriesVideos(mid, seriesID int64, page, pageSize int) ([]Ser
 // ExtractCollectionInfo 统一解析合集 URL（Season 和 Series）
 func ExtractCollectionInfo(rawURL string) (*CollectionInfo, error) {
 	var mid, id int64
-	
+
 	m := reSpaceMID.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		fmt.Sscanf(m[1], "%d", &mid)
@@ -1007,10 +1005,10 @@ type FavoriteItem struct {
 
 // FollowedUpper 关注的 UP 主
 type FollowedUpper struct {
-	MID    int64  `json:"mid"`
-	Name   string `json:"uname"`
-	Face   string `json:"face"`
-	Sign   string `json:"sign"`
+	MID  int64  `json:"mid"`
+	Name string `json:"uname"`
+	Face string `json:"face"`
+	Sign string `json:"sign"`
 }
 
 // FollowedUppers 关注列表分页响应

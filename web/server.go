@@ -10,10 +10,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -34,7 +34,7 @@ type rateLimitEntry struct {
 
 var (
 	rateLimiter     sync.Map // IP -> *rateLimitEntry
-	rateLimitMax    = 200     // 每分钟最大请求数
+	rateLimitMax    = 200    // 每分钟最大请求数
 	rateLimitWindow = time.Minute
 )
 
@@ -52,37 +52,37 @@ func init() {
 }
 
 type Server struct {
-	db             *db.DB
-	downloader     *downloader.Downloader
-	scanner        *scanner.Scanner
-	port           int
-	dataDir        string
-	downloadDir    string
-	mux            *http.ServeMux
-	httpServer     *http.Server
-	templates      *template.Template
-	notifier       *notify.Notifier
-	apiRouter      *newapi.Router
+	db          *db.DB
+	downloader  *downloader.Downloader
+	scanner     *scanner.Scanner
+	port        int
+	dataDir     string
+	downloadDir string
+	mux         *http.ServeMux
+	httpServer  *http.Server
+	templates   *template.Template
+	notifier    *notify.Notifier
+	apiRouter   *newapi.Router
 
 	// Callbacks
-	getCooldownInfo     func() (bool, int)
-	onCheckNow          func()
-	onCookieUpdate      func(string)
-	onCredentialUpdate  func(*bilibili.Credential)
-	onRetryDownload     func(int64)
-	onSyncSource        func(int64)
-	onFullScanSource    func(int64)
-	onProcessPending    func()
-	onRedownload        func(int64)
+	getCooldownInfo    func() (bool, int)
+	onCheckNow         func()
+	onCookieUpdate     func(string)
+	onCredentialUpdate func(*bilibili.Credential)
+	onRetryDownload    func(int64)
+	onSyncSource       func(int64)
+	onFullScanSource   func(int64)
+	onProcessPending   func()
+	onRedownload       func(int64)
 	getBiliClient      func() *bilibili.Client
-	onConfigReload      func()
+	onConfigReload     func()
 
-	version        string
-	buildTime      string
-	startTime      time.Time
+	version   string
+	buildTime string
+	startTime time.Time
 
-	cachedRateLimit   int
-	rateLimitMu       sync.RWMutex
+	cachedRateLimit int
+	rateLimitMu     sync.RWMutex
 }
 
 func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, port int, dataDir, downloadDir string) *Server {
@@ -119,13 +119,33 @@ func (s *Server) setupRoutes() {
 	// 设置新版 API router 的回调
 	if s.apiRouter != nil {
 		s.apiRouter.SetCallbacks(
-			func() { if s.onCheckNow != nil { go s.onCheckNow() } },
+			func() {
+				if s.onCheckNow != nil {
+					go s.onCheckNow()
+				}
+			},
 			s.onCredentialUpdate,
-			func(id int64) { if s.onRetryDownload != nil { s.onRetryDownload(id) } },
-			func(id int64) { if s.onSyncSource != nil { s.onSyncSource(id) } },
-			func() { if s.onProcessPending != nil { s.onProcessPending() } },
+			func(id int64) {
+				if s.onRetryDownload != nil {
+					s.onRetryDownload(id)
+				}
+			},
+			func(id int64) {
+				if s.onSyncSource != nil {
+					s.onSyncSource(id)
+				}
+			},
+			func() {
+				if s.onProcessPending != nil {
+					s.onProcessPending()
+				}
+			},
 			s.RefreshRateLimit,
-			func(id int64) { if s.onRedownload != nil { s.onRedownload(id) } },
+			func(id int64) {
+				if s.onRedownload != nil {
+					s.onRedownload(id)
+				}
+			},
 		)
 		s.apiRouter.SetVersion(s.version)
 		if s.getCooldownInfo != nil {
@@ -403,9 +423,9 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(s.startTime)
 	health := map[string]interface{}{
-		"status":  "ok",
-		"version": s.version,
-		"uptime":  uptime.String(),
+		"status":         "ok",
+		"version":        s.version,
+		"uptime":         uptime.String(),
 		"uptime_seconds": int(uptime.Seconds()),
 	}
 	if s.downloader != nil {
@@ -420,9 +440,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, health)
 }
 
-func (s *Server) SetVersion(v string)          { s.version = v }
-func (s *Server) SetStartTime(t time.Time)     { s.startTime = t }
-func (s *Server) SetBuildTime(t string)         { s.buildTime = t }
+func (s *Server) SetVersion(v string)      { s.version = v }
+func (s *Server) SetStartTime(t time.Time) { s.startTime = t }
+func (s *Server) SetBuildTime(t string)    { s.buildTime = t }
 
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]interface{}{

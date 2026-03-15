@@ -13,9 +13,9 @@ import (
 
 // SourcesHandler 订阅源 API
 type SourcesHandler struct {
-	db                 *db.DB
-	onSyncSource       func(int64)
-	onFullScanSource   func(int64)
+	db               *db.DB
+	onSyncSource     func(int64)
+	onFullScanSource func(int64)
 }
 
 func NewSourcesHandler(database *db.DB) *SourcesHandler {
@@ -361,7 +361,6 @@ func (h *SourcesHandler) HandleSync(w http.ResponseWriter, r *http.Request, id i
 	}
 	apiOK(w, map[string]interface{}{"id": id, "message": "同步已触发"})
 }
-
 
 // POST /api/sources/:id/fullscan — 全量补漏扫描
 func (h *SourcesHandler) HandleFullScan(w http.ResponseWriter, r *http.Request, id int64) {

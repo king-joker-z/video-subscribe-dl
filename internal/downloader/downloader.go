@@ -64,17 +64,17 @@ type Downloader struct {
 }
 
 type Job struct {
-	BvID        string // 直接用 BV 号
-	CID         int64  // 视频 CID
-	Title       string
-	OutputDir   string
-	Quality     string // "best", "1080p", "720p"
-	QualityMin  string // 最低画质: "480p", "720p", "1080p"
-	Codec       string // "avc", "hevc", "av1", ""
-	Danmaku     bool
-	Flat        bool   // Flat 模式: 直接用 OutputDir 输出，不创建子目录
-	Subtitle    bool   // 是否下载字幕
-	SkipNFO     bool   // 跳过 NFO 生成
+	BvID             string // 直接用 BV 号
+	CID              int64  // 视频 CID
+	Title            string
+	OutputDir        string
+	Quality          string // "best", "1080p", "720p"
+	QualityMin       string // 最低画质: "480p", "720p", "1080p"
+	Codec            string // "avc", "hevc", "av1", ""
+	Danmaku          bool
+	Flat             bool   // Flat 模式: 直接用 OutputDir 输出，不创建子目录
+	Subtitle         bool   // 是否下载字幕
+	SkipNFO          bool   // 跳过 NFO 生成
 	SkipPoster       bool   // 跳过封面下载
 	UploaderName     string // UP 主名称（用于文件名模板）
 	PubDate          string // 发布日期（YYYY-MM-DD，用于文件名模板）
@@ -82,8 +82,8 @@ type Job struct {
 	PartTitle        string // 分P 标题
 	FilenameTemplate string // 文件名模板（空则使用默认）
 	CookiesFile      string
-	ResultCh    chan *Result
-	OnStart     func() // 开始下载时回调（用于更新 DB 状态）
+	ResultCh         chan *Result
+	OnStart          func() // 开始下载时回调（用于更新 DB 状态）
 }
 
 type Result struct {

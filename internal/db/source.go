@@ -12,7 +12,9 @@ const sourceColumns = `id, COALESCE(type,'channel'), url, COALESCE(name,''), COA
        COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')`
 
 // scanSource 统一的 source 行扫描（修改字段时只改这一处）
-func scanSource(scanner interface{ Scan(dest ...interface{}) error }) (Source, error) {
+func scanSource(scanner interface {
+	Scan(dest ...interface{}) error
+}) (Source, error) {
 	var s Source
 	var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
 	err := scanner.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
@@ -90,17 +92,29 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 
 func (d *DB) UpdateSource(s *Source) error {
 	enabled := 0
-	if s.Enabled { enabled = 1 }
+	if s.Enabled {
+		enabled = 1
+	}
 	danmaku := 0
-	if s.DownloadDanmaku { danmaku = 1 }
+	if s.DownloadDanmaku {
+		danmaku = 1
+	}
 	subtitle := 0
-	if s.DownloadSubtitle { subtitle = 1 }
+	if s.DownloadSubtitle {
+		subtitle = 1
+	}
 	skipNFO := 0
-	if s.SkipNFO { skipNFO = 1 }
+	if s.SkipNFO {
+		skipNFO = 1
+	}
 	skipPoster := 0
-	if s.SkipPoster { skipPoster = 1 }
+	if s.SkipPoster {
+		skipPoster = 1
+	}
 	useDynamic := 0
-	if s.UseDynamicAPI { useDynamic = 1 }
+	if s.UseDynamicAPI {
+		useDynamic = 1
+	}
 	_, err := d.Exec(`
 		UPDATE sources SET type=?, url=?, name=?, cookies_file=?, check_interval=?, 
 		download_quality=?, download_codec=?, download_danmaku=?, download_subtitle=?, enabled=?,
@@ -126,12 +140,16 @@ func (d *DB) UpdateSourceLastCheck(id int64) error {
 
 func (d *DB) CleanSource(id int64) (int, error) {
 	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ? AND status = 'completed'", id)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	var count int
 	for rows.Next() {
 		var path string
 		rows.Scan(&path)
-		if path != "" { count++ }
+		if path != "" {
+			count++
+		}
 	}
 	rows.Close()
 	_, err = d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
@@ -162,12 +180,16 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 			  AND (last_check IS NULL OR datetime(last_check, '+' || check_interval || ' seconds') <= datetime('now'))`
 	}
 	rows, err := d.Query(query)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var sources []Source
 	for rows.Next() {
 		s, err := scanSource(rows)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		sources = append(sources, s)
 	}
 	return sources, rows.Err()

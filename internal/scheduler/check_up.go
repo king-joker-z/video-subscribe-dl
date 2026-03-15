@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-
 	"fmt"
 	"log"
 	"math/rand"
@@ -176,7 +175,6 @@ func (s *Scheduler) checkUP(src db.Source) {
 	}
 }
 
-
 // checkUPDynamic 使用动态 API 检查 UP 主新视频
 func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid int64,
 	upInfo *bilibili.UPInfo, uploaderName, uploaderDir string, latestVideoAt int64, isFirstScan bool, firstScanPages int) {
@@ -238,8 +236,6 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 
 	log.Printf("[动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
 }
-
-
 
 // FullScanSource 全量补漏扫描指定 source（忽略增量基准，扫描所有视频，跳过已下载的）
 func (s *Scheduler) FullScanSource(sourceID int64) {

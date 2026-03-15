@@ -83,27 +83,27 @@ type DB struct {
 }
 
 type Source struct {
-	ID              int64      `json:"id"`
-	Type            string     `json:"type"`
-	URL             string     `json:"url"`
-	Name            string     `json:"name"`
-	CookiesFile     string     `json:"cookies_file"`
-	CheckInterval   int        `json:"check_interval"`
-	DownloadQuality string     `json:"download_quality"`
-	DownloadCodec   string     `json:"download_codec"`
-	DownloadDanmaku bool       `json:"download_danmaku"`
-	DownloadSubtitle bool      `json:"download_subtitle"`
-	DownloadFilter  string     `json:"download_filter"`
-	DownloadQualityMin string  `json:"download_quality_min"`
-	SkipNFO         bool       `json:"skip_nfo"`
-	SkipPoster      bool       `json:"skip_poster"`
-	FilterRules     string     `json:"filter_rules"`
-	UseDynamicAPI   bool       `json:"use_dynamic_api"`
-	LatestVideoAt   int64      `json:"latest_video_at"`
-	Enabled         bool       `json:"enabled"`
-	LastCheck       *time.Time `json:"last_check"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID                 int64      `json:"id"`
+	Type               string     `json:"type"`
+	URL                string     `json:"url"`
+	Name               string     `json:"name"`
+	CookiesFile        string     `json:"cookies_file"`
+	CheckInterval      int        `json:"check_interval"`
+	DownloadQuality    string     `json:"download_quality"`
+	DownloadCodec      string     `json:"download_codec"`
+	DownloadDanmaku    bool       `json:"download_danmaku"`
+	DownloadSubtitle   bool       `json:"download_subtitle"`
+	DownloadFilter     string     `json:"download_filter"`
+	DownloadQualityMin string     `json:"download_quality_min"`
+	SkipNFO            bool       `json:"skip_nfo"`
+	SkipPoster         bool       `json:"skip_poster"`
+	FilterRules        string     `json:"filter_rules"`
+	UseDynamicAPI      bool       `json:"use_dynamic_api"`
+	LatestVideoAt      int64      `json:"latest_video_at"`
+	Enabled            bool       `json:"enabled"`
+	LastCheck          *time.Time `json:"last_check"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type Download struct {
@@ -185,4 +185,3 @@ func Init(dataDir string) (*DB, error) {
 
 // GetSourcesDueForCheck 返回到期需要检查的 enabled sources
 // globalInterval 为全局覆盖间隔(秒)，0 表示不覆盖，使用各 source 自身的 check_interval
-

@@ -32,15 +32,15 @@ type Scheduler struct {
 	biliMu sync.RWMutex
 
 	// 风控退避
-	rateLimitMu          sync.Mutex
-	rateLimitUntil       time.Time // 风控冷却截止时间
-	lastCooldownNotify   time.Time // 上次风控通知时间（防重复）
+	rateLimitMu        sync.Mutex
+	rateLimitUntil     time.Time // 风控冷却截止时间
+	lastCooldownNotify time.Time // 上次风控通知时间（防重复）
 
 	// Cookie 定期检测
-	lastCookieCheck      time.Time // 上次 Cookie 主动检测时间
+	lastCookieCheck time.Time // 上次 Cookie 主动检测时间
 
 	// Credential 管理
-	db2          *db.DB   // alias, same as db (for clarity in credential methods)
+	db2 *db.DB // alias, same as db (for clarity in credential methods)
 
 	// 并发控制信号量（参考 bili-sync workflow.rs）
 	videoSema *bilibili.Semaphore // video 级别并发限制
@@ -74,18 +74,18 @@ type upInfoCacheEntry struct {
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
 	cookie := bilibili.ReadCookieFile(cookiePath)
 	return &Scheduler{
-		db:          database,
-		dl:          dl,
-		bili:        bilibili.NewClient(cookie),
-		downloadDir: downloadDir,
-		cookiePath:  cookiePath,
-		notifier:    notify.New(database),
-		stopCh:      make(chan struct{}),
-		hotConfig:   config.NewHotConfig(),
+		db:              database,
+		dl:              dl,
+		bili:            bilibili.NewClient(cookie),
+		downloadDir:     downloadDir,
+		cookiePath:      cookiePath,
+		notifier:        notify.New(database),
+		stopCh:          make(chan struct{}),
+		hotConfig:       config.NewHotConfig(),
 		upInfoCache:     make(map[int64]*upInfoCacheEntry),
 		fullScanRunning: make(map[int64]bool),
-		videoSema:   bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
-		pageSema:    bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
+		videoSema:       bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
+		pageSema:        bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}
 }
 
@@ -135,9 +135,9 @@ func (s *Scheduler) Start() {
 			s.cookiePath = cp
 		}
 
-	// 启动配置热更新监视器
-	s.configWatcher = config.NewConfigWatcher(s.hotConfig, s.db, 30*time.Second)
-	s.configWatcher.Start()
+		// 启动配置热更新监视器
+		s.configWatcher = config.NewConfigWatcher(s.hotConfig, s.db, 30*time.Second)
+		s.configWatcher.Start()
 	}
 
 	s.wg.Add(1)
@@ -516,6 +516,7 @@ func (s *Scheduler) periodicCookieCheck() {
 		s.tryCookieRefresh("periodic check")
 	}
 }
+
 // verifyCookie 验证当前 cookie 是否有效，即将过期时自动刷新，失效打 warning
 func (s *Scheduler) verifyCookie(trigger string) {
 	result, err := s.getBili().VerifyCookie()
