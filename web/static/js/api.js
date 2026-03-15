@@ -25,6 +25,7 @@ export const api = {
   parseSource: (url) => request('/api/sources/parse', { method: 'POST', body: JSON.stringify({ url }) }),
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteSource: (id) => request(`/api/sources/${id}`, { method: 'DELETE' }),
   syncSource: (id) => request(`/api/sources/${id}/sync`, { method: 'POST' }),
   fullScanSource: (id) => request(`/api/sources/${id}/fullscan`, { method: 'POST' }),
 
@@ -76,6 +77,7 @@ export const api = {
 
   // Logs
   getLogs: (limit = 100) => request(`/api/logs?limit=${limit}`),
+  clearLogs: () => request('/api/logs', { method: 'POST' }),
 
   // Version
   getVersion: () => request('/api/version'),
@@ -92,6 +94,13 @@ export const api = {
   }),
   // UP 主下载 pending（专用 endpoint）
   uploaderDownloadPending: (name) => request(`/api/uploaders/${encodeURIComponent(name)}/download-pending`, { method: 'POST' }),
+  // Me — 关注列表
+  getMyUppers: (page, pageSize, search) => {
+    const qs = new URLSearchParams({ page, page_size: pageSize });
+    if (search) qs.set('name', search);
+    return request('/api/me/uppers?' + qs.toString());
+  },
+  batchSubscribe: (body) => request('/api/me/subscribe', { method: 'POST', body: JSON.stringify(body) }),
 
   };
 

@@ -116,6 +116,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 
 	// Uploaders
+	mux.HandleFunc("/api/uploaders/suggestions", rt.uploaders.HandleSuggestions)
 	mux.HandleFunc("/api/uploaders", rt.uploaders.HandleList)
 	mux.HandleFunc("/api/uploaders/", rt.uploaders.HandleByID)
 

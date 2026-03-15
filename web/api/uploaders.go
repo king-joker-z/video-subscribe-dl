@@ -200,8 +200,11 @@ func (h *UploadersHandler) HandleDownloadPending(w http.ResponseWriter, r *http.
 	})
 }
 
-// handleUploaderSuggestions GET /api/uploaders — 搜索提示用（快速返回）
+// HandleSuggestions GET /api/uploaders/suggestions — 搜索提示用（快速返回）
 func (h *UploadersHandler) HandleSuggestions(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("GET", w, r) {
+		return
+	}
 	search := r.URL.Query().Get("q")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {

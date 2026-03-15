@@ -1,5 +1,5 @@
 import React from 'react';
-import { api } from '../api.js';
+import { api, createLogSocket, createEventSource } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useRef, useCallback } = React;
 
@@ -13,7 +13,7 @@ export function LogsPage() {
   const skipHistoryRef = useRef(false);
   const reconnectKey = useRef(0); // 用于强制重连
 
-  // 连接管理：WebSocket 优先，SSE 降级
+  // 连接管理：WebSocket 优先，SSE 降级（复用 api.js 导出的工厂函数）
   const connect = useCallback(() => {
     // 关闭旧连接
     if (connectionRef.current) {
@@ -21,77 +21,46 @@ export function LogsPage() {
       connectionRef.current = null;
     }
 
-    // 尝试 WebSocket
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${location.host}/api/ws/logs`;
-    
-    try {
-      const finalWsUrl = skipHistoryRef.current ? wsUrl + (wsUrl.includes('?') ? '&' : '?') + 'no_history=1' : wsUrl;
-      skipHistoryRef.current = false;
-      const ws = new WebSocket(finalWsUrl);
-      let wsConnected = false;
-      
-      ws.onopen = () => {
-        wsConnected = true;
-        setConnType('ws');
-        console.log('[logs] WebSocket 已连接');
+    const onLog = (entry) => setLogs(prev => [...prev.slice(-999), entry]);
+
+    // 使用 api.js 导出的 createLogSocket（WebSocket 优先）
+    const sock = createLogSocket(onLog, (type) => {
+      setConnType('ws');
+      console.log('[logs] WebSocket 已连接');
+    });
+
+    if (sock.ws) {
+      const origOnError = sock.ws.onerror;
+      sock.ws.onerror = () => {
+        if (origOnError) origOnError();
+        // WebSocket 失败，降级到 SSE
+        fallbackToSSE();
       };
-      
-      ws.onmessage = (e) => {
-        try {
-          const entry = JSON.parse(e.data);
-          setLogs(prev => [...prev.slice(-999), entry]);
-        } catch {}
+      sock.ws.onclose = () => {
+        setConnType('');
+        setTimeout(() => connect(), 5000);
       };
-      
-      ws.onerror = () => {
-        if (!wsConnected) {
-          // WebSocket 连接失败，降级到 SSE
-          ws.close();
-          fallbackToSSE();
-        }
-      };
-      
-      ws.onclose = () => {
-        if (wsConnected) {
-          setConnType('');
-          // 5 秒后自动重连
-          setTimeout(() => connect(), 5000);
-        }
-      };
-      
-      connectionRef.current = {
-        close: () => ws.close(),
-        type: 'ws',
-      };
-    } catch {
-      fallbackToSSE();
     }
+
+    connectionRef.current = sock;
   }, []);
 
   const fallbackToSSE = useCallback(() => {
-    try {
-      const es = new EventSource('/api/events');
-      es.addEventListener('log', (e) => {
-        try {
-          const entry = JSON.parse(e.data);
-          setLogs(prev => [...prev.slice(-999), entry]);
-        } catch {}
-      });
-      es.addEventListener('connected', () => {
+    // 使用 api.js 导出的 createEventSource（SSE 降级）
+    const es = createEventSource(
+      null, // onProgress — 日志页不需要
+      (entry) => setLogs(prev => [...prev.slice(-999), entry]),
+      () => {
         setConnType('sse');
         console.log('[logs] SSE 已连接');
-      });
-      es.onerror = () => {
-        setConnType('');
-        es.close();
-        setTimeout(() => connect(), 5000);
-      };
-      connectionRef.current = {
-        close: () => es.close(),
-        type: 'sse',
-      };
-    } catch {}
+      }
+    );
+    es.onerror = () => {
+      setConnType('');
+      es.close();
+      setTimeout(() => connect(), 5000);
+    };
+    connectionRef.current = { close: () => es.close(), type: 'sse' };
   }, []);
 
   // 加载历史日志 + 建立连接

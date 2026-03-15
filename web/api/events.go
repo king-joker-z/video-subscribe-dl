@@ -119,10 +119,6 @@ func (h *EventsHandler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/logs — 清空日志 buffer
 func (h *EventsHandler) HandleLogsClear(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		apiError(w, CodeMethodNotAllow, "method not allowed")
-		return
-	}
 	appLogger := logger.Default()
 	if appLogger != nil {
 		appLogger.Clear()
