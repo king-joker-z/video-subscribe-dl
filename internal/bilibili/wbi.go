@@ -176,6 +176,8 @@ func (c *Client) getWbi(baseURL string, params url.Values, result interface{}) e
 		// WBI 签名失败，尝试不签名直接请求
 		return c.get(baseURL+"?"+params.Encode(), result)
 	}
+	// 签名后追加 dm_img_* 反爬参数（不参与 WBI 签名，否则会导致 -403）
+	addDmImgParams(signed)
 	// get() 内部已包含风控检测（-352/-401/-412 → ErrRateLimited）
 	return c.get(baseURL+"?"+signed.Encode(), result)
 }

@@ -284,8 +284,6 @@ func (c *Client) GetUPInfo(mid int64) (*UPInfo, error) {
 	}
 	params := url.Values{}
 	params.Set("mid", fmt.Sprintf("%d", mid))
-	// B站反爬必需参数
-	addDmImgParams(params)
 	err := c.getWbi("https://api.bilibili.com/x/space/wbi/acc/info", params, &resp)
 	if err != nil {
 		return nil, err
@@ -335,8 +333,6 @@ func (c *Client) GetUPVideos(mid int64, page, pageSize int) ([]VideoItem, int, e
 	params.Set("order_avoided", "true")
 	params.Set("platform", "web")
 	params.Set("web_location", "1550101")
-	// B站反爬必需参数：dm_img_* 系列，缺失会导致 -352 风控
-	addDmImgParams(params)
 	if err := c.getWbi("https://api.bilibili.com/x/space/wbi/arc/search", params, &resp); err != nil {
 		return nil, 0, err
 	}
@@ -394,8 +390,6 @@ func (c *Client) GetDynamicVideos(mid int64, offset string) (*DynamicResponse, e
 	params.Set("host_mid", fmt.Sprintf("%d", mid))
 	params.Set("offset", offset)
 	params.Set("type", "video")
-	// B站反爬必需参数
-	addDmImgParams(params)
 
 	var resp struct {
 		Code int    `json:"code"`
