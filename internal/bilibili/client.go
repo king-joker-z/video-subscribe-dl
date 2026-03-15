@@ -11,9 +11,37 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// FlexInt64 兼容 B站 API 返回的 int64 或 string 类型数字字段
+type FlexInt64 int64
+
+func (f *FlexInt64) UnmarshalJSON(data []byte) error {
+	// 先尝试直接解析为数字
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = FlexInt64(n)
+		return nil
+	}
+	// 再尝试解析为字符串
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			*f = 0
+			return nil
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return fmt.Errorf("FlexInt64: cannot parse %q as int64: %w", s, err)
+		}
+		*f = FlexInt64(n)
+		return nil
+	}
+	return fmt.Errorf("FlexInt64: cannot unmarshal %s", string(data))
+}
 
 // ErrRateLimited 表示触发了B站风控（-352/-401/-412）
 var ErrRateLimited = errors.New("bilibili: rate limited by risk control")
@@ -208,7 +236,7 @@ type DynamicItem struct {
 	Type    string `json:"type"`
 	Modules struct {
 		ModuleAuthor struct {
-			PubTS int64 `json:"pub_ts"`
+			PubTS FlexInt64 `json:"pub_ts"`
 		} `json:"module_author"`
 		ModuleDynamic struct {
 			Major *struct {
@@ -407,7 +435,7 @@ func (c *Client) FetchDynamicVideosIncremental(mid int64, latestVideoAt int64) (
 			}
 
 			archive := item.Modules.ModuleDynamic.Major.Archive
-			pubTS := item.Modules.ModuleAuthor.PubTS
+			pubTS := int64(item.Modules.ModuleAuthor.PubTS)
 
 			// 增量截止判断：
 			// idx==0 && pageIdx==0 时跳过判断（可能是置顶动态，时间很旧但不应该因此停止）
