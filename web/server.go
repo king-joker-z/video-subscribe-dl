@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -171,9 +173,47 @@ func (s *Server) SetNotifier(n *notify.Notifier) {
 	s.notifier = n
 }
 
+func (s *Server) ensureAuthToken() {
+	// 环境变量优先
+	if os.Getenv("AUTH_TOKEN") != "" {
+		log.Printf("[auth] 使用环境变量 AUTH_TOKEN")
+		return
+	}
+	// 如果环境变量 NO_AUTH=1 则禁用
+	if os.Getenv("NO_AUTH") == "1" {
+		log.Printf("[auth] 认证已禁用 (NO_AUTH=1)")
+		return
+	}
+	// 检查 DB 是否已有 token
+	if token, err := s.db.GetSetting("auth_token"); err == nil && token != "" {
+		log.Printf("[auth] Web UI 认证已启用，token: %s", token)
+		return
+	}
+	// 自动生成随机 token
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		log.Printf("[auth] 生成 token 失败: %v，认证未启用", err)
+		return
+	}
+	token := hex.EncodeToString(b)
+	if err := s.db.SetSetting("auth_token", token); err != nil {
+		log.Printf("[auth] 保存 token 失败: %v", err)
+		return
+	}
+	log.Printf("============================================")
+	log.Printf("[auth] Web UI 认证 Token（首次生成）: %s", token)
+	log.Printf("[auth] 请妥善保存此 Token，用于登录 Web 界面")
+	log.Printf("[auth] 可通过设置页面修改或设置环境变量 AUTH_TOKEN")
+	log.Printf("[auth] 设置 NO_AUTH=1 可禁用认证")
+	log.Printf("============================================")
+}
+
 func (s *Server) Start() error {
 	// 在启动前设置路由（此时所有 callback 已设置）
 	s.setupRoutes()
+
+	// 自动生成 auth_token（如果未设置且未禁用）
+	s.ensureAuthToken()
 
 	addr := fmt.Sprintf(":%d", s.port)
 	s.httpServer = &http.Server{
@@ -207,32 +247,72 @@ func (s *Server) getAuthToken() string {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		path := r.URL.Path
+
+		// 白名单路径不需要认证
+		if s.isAuthWhitelist(path) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		token := s.getAuthToken()
 		if token == "" {
+			// 未设置 token 不启用认证
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		reqToken := r.URL.Query().Get("token")
-		if reqToken == "" {
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(auth, "Bearer ") {
-				reqToken = strings.TrimPrefix(auth, "Bearer ")
+		// 1. Authorization: Bearer {token}
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			if strings.TrimPrefix(auth, "Bearer ") == token {
+				next.ServeHTTP(w, r)
+				return
 			}
 		}
 
-		if reqToken != token {
-			jsonError(w, "unauthorized", http.StatusUnauthorized)
+		// 2. Cookie auth_token
+		if cookie, err := r.Cookie("auth_token"); err == nil && cookie.Value == token {
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// 3. Query param ?token=xxx（WebSocket 连接用）
+		if qToken := r.URL.Query().Get("token"); qToken == token {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 未认证: API 请求返回 401, 页面请求重定向到登录
+		if strings.HasPrefix(path, "/api/") {
+			jsonError(w, "未认证，请先登录", http.StatusUnauthorized)
+		} else {
+			// 返回登录页面（前端 SPA 会处理）
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+		}
 	})
+}
+
+func (s *Server) isAuthWhitelist(path string) bool {
+	// 静态文件和入口页面
+	if strings.HasPrefix(path, "/static/") || path == "/" || path == "/index.html" || path == "/favicon.ico" {
+		return true
+	}
+	// 健康检查
+	if path == "/health" {
+		return true
+	}
+	// 登录相关 API
+	whitelist := []string{
+		"/api/login/token",
+		"/api/login/qrcode/generate",
+		"/api/login/qrcode/poll",
+	}
+	for _, w := range whitelist {
+		if path == w {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {

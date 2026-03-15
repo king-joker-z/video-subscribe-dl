@@ -94,3 +94,81 @@ func MethodGuard(method string, w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
+
+// AuthMiddleware Token 认证中间件
+// 检查 Authorization: Bearer {token} 或 cookie auth_token
+// 白名单路径不需要认证
+func AuthMiddleware(getToken func() string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+
+			// 白名单：不需要认证
+			if isAuthWhitelist(path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			token := getToken()
+			// 如果未设置 token（空字符串），则不启用认证
+			if token == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// 从 Authorization header 获取
+			authHeader := r.Header.Get("Authorization")
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				if strings.TrimPrefix(authHeader, "Bearer ") == token {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// 从 cookie 获取
+			cookie, err := r.Cookie("auth_token")
+			if err == nil && cookie.Value == token {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// 从 query param 获取（WebSocket 连接用）
+			if qToken := r.URL.Query().Get("token"); qToken == token {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// 未认证
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"code":401,"message":"未认证，请先登录"}`))
+		})
+	}
+}
+
+// isAuthWhitelist 判断路径是否在白名单中
+func isAuthWhitelist(path string) bool {
+	whitelist := []string{
+		"/health",
+		"/api/login/token",
+		"/api/login/qrcode/generate",
+		"/api/login/qrcode/poll",
+	}
+	for _, w := range whitelist {
+		if path == w {
+			return true
+		}
+	}
+
+	// 静态文件不需要认证
+	if strings.HasPrefix(path, "/static/") {
+		return true
+	}
+
+	// 根路径（SPA 入口）
+	if path == "/" || path == "/index.html" {
+		return true
+	}
+
+	return false
+}
