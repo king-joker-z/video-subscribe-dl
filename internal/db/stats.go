@@ -88,6 +88,9 @@ func (d *DB) GetStatsByMonth() ([]MonthStat, error) {
 		}
 		stats = append(stats, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return stats, nil
 }
 
@@ -117,6 +120,9 @@ func (d *DB) GetStatsByUploader(limit int) ([]UploaderStat, error) {
 			return nil, err
 		}
 		stats = append(stats, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return stats, nil
 }

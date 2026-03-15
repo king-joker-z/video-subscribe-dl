@@ -39,6 +39,9 @@ func (d *DB) GetSources() ([]Source, error) {
 		s.DownloadDanmaku = danmaku == 1
 		sources = append(sources, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return sources, nil
 }
 
@@ -66,6 +69,9 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
 		sources = append(sources, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return sources, nil
 }

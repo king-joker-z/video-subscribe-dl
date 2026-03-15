@@ -35,6 +35,9 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 		}
 		downloads = append(downloads, dl)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return downloads, nil
 }
 
@@ -59,6 +62,9 @@ func (d *DB) GetDownloadsByStatus(status string, limit int) ([]Download, error) 
 			return nil, err
 		}
 		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return downloads, nil
 }
@@ -119,6 +125,9 @@ func (d *DB) GetRetryableDownloads(maxRetries int, limit int) ([]Download, error
 			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return downloads, nil
 }
@@ -203,6 +212,9 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 		}
 		downloads = append(downloads, dl)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return downloads, nil
 }
 
@@ -228,6 +240,9 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return downloads, nil
 }
@@ -344,6 +359,9 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 			return nil, err
 		}
 		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return downloads, nil
 }

@@ -35,6 +35,9 @@ func (d *DB) GetPeople() ([]Person, error) {
 		}
 		people = append(people, p)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return people, nil
 }
 
@@ -65,6 +68,9 @@ func (d *DB) GetPeopleWithVideoCount() ([]PersonWithCount, error) {
 			return nil, err
 		}
 		people = append(people, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return people, nil
 }

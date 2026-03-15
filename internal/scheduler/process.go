@@ -115,6 +115,52 @@ func (s *Scheduler) prepareVideoDir(uploaderDir, collectionName string) string {
 }
 
 // submitDownload 创建下载记录并提交到队列
+// submitDownloadFlat 和 submitDownload 类似，但使用 Flat 模式（多P视频的 Season 目录）
+func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64, title, pic, uploaderName, outputDir, cookiesFile string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo) {
+	if s.dl.IsPaused() {
+		log.Printf("[scheduler] Downloader paused, keeping %s as pending", videoID)
+		return
+	}
+
+	existingID, _ := s.db.GetPendingDownloadID(src.ID, videoID)
+	var dlID int64
+	if existingID > 0 {
+		dlID = existingID
+	} else {
+		dl := &db.Download{
+			SourceID: src.ID, VideoID: videoID, Title: title,
+			Uploader: uploaderName, Thumbnail: pic, Status: "pending",
+		}
+		dlID, _ = s.db.CreateDownload(dl)
+	}
+
+	resultCh := make(chan *downloader.Result, 1)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh)
+	}()
+
+	capturedDlID := dlID
+	if err := s.dl.Submit(&downloader.Job{
+		BvID:        strings.SplitN(videoID, "_P", 2)[0],
+		CID:         cid,
+		Title:       title,
+		OutputDir:   outputDir,
+		Quality:     src.DownloadQuality,
+		Codec:       src.DownloadCodec,
+		Danmaku:     src.DownloadDanmaku,
+		Flat:        true,
+		CookiesFile: cookiesFile,
+		ResultCh:    resultCh,
+		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+	}); err != nil {
+		log.Printf("[scheduler] Queue full for %s, keeping pending for next sync", videoID)
+		close(resultCh)
+		return
+	}
+}
+
 func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, title, pic, uploaderName, outputDir, cookiesFile string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo) {
 	// 检查是否已有 pending 记录（容器重启后保留的）
 	existingID, _ := s.db.GetPendingDownloadID(src.ID, videoID)
@@ -199,16 +245,19 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		s.submitDownload(src, bvid, pages[0].CID, title, pic, uploaderName, outputDir, cookiesFile, detail, upInfo)
 	} else {
 		log.Printf("Multi-part video: %s (%s, %d parts)", title, bvid, len(pages))
+		// 多P视频目录结构: UP主/视频标题 [BVxxx]/Season 1/S01Exx - 分P标题 [BVxxx].mkv
+		multiPartBase := filepath.Join(outputDir, bilibili.SanitizeFilename(title)+" ["+bvid+"]")
+		seasonDir := filepath.Join(multiPartBase, "Season 1")
+		os.MkdirAll(seasonDir, 0755)
 		for _, page := range pages {
 			partVideoID := fmt.Sprintf("%s_P%d", bvid, page.Page)
 			exists, _ := s.db.IsVideoDownloaded(src.ID, partVideoID)
 			if exists {
 				continue
 			}
-			partTitle := fmt.Sprintf("P%d %s", page.Page, page.PartName)
+			partTitle := fmt.Sprintf("S01E%02d - %s [%s]", page.Page, page.PartName, bvid)
 			log.Printf("  Part %d/%d: %s (cid=%d)", page.Page, len(pages), page.PartName, page.CID)
-			multiPartDir := filepath.Join(outputDir, bilibili.SanitizeFilename(title)+" ["+bvid+"]")
-			s.submitDownload(src, partVideoID, page.CID, partTitle, pic, uploaderName, multiPartDir, cookiesFile, detail, upInfo)
+			s.submitDownloadFlat(src, partVideoID, page.CID, partTitle, pic, uploaderName, seasonDir, cookiesFile, detail, upInfo)
 		}
 	}
 }

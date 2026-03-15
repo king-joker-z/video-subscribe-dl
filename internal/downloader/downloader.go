@@ -55,6 +55,10 @@ type Downloader struct {
 	rateLimitBps   int64 // bytes per second, 0 = unlimited
 	downloadChunks int   // parallel chunks for large files, 0 = use default (4)
 
+	// 优雅关闭
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
+
 	// 进度追踪
 	progressMu sync.RWMutex
 	progress   map[string]*ProgressInfo // key = bvid
@@ -68,6 +72,7 @@ type Job struct {
 	Quality     string // "best", "1080p", "720p"
 	Codec       string // "avc", "hevc", "av1", ""
 	Danmaku     bool
+	Flat        bool   // Flat 模式: 直接用 OutputDir 输出，不创建子目录
 	CookiesFile string
 	ResultCh    chan *Result
 	OnStart     func() // 开始下载时回调（用于更新 DB 状态）
@@ -81,13 +86,16 @@ type Result struct {
 }
 
 func New(config Config, biliClient *bilibili.Client) *Downloader {
+	ctx, cancel := context.WithCancel(context.Background())
 	d := &Downloader{
-		config:   config,
-		bili:     biliClient,
-		queue:    make(chan *Job, appconfig.DefaultQueueSize),
-		pauseCh:  make(chan struct{}),
-		resumeCh: make(chan struct{}),
-		progress: make(map[string]*ProgressInfo),
+		config:     config,
+		bili:       biliClient,
+		queue:      make(chan *Job, appconfig.DefaultQueueSize),
+		pauseCh:    make(chan struct{}),
+		resumeCh:   make(chan struct{}),
+		progress:   make(map[string]*ProgressInfo),
+		rootCtx:    ctx,
+		rootCancel: cancel,
 	}
 	for i := 0; i < config.MaxConcurrent; i++ {
 		go d.worker(i)
@@ -157,6 +165,12 @@ func (d *Downloader) Pause() {
 		d.paused = true
 		d.pauseCh = make(chan struct{})
 	}
+}
+
+// Stop 优雅关闭下载器：取消所有进行中的下载任务
+func (d *Downloader) Stop() {
+	d.rootCancel()
+	close(d.queue) // 关闭队列让 worker 退出
 }
 
 func (d *Downloader) Resume() {
@@ -391,8 +405,15 @@ func (d *Downloader) download(job *Job) *Result {
 	log.Printf("  Selected audio: %s", bilibili.FormatAudioInfo(bestAudio))
 
 	// 4. 构建输出路径
-	safeName := bilibili.SanitizeFilename(job.Title) + " [" + job.BvID + "]"
-	videoDir := filepath.Join(job.OutputDir, safeName)
+	var videoDir, safeName string
+	if job.Flat {
+		// Flat 模式: 直接使用 OutputDir（多P视频的 Season 1 目录）
+		videoDir = job.OutputDir
+		safeName = bilibili.SanitizeFilename(job.Title)
+	} else {
+		safeName = bilibili.SanitizeFilename(job.Title) + " [" + job.BvID + "]"
+		videoDir = filepath.Join(job.OutputDir, safeName)
+	}
 	os.MkdirAll(videoDir, 0755)
 
 	// 5. 构造进度回调
@@ -418,8 +439,9 @@ func (d *Downloader) download(job *Job) *Result {
 	// 6. 下载并合并（带进度回调 + 限速 + 分块并行）
 	chunks := d.GetDownloadChunks()
 	dlTimeout := calculateDownloadTimeout(int64(bestVideo.Bandwidth+bestAudio.Bandwidth), currentRateLimit)
+	// 使用 rootCtx 感知优雅关闭信号
 	log.Printf("  Download timeout: %v (bitrate=%dkbps, rateLimit=%d)", dlTimeout, (bestVideo.Bandwidth+bestAudio.Bandwidth)/1000, currentRateLimit)
-	downloadCtx, downloadCancel := context.WithTimeout(context.Background(), dlTimeout)
+	downloadCtx, downloadCancel := context.WithTimeout(d.rootCtx, dlTimeout)
 	defer downloadCancel()
 	outputPath, err := bilibili.DownloadDashWithProgressChunked(downloadCtx, bestVideo, bestAudio, videoDir, safeName, progressCb, currentRateLimit, chunks)
 	if err != nil {

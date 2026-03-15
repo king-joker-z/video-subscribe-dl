@@ -200,5 +200,8 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 		s.DownloadDanmaku = danmaku == 1
 		sources = append(sources, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return sources, nil
 }

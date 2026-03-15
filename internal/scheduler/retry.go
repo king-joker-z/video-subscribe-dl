@@ -85,6 +85,16 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	uploaderDir := bilibili.SanitizePath(uploaderName)
 	outputDir := filepath.Join(s.downloadDir, uploaderDir)
 
+	// 多P视频重试时还原完整路径: UP主/视频标题 [BVxxx]/Season 1/
+	isMultiPart := targetPageNum > 0
+	flat := false
+	if isMultiPart {
+		videoTitle := detail.Title
+		multiPartBase := filepath.Join(outputDir, bilibili.SanitizeFilename(videoTitle)+" ["+actualBvID+"]")
+		outputDir = filepath.Join(multiPartBase, "Season 1")
+		flat = true
+	}
+
 	resultCh := make(chan *downloader.Result, 1)
 	s.wg.Add(1)
 	go func() {
@@ -101,6 +111,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		Quality:     src.DownloadQuality,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		Flat:        flat,
 		CookiesFile: cookiesFile,
 		ResultCh:    resultCh,
 		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
