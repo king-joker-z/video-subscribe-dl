@@ -3,6 +3,7 @@ package bilibili
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-		"net/http"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -156,11 +157,12 @@ func (c *Credential) NeedRefresh(httpClient *http.Client) (bool, error) {
 const biliPublicKeyPEM = `-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDLgd2OAkcGVtoE3ThUREbio0Eg
 Uc/prcajMKXvkCKFCWhJYJcLkcM2DKKcSeFpD/j6Boy538YXnR6VhcuUJOhH2x71
-nzPjfdTcqMz7djHKETKEIFRnREDEg/iCHZe7Fz7/tmMcBBmHpBnFw0GPvAd2GrC2
-jbFJPYEq9a/ehLbVHQIDAQAB
+nzPjfdTcqMz7djHum0qSZA0AyCBDABUqCrfNgCiJ00Ra7GmRj+YCK1NJEuewlb40
+JNrRuoEUXpabUzGB8QIDAQAB
 -----END PUBLIC KEY-----`
 
 // getCorrespondPath RSA 公钥加密 "refresh_{timestamp_ms}" 得到 hex 字符串
+// 使用 OAEP(SHA256) 加密，与 B 站最新实现一致
 func getCorrespondPath(ts int64) (string, error) {
 	block, _ := pem.Decode([]byte(biliPublicKeyPEM))
 	if block == nil {
@@ -177,10 +179,10 @@ func getCorrespondPath(ts int64) (string, error) {
 
 	plaintext := []byte(fmt.Sprintf("refresh_%d", ts))
 
-	// PKCS1v15 加密
-	ciphertext, err := rsa.EncryptPKCS1v15(rand.Reader, pubKey, plaintext)
+	// OAEP(SHA256) 加密，与 bili-sync Rust 实现一致
+	ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, plaintext, nil)
 	if err != nil {
-		return "", fmt.Errorf("RSA encrypt: %w", err)
+		return "", fmt.Errorf("RSA OAEP encrypt: %w", err)
 	}
 	return hex.EncodeToString(ciphertext), nil
 }
@@ -188,8 +190,26 @@ func getCorrespondPath(ts int64) (string, error) {
 // 正则: 从 HTML 中提取 refresh CSRF
 var reRefreshCSRF = regexp.MustCompile(`<div\s+id="1-name">([^<]+)</div>`)
 
-// getRefreshCSRF 获取 refresh CSRF token
+// getRefreshCSRF 获取 refresh CSRF token（带 retry）
 func (c *Credential) getRefreshCSRF(httpClient *http.Client, correspondPath string) (string, error) {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			log.Printf("[credential] refresh CSRF 重试第 %d 次...", attempt)
+			time.Sleep(2 * time.Second)
+		}
+
+		csrf, err := c.doGetRefreshCSRF(httpClient, correspondPath)
+		if err == nil {
+			return csrf, nil
+		}
+		lastErr = err
+		log.Printf("[credential] getRefreshCSRF attempt %d failed: %v", attempt+1, err)
+	}
+	return "", lastErr
+}
+
+func (c *Credential) doGetRefreshCSRF(httpClient *http.Client, correspondPath string) (string, error) {
 	reqURL := fmt.Sprintf("https://www.bilibili.com/correspond/1/%s", correspondPath)
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
@@ -206,9 +226,21 @@ func (c *Credential) getRefreshCSRF(httpClient *http.Client, correspondPath stri
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
+	// 详细日志：记录状态码和 body 前 500 字符，便于排查
+	bodyPreview := string(body)
+	if len(bodyPreview) > 500 {
+		bodyPreview = bodyPreview[:500]
+	}
+	log.Printf("[credential] correspond page: status=%d, body_len=%d, preview=%s",
+		resp.StatusCode, len(body), bodyPreview)
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("correspond page HTTP %d", resp.StatusCode)
+	}
+
 	matches := reRefreshCSRF.FindSubmatch(body)
 	if len(matches) < 2 {
-		return "", fmt.Errorf("refresh CSRF not found in correspond page")
+		return "", fmt.Errorf("refresh CSRF not found in correspond page (status=%d, body_len=%d)", resp.StatusCode, len(body))
 	}
 	return string(matches[1]), nil
 }
@@ -224,7 +256,8 @@ func (c *Credential) Refresh(httpClient *http.Client) (*Credential, error) {
 	}
 
 	// Step 1: 获取 correspond_path
-	ts := time.Now().UnixMilli()
+	// 提前 20 秒，避免客户端时间比服务器快导致失败（与 bili-sync 一致）
+	ts := time.Now().UnixMilli() - 20000
 	correspondPath, err := getCorrespondPath(ts)
 	if err != nil {
 		return nil, fmt.Errorf("get correspond path: %w", err)
@@ -385,9 +418,6 @@ func truncateStr(s string, maxLen int) string {
 	}
 	return s[:maxLen]
 }
-
-// rsaEncryptOAEP is not needed, B站用的是 PKCS1v15
-// 保留 getCorrespondPath 中的 EncryptPKCS1v15 实现即可
 
 // CredentialFromCookieFile 从 cookie.txt 文件解析为 Credential
 func CredentialFromCookieFile(path string) *Credential {
