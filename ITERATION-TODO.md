@@ -318,3 +318,16 @@
 - [x] 8 色方案生成 fallback 头像颜色，基于名字 hash 一致性映射
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.18.0
+
+## 迭代 #31 (v2.19.0) — 视频详情下载组件状态指示器
+- [x] 修复 GetDownload SQL 查询缺少 detail_status 字段：该字段虽存在于 DB schema 和 struct 中，但从未在单条查询中返回
+- [x] 修复 HandleList SQL 查询缺少 detail_status 字段：列表 API 同样未返回该字段，导致前端始终拿到默认值 0
+- [x] 两处 Scan 调用同步更新：正确映射 detail_status → Download.DetailStatus
+- [x] 前端新增 DetailStatusBar 组件：解析 detail_status 位图，展示 5 种下载组件的完成状态
+- [x] 组件类型：视频(bit 2) / 封面(bit 1) / NFO(bit 4) / 弹幕(bit 8) / 字幕(bit 16)
+- [x] 已完成组件显示彩色标签（蓝/紫/绿/橙/青）+ ✓ 图标，未完成显示灰色 + — 图标
+- [x] hover title 提示"已下载"/"未下载"状态
+- [x] 仅当 detail_status > 0 时显示（避免对 pending/未处理记录显示空面板）
+- [x] VideoDetailModal 在简介和信息网格之间插入组件状态栏
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.19.0

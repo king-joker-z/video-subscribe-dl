@@ -298,14 +298,16 @@ func (d *DB) GetDownload(id int64) (*Download, error) {
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
 		       COALESCE(thumbnail,''), COALESCE(thumb_path,''),
-		       duration, downloaded_at, COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
+		       duration, downloaded_at, COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''),
+		       COALESCE(detail_status,0), created_at
 		FROM downloads WHERE id = ?
 	`, id)
 	var dl Download
 	var downloadedAt sql.NullTime
 	err := row.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename, &dl.Status,
 		&dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail, &dl.ThumbPath,
-		&dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.RetryCount, &dl.LastError, &dl.CreatedAt)
+		&dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.RetryCount, &dl.LastError,
+		&dl.DetailStatus, &dl.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

@@ -114,7 +114,8 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(d.file_path,''), d.file_size, COALESCE(d.uploader,''), COALESCE(d.description,''),
 		       COALESCE(d.thumbnail,''), COALESCE(d.thumb_path,''), d.duration,
 		       d.downloaded_at, COALESCE(d.error_message,''),
-		       COALESCE(d.retry_count,0), COALESCE(d.last_error,''), d.created_at
+		       COALESCE(d.retry_count,0), COALESCE(d.last_error,''),
+		       COALESCE(d.detail_status,0), d.created_at
 		FROM downloads d ` + where + `
 		ORDER BY ` + orderBy + `
 		LIMIT ? OFFSET ?
@@ -134,7 +135,8 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
 			&dl.Thumbnail, &dl.ThumbPath, &dl.Duration, &dl.DownloadedAt,
-			&dl.ErrorMessage, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
+			&dl.ErrorMessage, &dl.RetryCount, &dl.LastError,
+			&dl.DetailStatus, &dl.CreatedAt); err != nil {
 			apiError(w, CodeInternal, "解析数据失败")
 			return
 		}

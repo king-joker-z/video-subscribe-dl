@@ -163,6 +163,9 @@ export function VideoDetailModal({ video, onClose, onAction }) {
           h('div', { className: 'text-sm text-slate-300 whitespace-pre-line leading-relaxed max-h-24 overflow-y-auto' }, v.description)
         ),
 
+        // Download component indicators
+        v.detail_status > 0 && h(DetailStatusBar, { status: v.detail_status }),
+
         // Info grid
         h('div', { className: 'grid grid-cols-2 gap-3' },
           h(InfoItem, { label: '创建时间', value: formatTime(v.created_at) }),
@@ -225,5 +228,41 @@ function InfoItem({ label, value, mono = false }) {
   return h('div', { className: 'bg-slate-900/30 rounded-lg px-3 py-2' },
     h('div', { className: 'text-xs text-slate-500 mb-0.5' }, label),
     h('div', { className: cn('text-sm text-slate-300 truncate', mono && 'font-mono text-xs') }, value)
+  );
+}
+
+// 下载组件状态指示器
+// detail_status 位图: 1=封面 2=视频 4=NFO 8=弹幕 16=字幕
+function DetailStatusBar({ status }) {
+  const components = [
+    { bit: 2,  label: '视频', icon: 'video',    color: 'blue' },
+    { bit: 1,  label: '封面', icon: 'image',    color: 'purple' },
+    { bit: 4,  label: 'NFO',  icon: 'file-text', color: 'emerald' },
+    { bit: 8,  label: '弹幕', icon: 'message-square', color: 'amber' },
+    { bit: 16, label: '字幕', icon: 'subtitles', color: 'cyan' },
+  ];
+
+  return h('div', { className: 'bg-slate-900/50 rounded-lg px-4 py-3' },
+    h('div', { className: 'text-xs text-slate-500 mb-2' }, '下载组件'),
+    h('div', { className: 'flex items-center gap-2 flex-wrap' },
+      components.map(c => {
+        const has = (status & c.bit) !== 0;
+        const colorMap = {
+          blue:    has ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+          purple:  has ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+          emerald: has ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+          amber:   has ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+          cyan:    has ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+        };
+        return h('span', {
+          key: c.bit,
+          className: cn('inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-colors', colorMap[c.color]),
+          title: has ? c.label + ' 已下载' : c.label + ' 未下载'
+        },
+          h(Icon, { name: has ? 'check' : 'minus', size: 12 }),
+          c.label
+        );
+      })
+    )
   );
 }
