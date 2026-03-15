@@ -63,6 +63,7 @@ const ICON_PATHS = {
   'qr-code': 'M3 3h7v7H3V3zM14 3h7v7h-7V3zM3 14h7v7H3v-7zM17 14h1v3h-1v-3zM14 17h3v4h-3v-4zM20 14h1v7h-4v-1h3v-6z',
   'file-x': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9.5 12.5l5 5M14.5 12.5l-5 5',
   'alert-circle': 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 8v4M12 16h.01',
+  'undo': 'M3 7v6h6M3 13a9 9 0 1 0 2.5-6.3L3 7',
 };
 
 export function Icon({ name, size = 18, className = '' }) {
@@ -93,6 +94,7 @@ export function StatusBadge({ status }) {
     cancelled: { label: '已取消', variant: 'outline' },
     skipped: { label: '已跳过', variant: 'outline' },
     charge_blocked: { label: '充电专属', variant: 'warning' },
+    deleted: { label: '已删除', variant: 'outline' },
   };
   const s = map[status] || { label: status || '未知', variant: 'outline' };
   return h(Badge, { variant: s.variant }, s.label);

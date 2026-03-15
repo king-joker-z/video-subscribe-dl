@@ -167,7 +167,7 @@ func (d *DB) IsVideoDownloaded(sourceID int64, videoID string) (bool, error) {
 	// 排除 permanent_failed 让用户可以通过清理后重新触发
 	// charge_blocked 也保留（充电视频无法下载）
 	err := d.QueryRow(`
-		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status != 'permanent_failed'
+		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status NOT IN ('permanent_failed', 'deleted')
 	`, sourceID, videoID).Scan(&exists)
 	return exists > 0, err
 }

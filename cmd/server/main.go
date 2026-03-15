@@ -128,6 +128,9 @@ func main() {
 	}
 	sched.Start()
 
+	// 一次性启动清理：扫描非法字符目录 + 重置全量扫描
+	sched.StartupCleanup()
+
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)
 	server.SetCheckNowFunc(sched.CheckNow)
 	server.SetCookieUpdateFunc(sched.UpdateCookie)

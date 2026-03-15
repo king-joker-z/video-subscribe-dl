@@ -56,7 +56,10 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	where := "WHERE 1=1"
 	args := []interface{}{}
 
-	if status != "" && status != "all" {
+	if status == "" {
+		// 默认不显示已删除的视频
+		where += " AND d.status != 'deleted'"
+	} else if status != "all" {
 		if status == "failed" {
 			where += " AND d.status IN ('failed','permanent_failed')"
 		} else if status == "completed" {
@@ -207,21 +210,44 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 }
 
 
-// DELETE /api/videos/:id — 删除下载记录及文件
+// DELETE /api/videos/:id — 软删除下载记录（标记为 deleted，删除本地文件）
 func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, _ := h.db.GetDownload(id)
 	if dl != nil && dl.FilePath != "" {
 		util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 	}
 
-	// 回退 source 的 latest_video_at，确保下次同步能扫到被删除的视频
-	if dl != nil && dl.SourceID > 0 {
-		h.rewindLatestVideoAt(dl.SourceID, dl.VideoID)
+	// 软删除：标记状态为 deleted，清空文件信息
+	h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+	log.Printf("[video] Soft-deleted record %d", id)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
+}
+
+// POST /api/videos/:id/restore — 恢复已删除的视频（重新下载）
+func (h *VideosHandler) HandleRestore(w http.ResponseWriter, r *http.Request, id int64) {
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+	if dl.Status != "deleted" {
+		apiError(w, CodeInvalidParam, "只能恢复已删除的视频")
+		return
 	}
 
-	h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
-	log.Printf("[video] Deleted record %d", id)
-	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
+	// 重置为 pending
+	h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+	h.db.ResetRetryCount(id)
+
+	// 直接提交到下载队列
+	if h.onRedownload != nil {
+		go h.onRedownload(id)
+	} else if h.onProcessPending != nil {
+		go h.onProcessPending()
+	}
+
+	log.Printf("[video] Restored deleted video %d (%s)", id, dl.Title)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已恢复，开始重新下载"})
 }
 
 // POST /api/videos/:id/delete-files — 只删除本地文件，不改数据库状态
@@ -253,7 +279,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string  `json:"action"` // retry | cancel | delete | redownload | delete_files
+		Action string  `json:"action"` // retry | cancel | delete | redownload | delete_files | restore
 		IDs    []int64 `json:"ids"`
 	}
 	if err := parseJSON(r, &req); err != nil {
@@ -298,11 +324,16 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			if dl != nil && dl.FilePath != "" {
 				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 			}
-			if dl != nil && dl.SourceID > 0 {
-				h.rewindLatestVideoAt(dl.SourceID, dl.VideoID)
-			}
-			h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
+			h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
 			affected++
+		case "restore":
+			dl, _ := h.db.GetDownload(id)
+			if dl != nil && dl.Status == "deleted" {
+				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+				h.db.ResetRetryCount(id)
+				redownloadIDs = append(redownloadIDs, id)
+				affected++
+			}
 		case "delete_files":
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
@@ -316,8 +347,8 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 批量重新下载后触发 pending 处理
-	if req.Action == "redownload" {
+	// 批量重新下载/恢复后触发 pending 处理
+	if req.Action == "redownload" || req.Action == "restore" {
 		if h.onRedownload != nil {
 			for _, id := range redownloadIDs {
 				go h.onRedownload(id)
@@ -391,6 +422,18 @@ func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.HandleCancel(w, r, id)
+		return
+	}
+
+	// /api/videos/:id/restore
+	if strings.HasSuffix(path, "/restore") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/restore")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleRestore(w, r, id)
 		return
 	}
 
@@ -528,21 +571,4 @@ func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
 	apiError(w, CodeNotFound, "无封面图")
 }
 
-// rewindLatestVideoAt 回退 source 的 latest_video_at，确保下次同步时能扫到被删除的视频
-// 通过查询被删除视频的 created_at 来决定是否需要回退
-func (h *VideosHandler) rewindLatestVideoAt(sourceID int64, videoID string) {
-	// 获取被删除视频的 bilibili 发布时间
-	// 由于 downloads 表没有存 bilibili 的原始发布时间戳，我们需要查 source 的 latest_video_at
-	// 如果删了某条记录，直接把 latest_video_at 设为 0，让下次同步做一次全量扫描
-	// 这是最安全的方案：虽然会多扫一次，但保证不遗漏
 
-	var latestVideoAt int64
-	err := h.db.QueryRow("SELECT COALESCE(latest_video_at, 0) FROM sources WHERE id = ?", sourceID).Scan(&latestVideoAt)
-	if err != nil || latestVideoAt == 0 {
-		return // source 不存在或已经是 0，无需回退
-	}
-
-	// 重置为 0，下次同步时做全量扫描
-	h.db.Exec("UPDATE sources SET latest_video_at = 0 WHERE id = ?", sourceID)
-	log.Printf("[video] Reset latest_video_at for source %d (was %d) due to video deletion (%s)", sourceID, latestVideoAt, videoID)
-}
