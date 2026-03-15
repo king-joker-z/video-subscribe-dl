@@ -336,3 +336,85 @@ func (s *Server) handleDownloadActions(w http.ResponseWriter, r *http.Request) {
 		"affected": affected,
 	})
 }
+
+// handleDownloadStatsByUploader GET /api/downloads/stats-by-uploader
+func (s *Server) handleDownloadStatsByUploader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+	uploader := r.URL.Query().Get("uploader")
+	if uploader == "" {
+		jsonError(w, "uploader required", 400)
+		return
+	}
+	stats, err := s.db.GetDownloadStatsByUploader(uploader)
+	if err != nil {
+		jsonError(w, "query error: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, stats)
+}
+
+// handleRetryFailedByUploader POST /api/downloads/retry-failed-by-uploader
+func (s *Server) handleRetryFailedByUploader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		Uploader string `json:"uploader"`
+	}
+	if err := parseJSON(r, &req); err != nil || req.Uploader == "" {
+		jsonError(w, "uploader required", 400)
+		return
+	}
+	affected, err := s.db.RetryFailedByUploader(req.Uploader)
+	if err != nil {
+		jsonError(w, "error: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, map[string]interface{}{"ok": true, "affected": affected})
+}
+
+// handleProcessPendingByUploader POST /api/downloads/process-pending-by-uploader
+func (s *Server) handleProcessPendingByUploader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		Uploader string `json:"uploader"`
+	}
+	if err := parseJSON(r, &req); err != nil || req.Uploader == "" {
+		jsonError(w, "uploader required", 400)
+		return
+	}
+	downloads, err := s.db.GetPendingByUploader(req.Uploader)
+	if err != nil {
+		jsonError(w, "error: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, map[string]interface{}{"ok": true, "pending": len(downloads)})
+}
+
+// handleCompletedByUploader POST /api/downloads/completed-by-uploader
+func (s *Server) handleCompletedByUploader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+	var req struct {
+		Uploader string `json:"uploader"`
+	}
+	if err := parseJSON(r, &req); err != nil || req.Uploader == "" {
+		jsonError(w, "uploader required", 400)
+		return
+	}
+	affected, err := s.db.DeleteCompletedByUploader(req.Uploader)
+	if err != nil {
+		jsonError(w, "error: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, map[string]interface{}{"ok": true, "affected": affected})
+}

@@ -271,10 +271,12 @@ function connectProgressSSE() {
         progressSSE.close();
         if (progressSSERetries < PROGRESS_SSE_MAX_RETRIES) {
             progressSSERetries++;
-            console.log(`SSE disconnected, reconnecting (${progressSSERetries}/${PROGRESS_SSE_MAX_RETRIES})...`);
-            setTimeout(connectProgressSSE, 3000);
+            // 指数退避: 1s, 2s, 4s, 8s, 16s... 最大 30s
+            const delay = Math.min(30000, 1000 * Math.pow(2, progressSSERetries - 1));
+            console.log(`SSE disconnected, reconnecting in ${delay/1000}s (${progressSSERetries}/${PROGRESS_SSE_MAX_RETRIES})...`);
+            setTimeout(connectProgressSSE, delay);
         } else {
-            console.warn('SSE max retries reached, giving up');
+            console.warn('SSE max retries reached, giving up. Refresh page to retry.');
         }
     };
 }
