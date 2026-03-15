@@ -213,8 +213,8 @@ func DownloadDash(video, audio *DashStream, outputDir, filename string) (string,
 }
 
 func downloadStream(stream *DashStream, dest string) error {
-	urls := []string{stream.BaseURL}
-	urls = append(urls, stream.BackupURL...)
+	// 使用 CDN 优先级排序: upos > cn > mcdn > pcdn
+	urls := StreamURLs(stream, true)
 
 	for _, u := range urls {
 		err := downloadWithResume(u, dest)

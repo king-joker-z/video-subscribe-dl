@@ -69,8 +69,8 @@ func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStre
 }
 
 func downloadStreamWithProgressChunked(ctx context.Context, stream *DashStream, dest, phase string, onProgress ProgressCallback, rateLimitBps int64, numChunks int) error {
-	urls := []string{stream.BaseURL}
-	urls = append(urls, stream.BackupURL...)
+	// 使用 CDN 优先级排序: upos > cn > mcdn > pcdn
+	urls := StreamURLs(stream, true)
 
 	for _, u := range urls {
 		err := downloadSmartProgress(ctx, u, dest, phase, onProgress, rateLimitBps, numChunks)
