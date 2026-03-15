@@ -312,6 +312,23 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		return
 	}
 
+	// 高级过滤规则（部分字段在 API 调用前可用）
+	advRules := ParseFilterRules(src.FilterRules)
+	if len(advRules) > 0 {
+		// 标题 + 发布日期在 detail 之前只有标题可用
+		preInfo := VideoInfo{Title: title}
+		// 只检查 title 相关规则（其余在 detail 后检查）
+		titleRules := make([]FilterRule, 0)
+		for _, r := range advRules {
+			if r.Target == "title" {
+				titleRules = append(titleRules, r)
+			}
+		}
+		if !MatchesFilterRules(titleRules, preInfo) {
+			return
+		}
+	}
+
 	if !s.checkDiskSpace() {
 		return
 	}
@@ -346,6 +363,19 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 	if len(pages) == 0 {
 		log.Printf("No pages for %s, skipping", bvid)
 		return
+	}
+
+	// 高级过滤规则（完整检查：包含 duration/pages）
+	if len(advRules) > 0 {
+		fullInfo := VideoInfo{
+			Title:    title,
+			Duration: detail.Duration,
+			Pages:    len(pages),
+		}
+		if !MatchesFilterRules(advRules, fullInfo) {
+			log.Printf("视频 %s (%s) 未通过高级过滤规则，跳过", title, bvid)
+			return
+		}
 	}
 
 	outputDir := s.prepareVideoDir(uploaderDir, collectionName)

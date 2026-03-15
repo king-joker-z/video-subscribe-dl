@@ -5,9 +5,9 @@ func (d *DB) CreateSource(s *Source) (int64, error) {
 		s.Type = "channel"
 	}
 	result, err := d.Exec(`
-		INSERT INTO sources (type, url, name, cookies_file, check_interval, download_quality, download_codec, download_danmaku, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval, s.DownloadQuality, s.DownloadCodec, s.DownloadDanmaku, s.Enabled)
+		INSERT INTO sources (type, url, name, cookies_file, check_interval, download_quality, download_codec, download_danmaku, enabled, filter_rules)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval, s.DownloadQuality, s.DownloadCodec, s.DownloadDanmaku, s.Enabled, s.FilterRules)
 	if err != nil {
 		return 0, err
 	}
@@ -20,7 +20,7 @@ func (d *DB) GetSources() ([]Source, error) {
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 		FROM sources ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -35,7 +35,7 @@ func (d *DB) GetSources() ([]Source, error) {
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic); err != nil {
+			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
@@ -57,7 +57,7 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 		FROM sources WHERE enabled = 1
 	`)
 	if err != nil {
@@ -72,7 +72,7 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic); err != nil {
+			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
@@ -96,7 +96,7 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 		FROM sources WHERE id = ?
 	`, id).Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
@@ -138,11 +138,11 @@ func (d *DB) UpdateSource(s *Source) error {
 		UPDATE sources SET type=?, url=?, name=?, cookies_file=?, check_interval=?, 
 		download_quality=?, download_codec=?, download_danmaku=?, enabled=?,
 		download_filter=?, download_quality_min=?, skip_nfo=?, skip_poster=?,
-		use_dynamic_api=?, updated_at=CURRENT_TIMESTAMP
+		use_dynamic_api=?, filter_rules=?, updated_at=CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval,
 		s.DownloadQuality, s.DownloadCodec, danmaku, enabled,
-		s.DownloadFilter, s.DownloadQualityMin, skipNFO, skipPoster, useDynamic, s.ID)
+		s.DownloadFilter, s.DownloadQualityMin, skipNFO, skipPoster, useDynamic, s.FilterRules, s.ID)
 	return err
 }
 

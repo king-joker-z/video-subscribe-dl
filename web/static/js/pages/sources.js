@@ -34,7 +34,16 @@ function EditModal({ source, onSave, onClose }) {
     skip_poster: source.skip_poster || false,
     use_dynamic_api: source.use_dynamic_api || false,
     check_interval: source.check_interval || 1800,
+    filter_rules: (() => { try { return JSON.parse(source.filter_rules || '[]'); } catch { return []; } })(),
   });
+
+  const addFilterRule = () => update('filter_rules', [...form.filter_rules, { target: 'title', condition: 'contains', value: '', value2: '' }]);
+  const removeFilterRule = (i) => update('filter_rules', form.filter_rules.filter((_, idx) => idx !== i));
+  const updateFilterRule = (i, key, val) => {
+    const rules = [...form.filter_rules];
+    rules[i] = { ...rules[i], [key]: val };
+    update('filter_rules', rules);
+  };
   const [saving, setSaving] = useState(false);
 
   const update = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
@@ -42,7 +51,8 @@ function EditModal({ source, onSave, onClose }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.updateSource(source.id, form);
+      const payload = { ...form, filter_rules: JSON.stringify(form.filter_rules || []) };
+      await api.updateSource(source.id, payload);
       toast.success('保存成功');
       onSave();
     } catch (e) {
@@ -112,6 +122,35 @@ function EditModal({ source, onSave, onClose }) {
       h('div', null,
         h('label', { className: labelClass }, '标题过滤关键词（匹配才下载，留空不过滤）'),
         h('input', { type: 'text', value: form.download_filter, onChange: (e) => update('download_filter', e.target.value), placeholder: '关键词1|关键词2', className: inputClass })
+      ),
+
+      // 高级过滤规则
+      h('div', { className: 'space-y-2' },
+        h('div', { className: 'flex items-center justify-between' },
+          h('label', { className: labelClass }, '高级过滤规则'),
+          h(Button, { onClick: addFilterRule, size: 'sm', variant: 'ghost' }, '+ 添加规则')
+        ),
+        form.filter_rules.map((rule, i) =>
+          h('div', { key: i, className: 'flex gap-2 items-center bg-slate-900/30 rounded-lg px-2 py-1.5' },
+            h('select', { value: rule.target, onChange: (e) => updateFilterRule(i, 'target', e.target.value), className: 'bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 w-20' },
+              h('option', { value: 'title' }, '标题'),
+              h('option', { value: 'duration' }, '时长(秒)'),
+              h('option', { value: 'pages' }, '分P数')
+            ),
+            h('select', { value: rule.condition, onChange: (e) => updateFilterRule(i, 'condition', e.target.value), className: 'bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 w-24' },
+              h('option', { value: 'contains' }, '包含'),
+              h('option', { value: 'not_contains' }, '不包含'),
+              h('option', { value: 'regex' }, '正则'),
+              h('option', { value: 'gt' }, '大于'),
+              h('option', { value: 'lt' }, '小于'),
+              h('option', { value: 'between' }, '范围')
+            ),
+            h('input', { type: 'text', value: rule.value, onChange: (e) => updateFilterRule(i, 'value', e.target.value), placeholder: '值', className: 'flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 min-w-0' }),
+            rule.condition === 'between' && h('input', { type: 'text', value: rule.value2 || '', onChange: (e) => updateFilterRule(i, 'value2', e.target.value), placeholder: '到', className: 'w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200' }),
+            h('button', { onClick: () => removeFilterRule(i), className: 'p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-red-400' }, h(Icon, { name: 'x', size: 14 }))
+          )
+        ),
+        form.filter_rules.length > 0 && h('div', { className: 'text-xs text-slate-600' }, '所有规则为 AND 关系，全部满足才下载')
       ),
 
       // 检查间隔
