@@ -26,10 +26,16 @@ func (s *Scheduler) checkUP(src db.Source) {
 		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
+			return
+		}
+		// -403 或其他非风控错误：如果 DB 已有名字，用已有信息继续扫描
+		if src.Name != "" && src.Name != "未命名" {
+			log.Printf("[WARN] Get UP info failed (mid=%d): %v, 使用已有名称继续: %s", mid, err, src.Name)
+			upInfo = &bilibili.UPInfo{MID: mid, Name: src.Name}
 		} else {
 			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
+			return
 		}
-		return
 	}
 
 	if (src.Name == "" || src.Name == "未命名") && upInfo.Name != "" {
@@ -86,15 +92,17 @@ func (s *Scheduler) checkUP(src db.Source) {
 	for {
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
-			if bilibili.IsRiskControl(err) {
-				// 投稿 API 被风控，降级到动态 API
+			if bilibili.IsRiskControl(err) || bilibili.IsAccessDenied(err) {
+				// 投稿 API 被风控或 -403，降级到动态 API
 				if page == 1 {
-					log.Printf("[投稿API] %s: 触发风控，降级到动态 API", uploaderName)
+					log.Printf("[投稿API] %s: %v，降级到动态 API", uploaderName, err)
 					s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
 					return
 				}
-				s.triggerCooldown()
-				s.dl.Pause()
+				if bilibili.IsRiskControl(err) {
+					s.triggerCooldown()
+					s.dl.Pause()
+				}
 				return
 			}
 			log.Printf("Get videos page %d failed: %v", page, err)

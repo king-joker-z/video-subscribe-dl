@@ -526,6 +526,9 @@ func checkRateLimitCode(body []byte) error {
 	case -401:
 		log.Printf("[WARN] B站风控: code=-401 (未登录/鉴权失败)")
 		return NewErrorResponse(-401, "未登录/鉴权失败")
+	case -403:
+		log.Printf("[WARN] B站风控: code=-403 (访问权限不足/鉴权异常)")
+		return NewErrorResponse(-403, "访问权限不足")
 	case -412:
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
 		return NewErrorResponse(-412, "请求过于频繁")

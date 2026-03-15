@@ -91,3 +91,14 @@ func IsRiskControl(err error) bool {
 	// 兼容旧的 ErrRateLimited
 	return err == ErrRateLimited
 }
+
+// IsAccessDenied 检查是否为 -403 访问权限不足（WBI 签名/鉴权异常，非频率风控）
+func IsAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if be, ok := err.(*BiliError); ok {
+		return be.Kind == ErrKindErrorResponse && be.Code == -403
+	}
+	return false
+}
