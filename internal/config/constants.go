@@ -28,7 +28,7 @@ const (
 	MaxRetryCount = 3
 
 	// CooldownDuration 风控冷却时间
-	CooldownDuration = 30 * time.Minute
+	CooldownDuration = 10 * time.Minute
 
 	// DefaultQueueSize 下载队列默认大小
 	DefaultQueueSize = 2000

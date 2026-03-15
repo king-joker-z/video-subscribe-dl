@@ -302,7 +302,7 @@ func (s *Scheduler) checkAll() {
 
 		// source 间隔 3 秒，避免触发风控
 		if i < len(sources)-1 {
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 
@@ -332,7 +332,7 @@ func (s *Scheduler) checkAllForce() {
 
 		// source 间隔 3 秒，避免触发风控
 		if i < len(sources)-1 {
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 	log.Println("Manual sync completed")
