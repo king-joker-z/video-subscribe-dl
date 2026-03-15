@@ -132,6 +132,16 @@ func TestXMLToASS_Normal(t *testing.T) {
 	if strings.Contains(content, "Advanced Mode") {
 		t.Error("advanced mode danmaku should be skipped")
 	}
+	// Check styles have R2L, TOP, BTM
+	if !strings.Contains(content, "Style: R2L,") {
+		t.Error("missing R2L style")
+	}
+	if !strings.Contains(content, "Style: TOP,") {
+		t.Error("missing TOP style")
+	}
+	if !strings.Contains(content, "Style: BTM,") {
+		t.Error("missing BTM style")
+	}
 }
 
 func TestXMLToASS_DefaultResolution(t *testing.T) {
@@ -173,6 +183,102 @@ func TestXMLToASS_EmptyDanmaku(t *testing.T) {
 	content := string(data)
 	if !strings.Contains(content, "[Script Info]") {
 		t.Error("missing [Script Info] in empty danmaku ASS")
+	}
+}
+
+func TestXMLToASS_WithConfig(t *testing.T) {
+	xmlPath := writeTempXML(t, testXML)
+	defer os.Remove(xmlPath)
+
+	assPath := xmlPath + ".ass"
+	defer os.Remove(assPath)
+
+	cfg := DefaultConfig()
+	cfg.BlockTop = true
+	cfg.BlockBottom = true
+	cfg.ScrollDuration = 8.0
+	cfg.FontSize = 30
+	cfg.Opacity = 0.5
+
+	err := XMLToASSWithConfig(xmlPath, assPath, 1920, 1080, cfg)
+	if err != nil {
+		t.Fatalf("XMLToASSWithConfig: %v", err)
+	}
+
+	data, _ := os.ReadFile(assPath)
+	content := string(data)
+
+	// Top and bottom danmaku should be blocked
+	if strings.Contains(content, "Top Comment") {
+		t.Error("top danmaku should be blocked")
+	}
+	if strings.Contains(content, "Bottom Red") {
+		t.Error("bottom danmaku should be blocked")
+	}
+	// Scroll danmaku should still exist
+	if !strings.Contains(content, "Hello World") {
+		t.Error("scroll danmaku should be present")
+	}
+}
+
+// === TestCollisionDetection ===
+
+func TestScrollLaneManager_Basic(t *testing.T) {
+	mgr := newScrollLaneManager(3, 1920, 12.0)
+
+	// 第一条弹幕应该分配到泳道 0
+	lane := mgr.findLane(0.0, 200)
+	if lane != 0 {
+		t.Errorf("expected lane 0, got %d", lane)
+	}
+	mgr.occupy(lane, 0.0, 200)
+
+	// 很快又来一条，应该到泳道 1（因为泳道 0 的尾部还没进屏幕）
+	lane = mgr.findLane(0.1, 200)
+	if lane != 1 {
+		t.Errorf("expected lane 1, got %d", lane)
+	}
+	mgr.occupy(lane, 0.1, 200)
+
+	// 足够久之后，泳道 0 应该又可用了
+	lane = mgr.findLane(13.0, 200)
+	if lane != 0 {
+		t.Errorf("expected lane 0 after scrollDuration, got %d", lane)
+	}
+}
+
+func TestScrollLaneManager_AllFull(t *testing.T) {
+	mgr := newScrollLaneManager(2, 1920, 12.0)
+
+	mgr.occupy(0, 0.0, 200)
+	mgr.occupy(1, 0.0, 200)
+
+	// 马上又来一条，两条泳道都满
+	lane := mgr.findLane(0.05, 200)
+	if lane != -1 {
+		t.Errorf("expected -1 (all full), got %d", lane)
+	}
+}
+
+func TestFixedLaneManager_Basic(t *testing.T) {
+	mgr := newFixedLaneManager(3)
+
+	lane := mgr.findLane(0.0)
+	if lane != 0 {
+		t.Errorf("expected lane 0, got %d", lane)
+	}
+	mgr.occupy(lane, 5.0)
+
+	// 在 5s 前来一条，泳道 0 还在用，应该到泳道 1
+	lane = mgr.findLane(3.0)
+	if lane != 1 {
+		t.Errorf("expected lane 1, got %d", lane)
+	}
+
+	// 在 5s 后来一条，泳道 0 释放了
+	lane = mgr.findLane(5.0)
+	if lane != 0 {
+		t.Errorf("expected lane 0 after release, got %d", lane)
 	}
 }
 
@@ -230,4 +336,80 @@ func TestEscapeASS(t *testing.T) {
 			t.Errorf("escapeASS(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
+}
+
+func TestEstimateTextWidth(t *testing.T) {
+	// Pure ASCII: each char = 0.5 * fontSize
+	w := estimateTextWidth("abc", 40)
+	if w != 60 { // 3 * 0.5 * 40 = 60
+		t.Errorf("expected 60, got %d", w)
+	}
+
+	// Pure CJK: each char = 1.0 * fontSize
+	w = estimateTextWidth("你好", 40)
+	if w != 80 { // 2 * 40 = 80
+		t.Errorf("expected 80, got %d", w)
+	}
+
+	// Mixed
+	w = estimateTextWidth("a你", 40)
+	if w != 60 { // 0.5*40 + 1.0*40 = 60
+		t.Errorf("expected 60, got %d", w)
+	}
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.ScrollDuration != 12.0 {
+		t.Errorf("expected scroll duration 12.0, got %f", cfg.ScrollDuration)
+	}
+	if cfg.FixedDuration != 5.0 {
+		t.Errorf("expected fixed duration 5.0, got %f", cfg.FixedDuration)
+	}
+	if cfg.Opacity != 0.7 {
+		t.Errorf("expected opacity 0.7, got %f", cfg.Opacity)
+	}
+	if cfg.BlockTop || cfg.BlockBottom || cfg.BlockScroll {
+		t.Error("block options should default to false")
+	}
+}
+
+// === 密集弹幕碰撞测试 ===
+
+func TestXMLToASS_DenseDanmaku(t *testing.T) {
+	// 生成大量同时间弹幕，验证碰撞检测不会让弹幕重叠
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?><i>`)
+	for i := 0; i < 100; i++ {
+		sb.WriteString(`<d p="0.0,1,25,16777215,1609459200,0,abc,`)
+		sb.WriteString(strings.Repeat("1", 3))
+		sb.WriteString(`">弹幕`)
+		sb.WriteString(strings.Repeat("x", 5))
+		sb.WriteString(`</d>`)
+	}
+	sb.WriteString(`</i>`)
+
+	xmlPath := writeTempXML(t, sb.String())
+	defer os.Remove(xmlPath)
+
+	assPath := xmlPath + ".ass"
+	defer os.Remove(assPath)
+
+	err := XMLToASS(xmlPath, assPath, 1920, 1080)
+	if err != nil {
+		t.Fatalf("XMLToASS dense: %v", err)
+	}
+
+	data, _ := os.ReadFile(assPath)
+	content := string(data)
+
+	// 应该有一些 Dialogue 行，但不是全部 100 条（因为泳道满了会丢弃）
+	dialogueCount := strings.Count(content, "Dialogue:")
+	if dialogueCount == 0 {
+		t.Error("expected at least some dialogue lines")
+	}
+	if dialogueCount >= 100 {
+		t.Errorf("expected some danmaku to be dropped due to collision, got %d", dialogueCount)
+	}
+	t.Logf("Dense test: %d/100 danmaku rendered", dialogueCount)
 }

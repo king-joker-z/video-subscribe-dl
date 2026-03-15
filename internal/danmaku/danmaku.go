@@ -35,6 +35,38 @@ type ParsedDanmaku struct {
 	Text     string
 }
 
+// DanmakuConfig 弹幕渲染配置
+type DanmakuConfig struct {
+	ScrollDuration float64 // 滚动弹幕持续秒数（默认 12）
+	FixedDuration  float64 // 固定弹幕持续秒数（默认 5）
+	FontSize       int     // 基准字号（0 = 自动按分辨率计算）
+	Opacity        float64 // 透明度 0~1（默认 0.7）
+	Outline        float64 // 描边宽度（默认 1.5）
+	MaxOnScreen    int     // 最大同屏弹幕数（0 = 不限）
+	BlockTop       bool    // 屏蔽顶部弹幕
+	BlockBottom    bool    // 屏蔽底部弹幕
+	BlockScroll    bool    // 屏蔽滚动弹幕
+	LaneHeight     int     // 泳道高度（0 = 自动：字号 + 间距）
+	ScreenPortion  float64 // 弹幕区域占屏幕高度比例（默认 1.0，即全屏）
+}
+
+// DefaultConfig 返回默认弹幕配置
+func DefaultConfig() DanmakuConfig {
+	return DanmakuConfig{
+		ScrollDuration: 12.0,
+		FixedDuration:  5.0,
+		FontSize:       0,
+		Opacity:        0.7,
+		Outline:        1.5,
+		MaxOnScreen:    0,
+		BlockTop:       false,
+		BlockBottom:    false,
+		BlockScroll:    false,
+		LaneHeight:     0,
+		ScreenPortion:  1.0,
+	}
+}
+
 // DownloadDanmakuXML 下载弹幕 XML 到本地文件
 func DownloadDanmakuXML(cid int64, outputPath string) error {
 	// 主接口
@@ -115,7 +147,13 @@ func ParseXML(xmlPath string) ([]ParsedDanmaku, error) {
 }
 
 // XMLToASS 将弹幕 XML 转换为 ASS 字幕格式（兼容 Emby/Jellyfin/mpv）
+// 使用默认配置
 func XMLToASS(xmlPath, assPath string, width, height int) error {
+	return XMLToASSWithConfig(xmlPath, assPath, width, height, DefaultConfig())
+}
+
+// XMLToASSWithConfig 将弹幕 XML 转换为 ASS 字幕格式（可自定义配置）
+func XMLToASSWithConfig(xmlPath, assPath string, width, height int, cfg DanmakuConfig) error {
 	danmakus, err := ParseXML(xmlPath)
 	if err != nil {
 		return err
@@ -127,6 +165,41 @@ func XMLToASS(xmlPath, assPath string, width, height int) error {
 	if height <= 0 {
 		height = 1080
 	}
+
+	// 基准字号
+	fontSize := cfg.FontSize
+	if fontSize <= 0 {
+		fontSize = height / 27 // 1080p → 40
+	}
+
+	// 泳道高度
+	laneHeight := cfg.LaneHeight
+	if laneHeight <= 0 {
+		laneHeight = fontSize + 6 // 字号 + 间距
+	}
+
+	// 透明度 → ASS alpha（00=不透明, FF=全透明）
+	opacity := cfg.Opacity
+	if opacity <= 0 {
+		opacity = 0.7
+	}
+	if opacity > 1 {
+		opacity = 1
+	}
+	alphaHex := fmt.Sprintf("%02X", int((1-opacity)*255))
+
+	// 描边宽度
+	outline := cfg.Outline
+	if outline <= 0 {
+		outline = 1.5
+	}
+
+	// 弹幕区域高度
+	screenPortion := cfg.ScreenPortion
+	if screenPortion <= 0 || screenPortion > 1 {
+		screenPortion = 1.0
+	}
+	usableHeight := int(float64(height) * screenPortion)
 
 	f, err := os.Create(assPath)
 	if err != nil {
@@ -147,28 +220,43 @@ func XMLToASS(xmlPath, assPath string, width, height int) error {
 	fmt.Fprintf(f, "ScaledBorderAndShadow: yes\n")
 	fmt.Fprintf(f, "YCbCr Matrix: TV.601\n\n")
 
-	// 样式定义
-	fontSize := height / 27 // 基准字号
+	// 样式定义（带透明度和描边）
+	outlineStr := fmt.Sprintf("%.1f", outline)
 	fmt.Fprintf(f, "[V4+ Styles]\n")
 	fmt.Fprintf(f, "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
-	fmt.Fprintf(f, "Style: R2L,Microsoft YaHei,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,0,0,0,1\n", fontSize)
-	fmt.Fprintf(f, "Style: TOP,Microsoft YaHei,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,8,0,0,0,1\n", fontSize)
-	fmt.Fprintf(f, "Style: BTM,Microsoft YaHei,%d,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,0,0,0,1\n\n", fontSize)
+	fmt.Fprintf(f, "Style: R2L,Microsoft YaHei,%d,&H%s00FFFFFF,&H%s00FFFFFF,&H%s00000000,&H%s00000000,-1,0,0,0,100,100,0,0,1,%s,0,8,0,0,0,1\n", fontSize, alphaHex, alphaHex, alphaHex, alphaHex, outlineStr)
+	fmt.Fprintf(f, "Style: TOP,Microsoft YaHei,%d,&H%s00FFFFFF,&H%s00FFFFFF,&H%s00000000,&H%s00000000,-1,0,0,0,100,100,0,0,1,%s,0,8,0,0,0,1\n", fontSize, alphaHex, alphaHex, alphaHex, alphaHex, outlineStr)
+	fmt.Fprintf(f, "Style: BTM,Microsoft YaHei,%d,&H%s00FFFFFF,&H%s00FFFFFF,&H%s00000000,&H%s00000000,-1,0,0,0,100,100,0,0,1,%s,0,2,0,0,0,1\n\n", fontSize, alphaHex, alphaHex, alphaHex, alphaHex, outlineStr)
 
 	// 弹幕事件
 	fmt.Fprintf(f, "[Events]\n")
 	fmt.Fprintf(f, "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
 
-	// 碰撞检测：跟踪每行的结束时间
-	scrollDuration := 12.0 // 滚动弹幕持续秒数
-	fixedDuration := 5.0   // 固定弹幕持续秒数
+	// 泳道管理器
+	scrollDuration := cfg.ScrollDuration
+	if scrollDuration <= 0 {
+		scrollDuration = 12.0
+	}
+	fixedDuration := cfg.FixedDuration
+	if fixedDuration <= 0 {
+		fixedDuration = 5.0
+	}
 
-	maxScrollRows := height / (fontSize + 4)
-	maxFixedRows := height / 3 / (fontSize + 4)
+	numScrollLanes := usableHeight / laneHeight
+	numFixedLanes := (usableHeight / 3) / laneHeight // 固定弹幕最多占 1/3 屏幕
+	if numScrollLanes < 1 {
+		numScrollLanes = 1
+	}
+	if numFixedLanes < 1 {
+		numFixedLanes = 1
+	}
 
-	scrollRowEnd := make([]float64, maxScrollRows)
-	topRowEnd := make([]float64, maxFixedRows)
-	btmRowEnd := make([]float64, maxFixedRows)
+	scrollLanes := newScrollLaneManager(numScrollLanes, width, scrollDuration)
+	topLanes := newFixedLaneManager(numFixedLanes)
+	btmLanes := newFixedLaneManager(numFixedLanes)
+
+	onScreenCount := 0
+	maxOnScreen := cfg.MaxOnScreen
 
 	for _, dm := range danmakus {
 		if dm.Text == "" {
@@ -176,6 +264,23 @@ func XMLToASS(xmlPath, assPath string, width, height int) error {
 		}
 		// 跳过高级弹幕（mode 7, 8）
 		if dm.Mode == 7 || dm.Mode == 8 {
+			continue
+		}
+
+		// 屏蔽选项
+		if cfg.BlockScroll && (dm.Mode == 1 || dm.Mode == 2 || dm.Mode == 3 || dm.Mode == 6) {
+			continue
+		}
+		if cfg.BlockTop && dm.Mode == 5 {
+			continue
+		}
+		if cfg.BlockBottom && dm.Mode == 4 {
+			continue
+		}
+
+		// 最大同屏弹幕数限制（粗略估算：当前时间 - 滚动时长内的弹幕数）
+		if maxOnScreen > 0 && onScreenCount >= maxOnScreen {
+			// 简单策略：丢弃
 			continue
 		}
 
@@ -195,75 +300,210 @@ func XMLToASS(xmlPath, assPath string, width, height int) error {
 			colorTag = fmt.Sprintf("\\c%s", assColor)
 		}
 		scaleTag := ""
+		scaledFontSize := fontSize
 		if scale != 1.0 {
-			fz := int(math.Round(float64(fontSize) * scale))
-			scaleTag = fmt.Sprintf("\\fs%d", fz)
+			scaledFontSize = int(math.Round(float64(fontSize) * scale))
+			scaleTag = fmt.Sprintf("\\fs%d", scaledFontSize)
+		}
+
+		// 透明度标签（对非默认透明度的弹幕）
+		alphaTag := ""
+		if alphaHex != "00" {
+			alphaTag = fmt.Sprintf("\\1a&H%s&", alphaHex)
 		}
 
 		switch dm.Mode {
 		case 1, 2, 3, 6: // 滚动弹幕（含逆向）
-			row := findRow(scrollRowEnd, dm.Time)
-			if row < 0 {
+			textWidth := estimateTextWidth(dm.Text, scaledFontSize)
+			lane := scrollLanes.findLane(dm.Time, textWidth)
+			if lane < 0 {
 				continue // 屏幕满了，丢弃
 			}
-			scrollRowEnd[row] = dm.Time + scrollDuration
+			scrollLanes.occupy(lane, dm.Time, textWidth)
 
 			startTime := formatASSTime(dm.Time)
 			endTime := formatASSTime(dm.Time + scrollDuration)
 
-			y := row*(fontSize+4) + fontSize/2
+			y := lane*laneHeight + laneHeight/2
 
 			// 滚动效果：从右到左（move）
-			textWidth := len([]rune(dm.Text)) * fontSize // 粗略估算
 			startX := width + textWidth/2
 			endX := -textWidth / 2
+			if dm.Mode == 6 { // 逆向：从左到右
+				startX = -textWidth / 2
+				endX = width + textWidth/2
+			}
 
-			tags := fmt.Sprintf("{\\move(%d,%d,%d,%d)%s%s}", startX, y, endX, y, colorTag, scaleTag)
+			tags := fmt.Sprintf("{\\move(%d,%d,%d,%d)%s%s%s}", startX, y, endX, y, colorTag, scaleTag, alphaTag)
 			fmt.Fprintf(f, "Dialogue: 0,%s,%s,R2L,,0,0,0,,%s%s\n", startTime, endTime, tags, escapeASS(dm.Text))
+			onScreenCount++
 
 		case 5: // 顶部固定
-			row := findRow(topRowEnd, dm.Time)
-			if row < 0 {
+			lane := topLanes.findLane(dm.Time)
+			if lane < 0 {
 				continue
 			}
-			topRowEnd[row] = dm.Time + fixedDuration
+			topLanes.occupy(lane, dm.Time+fixedDuration)
 
 			startTime := formatASSTime(dm.Time)
 			endTime := formatASSTime(dm.Time + fixedDuration)
 
-			y := row*(fontSize+4) + fontSize/2
+			y := lane*laneHeight + laneHeight/2
 
-			tags := fmt.Sprintf("{\\an8\\pos(%d,%d)%s%s}", width/2, y, colorTag, scaleTag)
+			tags := fmt.Sprintf("{\\an8\\pos(%d,%d)%s%s%s}", width/2, y, colorTag, scaleTag, alphaTag)
 			fmt.Fprintf(f, "Dialogue: 0,%s,%s,TOP,,0,0,0,,%s%s\n", startTime, endTime, tags, escapeASS(dm.Text))
+			onScreenCount++
 
 		case 4: // 底部固定
-			row := findRow(btmRowEnd, dm.Time)
-			if row < 0 {
+			lane := btmLanes.findLane(dm.Time)
+			if lane < 0 {
 				continue
 			}
-			btmRowEnd[row] = dm.Time + fixedDuration
+			btmLanes.occupy(lane, dm.Time+fixedDuration)
 
 			startTime := formatASSTime(dm.Time)
 			endTime := formatASSTime(dm.Time + fixedDuration)
 
-			y := height - row*(fontSize+4) - fontSize/2
+			y := height - lane*laneHeight - laneHeight/2
 
-			tags := fmt.Sprintf("{\\an2\\pos(%d,%d)%s%s}", width/2, y, colorTag, scaleTag)
+			tags := fmt.Sprintf("{\\an2\\pos(%d,%d)%s%s%s}", width/2, y, colorTag, scaleTag, alphaTag)
 			fmt.Fprintf(f, "Dialogue: 0,%s,%s,BTM,,0,0,0,,%s%s\n", startTime, endTime, tags, escapeASS(dm.Text))
+			onScreenCount++
 		}
 	}
 
 	return nil
 }
 
-// findRow 找一个空闲行
-func findRow(rowEnd []float64, currentTime float64) int {
-	for i := range rowEnd {
-		if currentTime >= rowEnd[i] {
+// === 泳道碰撞检测 ===
+
+// scrollLaneInfo 滚动弹幕泳道信息
+type scrollLaneInfo struct {
+	occupied  bool    // 是否已被使用过
+	enterTime float64 // 弹幕进入时间
+	textWidth int     // 弹幕文本宽度
+}
+
+// scrollLaneManager 滚动弹幕泳道管理器
+// 对每条泳道跟踪最后一条弹幕的进入时间和宽度
+// 碰撞检测逻辑：新弹幕从右边进入时，前一条弹幕必须已经完全离开右边界
+// 即：前一条弹幕的右端已经完全进入屏幕
+type scrollLaneManager struct {
+	lanes          []scrollLaneInfo
+	screenWidth    int
+	scrollDuration float64
+}
+
+func newScrollLaneManager(numLanes, screenWidth int, scrollDuration float64) *scrollLaneManager {
+	return &scrollLaneManager{
+		lanes:          make([]scrollLaneInfo, numLanes),
+		screenWidth:    screenWidth,
+		scrollDuration: scrollDuration,
+	}
+}
+
+// findLane 找一条不会碰撞的泳道
+// 碰撞条件：新弹幕从屏幕右边进入时，前一条弹幕的尾部还没完全进入屏幕
+// 即：前一条弹幕的尾部位置 > 屏幕右边界
+func (m *scrollLaneManager) findLane(currentTime float64, textWidth int) int {
+	for i := range m.lanes {
+		if m.isLaneFree(i, currentTime, textWidth) {
 			return i
 		}
 	}
 	return -1
+}
+
+// isLaneFree 检查泳道是否空闲
+func (m *scrollLaneManager) isLaneFree(lane int, currentTime float64, newTextWidth int) bool {
+	info := m.lanes[lane]
+	if !info.occupied {
+		return true // 从未使用
+	}
+
+	elapsed := currentTime - info.enterTime
+	if elapsed >= m.scrollDuration {
+		return true // 前一条弹幕已完全离开屏幕
+	}
+
+	// 前一条弹幕的移动速度
+	prevTotalDist := float64(m.screenWidth + info.textWidth)
+	prevSpeed := prevTotalDist / m.scrollDuration
+
+	// 前一条弹幕的尾部当前位置（从右边界开始）
+	// 起始位置：screenWidth + textWidth/2（中心点在右边界外）
+	// 尾部起始位置：screenWidth + textWidth
+	prevTailPos := float64(m.screenWidth+info.textWidth) - prevSpeed*elapsed
+
+	if prevTailPos > float64(m.screenWidth) {
+		return false // 前一条弹幕的尾部还没进入屏幕
+	}
+
+	// 还需要检查新弹幕不会追上前一条弹幕（速度不同时可能追尾）
+	newTotalDist := float64(m.screenWidth + newTextWidth)
+	newSpeed := newTotalDist / m.scrollDuration
+
+	if newSpeed > prevSpeed {
+		// 新弹幕更快，检查到达左边界时是否已经追上
+		// 前一条弹幕还需要多久到达左边界
+		prevHeadPos := float64(m.screenWidth) - prevSpeed*elapsed
+		prevRemaining := (prevHeadPos + float64(info.textWidth)) / prevSpeed
+		// 新弹幕到达左边界需要的时间
+		newRemaining := newTotalDist / newSpeed
+		if newRemaining < prevRemaining {
+			return false // 会追上
+		}
+	}
+
+	return true
+}
+
+func (m *scrollLaneManager) occupy(lane int, enterTime float64, textWidth int) {
+	m.lanes[lane] = scrollLaneInfo{
+		occupied:  true,
+		enterTime: enterTime,
+		textWidth: textWidth,
+	}
+}
+
+// fixedLaneManager 固定弹幕（顶部/底部）泳道管理器
+type fixedLaneManager struct {
+	laneEnd []float64 // 每条泳道的释放时间
+}
+
+func newFixedLaneManager(numLanes int) *fixedLaneManager {
+	return &fixedLaneManager{
+		laneEnd: make([]float64, numLanes),
+	}
+}
+
+func (m *fixedLaneManager) findLane(currentTime float64) int {
+	for i := range m.laneEnd {
+		if currentTime >= m.laneEnd[i] {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *fixedLaneManager) occupy(lane int, endTime float64) {
+	m.laneEnd[lane] = endTime
+}
+
+// === 工具函数 ===
+
+// estimateTextWidth 估算文本渲染宽度
+// 中文字符按 1.0 倍字号，ASCII 按 0.5 倍字号
+func estimateTextWidth(text string, fontSize int) int {
+	width := 0.0
+	for _, r := range text {
+		if r > 127 { // CJK 字符
+			width += float64(fontSize)
+		} else {
+			width += float64(fontSize) * 0.5
+		}
+	}
+	return int(math.Ceil(width))
 }
 
 // decColorToASS 将十进制颜色(RGB)转为 ASS 格式 &HBBGGRR
@@ -274,7 +514,7 @@ func decColorToASS(color int64) string {
 	return fmt.Sprintf("&H%02X%02X%02X", b, g, r)
 }
 
-// formatASSTime 格式化为 ASS 时间 H:MM:SS.CC
+// formatASSTime 格式化为 ASS 时间 H:MM:SS.CC（精确到百分之一秒）
 func formatASSTime(seconds float64) string {
 	if seconds < 0 {
 		seconds = 0
