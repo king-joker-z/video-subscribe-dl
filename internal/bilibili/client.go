@@ -466,8 +466,8 @@ func (c *Client) FetchDynamicVideosIncremental(mid int64, latestVideoAt int64) (
 		pageIdx++
 
 		// 安全限制：最多翻 50 页
-		if pageIdx >= 50 {
-			log.Printf("[dynamic] 达到最大翻页限制 50 页，mid=%d", mid)
+		if pageIdx >= 200 {
+			log.Printf("[dynamic] 达到最大翻页限制 200 页，mid=%d", mid)
 			break
 		}
 
