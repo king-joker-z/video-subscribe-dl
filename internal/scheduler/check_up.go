@@ -21,14 +21,9 @@ func (s *Scheduler) checkUP(src db.Source) {
 	}
 
 	// UP 主信息（优先缓存，6 小时内不重复请求）
+	// acc/info 接口容易触发风控，失败时用 DB 已有名字继续，不阻塞视频扫描
 	upInfo, err := s.getUPInfoCached(client, mid)
 	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
-			return
-		}
-		// -403 或其他非风控错误：如果 DB 已有名字，用已有信息继续扫描
 		if src.Name != "" && src.Name != "未命名" {
 			log.Printf("[WARN] Get UP info failed (mid=%d): %v, 使用已有名称继续: %s", mid, err, src.Name)
 			upInfo = &bilibili.UPInfo{MID: mid, Name: src.Name}
@@ -64,13 +59,10 @@ func (s *Scheduler) checkUP(src db.Source) {
 	}
 
 	if isFirstScan {
-		// 首次扫描：限制为仅第一页，避免大量翻页触发 -352 风控
-		// 第一页拿到 maxCreated 设置增量基准，后续走增量路径
-		// 如需全量补漏历史视频，使用 fullscan API
-		if firstScanPages <= 0 {
-			firstScanPages = 1
+		log.Printf("[首次全量] %s (mid=%d): 开始全量扫描", uploaderName, mid)
+		if firstScanPages > 0 {
+			log.Printf("[首次全量] 页数限制: %d 页", firstScanPages)
 		}
-		log.Printf("[首次全量] %s (mid=%d): 开始首次扫描（限制 %d 页，防风控）", uploaderName, mid, firstScanPages)
 	} else {
 		log.Printf("[增量] %s (mid=%d): 基准时间 %s",
 			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
@@ -190,8 +182,8 @@ func (s *Scheduler) checkUP(src db.Source) {
 		}
 
 		page++
-		// 翻页间隔统一为 1.5-2.5s（与 fullScanUP 一致，降低风控风险）
-		time.Sleep(time.Duration(1500+rand.Intn(1000)) * time.Millisecond)
+		// 翻页间隔 3-5s，避免触发风控
+		time.Sleep(time.Duration(3000+rand.Intn(2000)) * time.Millisecond)
 	}
 
 	// 更新 latest_video_at
@@ -409,7 +401,7 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		}
 
 		page++
-		time.Sleep(time.Duration(1500+rand.Intn(1000)) * time.Millisecond)
+		time.Sleep(time.Duration(3000+rand.Intn(2000)) * time.Millisecond)
 	}
 
 	// 第二阶段：过滤已下载的，只处理缺失的视频

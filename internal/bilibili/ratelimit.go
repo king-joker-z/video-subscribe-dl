@@ -32,10 +32,10 @@ func NewRateLimiter(max, refill int, interval time.Duration) *RateLimiter {
 	return rl
 }
 
-// DefaultRateLimiter 创建默认限流器: 每 1s 补充 1 个 token，桶容量 2
+// DefaultRateLimiter 创建默认限流器: 每 2s 补充 1 个 token，桶容量 1
 // B 站风控严格，保守限流
 func DefaultRateLimiter() *RateLimiter {
-	return NewRateLimiter(2, 1, 1*time.Second)
+	return NewRateLimiter(1, 1, 2*time.Second)
 }
 
 // Acquire 获取一个 token，阻塞直到获取成功
