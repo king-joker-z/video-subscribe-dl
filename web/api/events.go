@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -130,6 +132,16 @@ func (h *EventsHandler) HandleLogsClear(w http.ResponseWriter, r *http.Request) 
 
 // === WebSocket 日志（标准库实现，无第三方依赖）===
 
+// WebSocket opcodes
+const (
+	wsOpContinuation = 0x0
+	wsOpText         = 0x1
+	wsOpBinary       = 0x2
+	wsOpClose        = 0x8
+	wsOpPing         = 0x9
+	wsOpPong         = 0xA
+)
+
 // wsConn 表示一个 WebSocket 连接
 type wsConn struct {
 	conn   net.Conn
@@ -145,7 +157,22 @@ func (ws *wsConn) writeMessage(data []byte) error {
 		return fmt.Errorf("connection closed")
 	}
 	// 构造 WebSocket text frame
-	frame := buildWSFrame(1, data) // opcode 1 = text
+	frame := buildWSFrame(wsOpText, data)
+	_, err := ws.bufrw.Write(frame)
+	if err != nil {
+		return err
+	}
+	return ws.bufrw.Flush()
+}
+
+// writeFrame 写入指定 opcode 的 frame（内部使用，调用方需已持锁或保证安全）
+func (ws *wsConn) writeFrame(opcode byte, payload []byte) error {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	if ws.closed {
+		return fmt.Errorf("connection closed")
+	}
+	frame := buildWSFrame(opcode, payload)
 	_, err := ws.bufrw.Write(frame)
 	if err != nil {
 		return err
@@ -159,6 +186,105 @@ func (ws *wsConn) close() {
 	if !ws.closed {
 		ws.closed = true
 		ws.conn.Close()
+	}
+}
+
+// readFrame 从连接读取一个完整的 WebSocket frame
+// 返回: opcode, payload, error
+// 正确处理 mask（客户端发来的 frame 都有 mask）
+func (ws *wsConn) readFrame() (byte, []byte, error) {
+	reader := ws.bufrw.Reader
+
+	// 读取前 2 字节头
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(reader, header); err != nil {
+		return 0, nil, err
+	}
+
+	// FIN + opcode
+	// fin := (header[0] & 0x80) != 0  // 暂不处理分片重组，只读单帧
+	opcode := header[0] & 0x0F
+
+	// Mask + payload length
+	masked := (header[1] & 0x80) != 0
+	payloadLen := uint64(header[1] & 0x7F)
+
+	// Extended payload length
+	if payloadLen == 126 {
+		ext := make([]byte, 2)
+		if _, err := io.ReadFull(reader, ext); err != nil {
+			return 0, nil, err
+		}
+		payloadLen = uint64(binary.BigEndian.Uint16(ext))
+	} else if payloadLen == 127 {
+		ext := make([]byte, 8)
+		if _, err := io.ReadFull(reader, ext); err != nil {
+			return 0, nil, err
+		}
+		payloadLen = binary.BigEndian.Uint64(ext)
+	}
+
+	// 安全限制：单帧最大 1MB（控制帧正常很小）
+	if payloadLen > 1<<20 {
+		return 0, nil, fmt.Errorf("frame too large: %d bytes", payloadLen)
+	}
+
+	// Mask key（4 bytes）
+	var maskKey [4]byte
+	if masked {
+		if _, err := io.ReadFull(reader, maskKey[:]); err != nil {
+			return 0, nil, err
+		}
+	}
+
+	// Payload
+	payload := make([]byte, payloadLen)
+	if payloadLen > 0 {
+		if _, err := io.ReadFull(reader, payload); err != nil {
+			return 0, nil, err
+		}
+	}
+
+	// Unmask
+	if masked {
+		for i := range payload {
+			payload[i] ^= maskKey[i%4]
+		}
+	}
+
+	return opcode, payload, nil
+}
+
+// readLoop 读取客户端发来的 frame，处理 ping/pong/close
+// 当 readLoop 退出时，通过 closeCh 通知发送循环
+func (ws *wsConn) readLoop(closeCh chan struct{}) {
+	defer close(closeCh)
+	for {
+		ws.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		opcode, payload, err := ws.readFrame()
+		if err != nil {
+			return // 读出错，退出
+		}
+
+		switch opcode {
+		case wsOpClose:
+			// 回复 close frame
+			ws.writeFrame(wsOpClose, payload)
+			return
+
+		case wsOpPing:
+			// 回复 pong，payload 原样返回
+			ws.writeFrame(wsOpPong, payload)
+
+		case wsOpPong:
+			// 收到 pong，忽略（我们没有主动发 ping）
+
+		case wsOpText, wsOpBinary, wsOpContinuation:
+			// 日志是单向推送，忽略客户端发来的消息
+
+		default:
+			// 未知 opcode，忽略
+		}
 	}
 }
 
@@ -227,21 +353,7 @@ func (h *EventsHandler) HandleWSLogs(w http.ResponseWriter, r *http.Request) {
 
 	// 读取协程：处理 ping/pong/close
 	closeCh := make(chan struct{})
-	go func() {
-		defer close(closeCh)
-		buf := make([]byte, 4096)
-		for {
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			_, err := conn.Read(buf)
-			if err != nil {
-				return
-			}
-			// 解析 frame 检测 close
-			if len(buf) > 0 && (buf[0]&0x0F) == 8 {
-				return // close frame
-			}
-		}
-	}()
+	go ws.readLoop(closeCh)
 
 	// 发送循环
 	for {
@@ -298,9 +410,14 @@ func computeWSAccept(key string) string {
 }
 
 // buildWSFrame 构建 WebSocket frame（仅服务端发送，不需要 mask）
+// 正确处理 3 种 payload length 编码：
+//   - payload <= 125: 1 字节 length
+//   - 126 <= payload <= 65535: 1 字节 126 + 2 字节 length（big-endian）
+//   - payload > 65535: 1 字节 127 + 8 字节 length（big-endian）
 func buildWSFrame(opcode byte, payload []byte) []byte {
 	length := len(payload)
-	var frame []byte
+	// 预分配：2字节头 + 最多8字节扩展长度 + payload
+	frame := make([]byte, 0, 2+8+length)
 
 	// FIN + opcode
 	frame = append(frame, 0x80|opcode)
@@ -308,7 +425,8 @@ func buildWSFrame(opcode byte, payload []byte) []byte {
 	if length <= 125 {
 		frame = append(frame, byte(length))
 	} else if length <= 65535 {
-		frame = append(frame, 126, byte(length>>8), byte(length&0xFF))
+		frame = append(frame, 126)
+		frame = append(frame, byte(length>>8), byte(length&0xFF))
 	} else {
 		frame = append(frame, 127)
 		for i := 7; i >= 0; i-- {

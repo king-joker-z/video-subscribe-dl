@@ -180,8 +180,8 @@ func (s *Server) ensureAuthToken() {
 		return
 	}
 	// 如果环境变量 NO_AUTH=1 则禁用
-	if os.Getenv("NO_AUTH") == "1" {
-		log.Printf("[auth] 认证已禁用 (NO_AUTH=1)")
+	if noAuth := os.Getenv("NO_AUTH"); noAuth == "1" || noAuth == "true" {
+		log.Printf("[auth] 认证已禁用 (NO_AUTH=%s)", noAuth)
 		return
 	}
 	// 检查 DB 是否已有 token
@@ -236,6 +236,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) getAuthToken() string {
+	noAuth := os.Getenv("NO_AUTH")
+	if noAuth == "1" || noAuth == "true" {
+		return "" // 禁用认证
+	}
 	if t := os.Getenv("AUTH_TOKEN"); t != "" {
 		return t
 	}
