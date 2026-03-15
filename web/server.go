@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -93,7 +94,7 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 	}
 
 	// 加载模板
-	s.templates = template.Must(template.ParseGlob("web/templates/*.html"))
+	s.templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
 	// API 路由（必须在 / 之前注册）
 	s.mux.HandleFunc("/api/progress/stream", s.handleProgressStream)
@@ -128,7 +129,8 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 	s.mux.HandleFunc("/api/cleanup/config", s.handleCleanupConfig)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 	s.mux.HandleFunc("/health", s.handleHealth)
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	staticSub, _ := fs.Sub(staticFS, "static")
+	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	s.mux.HandleFunc("/", s.handleIndex)
 
 	return s

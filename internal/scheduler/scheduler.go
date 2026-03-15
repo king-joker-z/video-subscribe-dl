@@ -256,6 +256,8 @@ func (s *Scheduler) checkSource(src db.Source) {
 	switch src.Type {
 	case "season":
 		s.checkSeason(src)
+	case "series":
+		s.checkSeries(src)
 	case "favorite":
 		s.checkFavorite(src)
 	case "watchlater":

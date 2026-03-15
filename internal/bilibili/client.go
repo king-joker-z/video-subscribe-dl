@@ -106,6 +106,41 @@ type SeasonArchive struct {
 	PubDate  int64  `json:"pubdate"`
 }
 
+
+// CollectionType 合集类型
+type CollectionType string
+
+const (
+	CollectionSeason CollectionType = "season"
+	CollectionSeries CollectionType = "series"
+)
+
+// CollectionInfo 统一合集信息
+type CollectionInfo struct {
+	Type     CollectionType
+	MID      int64
+	ID       int64 // SeasonID 或 SeriesID
+}
+
+// SeriesMeta Series（视频列表）元数据
+type SeriesMeta struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	MID         int64  `json:"mid"`
+	Total       int    `json:"total"`
+	Cover       string `json:"cover"`
+}
+
+// SeriesArchive Series 内的视频
+type SeriesArchive struct {
+	BvID     string `json:"bvid"`
+	Title    string `json:"title"`
+	Pic      string `json:"pic"`
+	Duration int    `json:"duration"`
+	PubDate  int64  `json:"pubdate"`
+}
+
 // === API 方法 ===
 
 // GetUPInfo 获取 UP 主信息（含头像），需要 WBI 签名
@@ -568,4 +603,92 @@ func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
 		err = fmt.Errorf("cannot extract season info from: %s", rawURL)
 	}
 	return
+}
+
+// GetSeriesInfo 获取 Series（视频列表）信息
+func (c *Client) GetSeriesInfo(mid, seriesID int64) (*SeriesMeta, error) {
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			Meta SeriesMeta `json:"meta"`
+		} `json:"data"`
+	}
+	err := c.get(fmt.Sprintf("https://api.bilibili.com/x/series/series?series_id=%d", seriesID), &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	resp.Data.Meta.MID = mid
+	return &resp.Data.Meta, nil
+}
+
+// GetSeriesVideos 获取 Series 内视频列表（分页）
+func (c *Client) GetSeriesVideos(mid, seriesID int64, page, pageSize int) ([]SeriesArchive, int, error) {
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			Archives []SeriesArchive `json:"archives"`
+			Page     struct {
+				Total int `json:"total"`
+			} `json:"page"`
+		} `json:"data"`
+	}
+	url := fmt.Sprintf("https://api.bilibili.com/x/series/archives?mid=%d&series_id=%d&pn=%d&ps=%d&sort=asc",
+		mid, seriesID, page, pageSize)
+	if err := c.get(url, &resp); err != nil {
+		return nil, 0, err
+	}
+	if resp.Code != 0 {
+		return nil, 0, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	return resp.Data.Archives, resp.Data.Page.Total, nil
+}
+
+// ExtractCollectionInfo 统一解析合集 URL（Season 和 Series）
+func ExtractCollectionInfo(rawURL string) (*CollectionInfo, error) {
+	var mid, id int64
+	
+	m := reSpaceMID.FindStringSubmatch(rawURL)
+	if len(m) > 1 {
+		fmt.Sscanf(m[1], "%d", &mid)
+	}
+
+	// Series: /lists/{id}?type=series 或 seriesdetail?sid={id}
+	if strings.Contains(rawURL, "type=series") || strings.Contains(rawURL, "seriesdetail") {
+		m = reListsID.FindStringSubmatch(rawURL)
+		if len(m) > 1 {
+			fmt.Sscanf(m[1], "%d", &id)
+		}
+		if id == 0 {
+			m = reSID.FindStringSubmatch(rawURL)
+			if len(m) > 1 {
+				fmt.Sscanf(m[1], "%d", &id)
+			}
+		}
+		if mid > 0 && id > 0 {
+			return &CollectionInfo{Type: CollectionSeries, MID: mid, ID: id}, nil
+		}
+	}
+
+	// Season: /lists/{id}?type=season 或 collectiondetail?sid={id}
+	m = reListsID.FindStringSubmatch(rawURL)
+	if len(m) > 1 {
+		fmt.Sscanf(m[1], "%d", &id)
+	}
+	if id == 0 {
+		m = reSID.FindStringSubmatch(rawURL)
+		if len(m) > 1 {
+			fmt.Sscanf(m[1], "%d", &id)
+		}
+	}
+
+	if mid > 0 && id > 0 {
+		return &CollectionInfo{Type: CollectionSeason, MID: mid, ID: id}, nil
+	}
+
+	return nil, fmt.Errorf("cannot extract collection info from: %s", rawURL)
 }
