@@ -288,15 +288,22 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 	}
 	s.upInfoCacheMu.RUnlock()
 
-	// 全量扫描：使用投稿 API 翻完所有页（已修复缺失的 platform/web_location 参数）
+	// 全量扫描：先用投稿 API 拉取所有 BVID 列表，再批量过滤已下载的，最后只处理缺失的
+	// 第一阶段：拉取所有 BVID（只消耗翻页请求，不调 GetVideoDetail）
 	pageSize := 30
 	page := 1
+	type videoEntry struct {
+		BvID  string
+		Title string
+		Pic   string
+	}
+	var allVideos []videoEntry
 	processedBVIDs := map[string]bool{}
-	totalChecked := 0
 
+	log.Printf("[full-scan] %s: 第一阶段 - 拉取视频列表", uploaderName)
 	for {
 		if s.isInCooldown() {
-			log.Printf("[full-scan] %s: 风控冷却中，已检查 %d 个视频", uploaderName, totalChecked)
+			log.Printf("[full-scan] %s: 风控冷却中，已拉取 %d 个视频 ID（第 %d 页）", uploaderName, len(allVideos), page)
 			return
 		}
 
@@ -304,14 +311,15 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
-				log.Printf("[full-scan] %s: 触发风控，已检查 %d 个视频", uploaderName, totalChecked)
-				return
+				log.Printf("[full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
+				// 不 return，用已拉到的部分继续处理
+				break
 			}
 			log.Printf("[full-scan] Get videos page %d failed: %v", page, err)
 			break
 		}
 		if page == 1 {
-			log.Printf("[full-scan] %s: 共 %d 个视频，开始全量补漏（投稿 API）", uploaderName, total)
+			log.Printf("[full-scan] %s: 共 %d 个视频", uploaderName, total)
 		}
 
 		for _, v := range videos {
@@ -319,14 +327,10 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 				continue
 			}
 			processedBVIDs[v.BvID] = true
-
-			// processOneVideo 内部会检查 IsVideoDownloaded，已有的会跳过
-			s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+			allVideos = append(allVideos, videoEntry{BvID: v.BvID, Title: v.Title, Pic: v.Pic})
 		}
 
-		totalChecked = len(processedBVIDs)
-
-		if totalChecked >= total || len(videos) < pageSize {
+		if len(processedBVIDs) >= total || len(videos) < pageSize {
 			break
 		}
 
@@ -334,7 +338,37 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		time.Sleep(time.Duration(1500+rand.Intn(1000)) * time.Millisecond)
 	}
 
-	log.Printf("[full-scan] %s: 扫描完成，共检查 %d 个视频，翻页 %d", uploaderName, totalChecked, page)
+	// 第二阶段：过滤已下载的，只处理缺失的视频
+	var missing []videoEntry
+	for _, v := range allVideos {
+		exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+		if !exists {
+			missing = append(missing, v)
+		}
+	}
+
+	log.Printf("[full-scan] %s: 列表 %d 个，已下载 %d 个，缺失 %d 个",
+		uploaderName, len(allVideos), len(allVideos)-len(missing), len(missing))
+
+	if len(missing) == 0 {
+		log.Printf("[full-scan] %s: 无缺失视频，扫描完成", uploaderName)
+		return
+	}
+
+	// 第三阶段：逐个处理缺失视频（每个会调 GetVideoDetail）
+	for i, v := range missing {
+		if s.isInCooldown() {
+			log.Printf("[full-scan] %s: 风控冷却中，已处理 %d/%d 个缺失视频", uploaderName, i, len(missing))
+			return
+		}
+		s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+		// 每个视频间隔，减少风控
+		if i < len(missing)-1 {
+			time.Sleep(time.Duration(1000+rand.Intn(500)) * time.Millisecond)
+		}
+	}
+
+	log.Printf("[full-scan] %s: 扫描完成，处理 %d 个缺失视频", uploaderName, len(missing))
 }
 
 const upInfoCacheTTL = 6 * time.Hour
