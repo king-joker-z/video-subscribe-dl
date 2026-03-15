@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"errors"
 	"fmt"
 	"log"
 
@@ -15,7 +14,7 @@ func (s *Scheduler) checkWatchLater(src db.Source) {
 
 	videos, err := client.GetWatchLater()
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
 			return

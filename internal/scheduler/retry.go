@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
@@ -39,7 +38,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	client := s.clientForSource(*src)
 	detail, err := client.GetVideoDetail(actualBvID)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			log.Printf("[retry-scheduler] 风控触发，停止重试: %s", dl.VideoID)
 			s.triggerCooldown()
 			s.dl.Pause()

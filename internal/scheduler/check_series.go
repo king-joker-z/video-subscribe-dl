@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"errors"
 	"log"
 	"math/rand"
 	"os"
@@ -32,7 +31,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
 			return
@@ -49,7 +48,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 	// 获取 Series 信息
 	seriesMeta, err := client.GetSeriesInfo(mid, seriesID)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
 			return
@@ -97,7 +96,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 	for {
 		archives, _, err := client.GetSeriesVideosSorted(mid, seriesID, page, pageSize, sortOrder)
 		if err != nil {
-			if errors.Is(err, bilibili.ErrRateLimited) {
+			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return

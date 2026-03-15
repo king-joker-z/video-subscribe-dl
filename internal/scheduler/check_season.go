@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"errors"
 	"fmt"
 	"log"
 
@@ -22,13 +21,13 @@ func (s *Scheduler) checkSeason(src db.Source) {
 
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
-			return
+		} else {
+			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
 		}
-		log.Printf("Get UP info failed (mid=%d): %v", mid, err)
-		upInfo = &bilibili.UPInfo{MID: mid, Name: src.Name}
+		return
 	}
 
 	if upInfo.Name != "" {

@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"errors"
+
 	"fmt"
 	"log"
 	"math/rand"
@@ -24,13 +24,13 @@ func (s *Scheduler) checkUP(src db.Source) {
 	// UP 主信息
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
-			return
+		} else {
+			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
 		}
-		log.Printf("Get UP info failed (mid=%d): %v", mid, err)
-		upInfo = &bilibili.UPInfo{MID: mid, Name: src.Name}
+		return
 	}
 
 	if (src.Name == "" || src.Name == "未命名") && upInfo.Name != "" {
@@ -80,7 +80,7 @@ func (s *Scheduler) checkUP(src db.Source) {
 	for {
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
-			if errors.Is(err, bilibili.ErrRateLimited) {
+			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return

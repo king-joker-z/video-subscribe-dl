@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -26,7 +25,7 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 	if mediaID == 0 {
 		folders, err := client.GetFavoriteList(mid)
 		if err != nil {
-			if errors.Is(err, bilibili.ErrRateLimited) {
+			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return
@@ -45,13 +44,13 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 	// 获取 UP 主信息用于命名目录
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
-			return
+		} else {
+			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
 		}
-		log.Printf("Get UP info failed (mid=%d): %v", mid, err)
-		upInfo = &bilibili.UPInfo{MID: mid, Name: src.Name}
+		return
 	}
 
 	if (src.Name == "" || src.Name == "未命名") && upInfo.Name != "" {
@@ -91,7 +90,7 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 	for {
 		videos, hasMore, err := client.GetFavoriteVideos(mediaID, page, pageSize)
 		if err != nil {
-			if errors.Is(err, bilibili.ErrRateLimited) {
+			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return
