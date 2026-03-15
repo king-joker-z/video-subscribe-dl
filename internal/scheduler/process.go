@@ -510,8 +510,12 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		UploaderName: uploaderName, UploaderFace: uploaderFace,
 		UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,
 		Tags: tags, ViewCount: detail.Stat.View, LikeCount: detail.Stat.Like,
+		CoinCount: detail.Stat.Coin, DanmakuCount: detail.Stat.Danmaku,
+		ReplyCount: detail.Stat.Reply, FavoriteCount: detail.Stat.Favorite,
+		ShareCount: detail.Stat.Share,
 		Thumbnail:  detail.Pic,
 		WebpageURL: fmt.Sprintf("https://www.bilibili.com/video/%s", actualBvID),
+		TName:      detail.TName,
 	}
 	if err := nfo.GenerateVideoNFO(meta, result.FilePath); err != nil {
 		log.Printf("NFO failed: %v", err)

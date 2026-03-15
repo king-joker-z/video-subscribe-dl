@@ -7,7 +7,6 @@ import { VideosPage } from './pages/videos.js';
 import { UploadersPage } from './pages/uploaders.js';
 import { SettingsPage } from './pages/settings.js';
 import { LogsPage } from './pages/logs.js';
-import { LoginPage } from './pages/login.js';
 
 const { createElement: h, useState, useEffect, useCallback } = React;
 
@@ -100,45 +99,7 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
 
 // ==================== 主应用 ====================
 function App() {
-  const [authRequired, setAuthRequired] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-
-  // 检查是否需要登录
-  useEffect(() => {
-    // 从 localStorage 恢复 token
-    const savedToken = localStorage.getItem('auth_token');
-    if (savedToken) {
-      // 设置全局请求 header
-      window._authToken = savedToken;
-    }
-    // 检查认证状态
-    fetch('/api/dashboard', {
-      headers: savedToken ? { 'Authorization': 'Bearer ' + savedToken } : {},
-    }).then(res => {
-      if (res.status === 401) {
-        setAuthRequired(true);
-      }
-      setAuthChecked(true);
-    }).catch(() => setAuthChecked(true));
-  }, []);
-
-  const handleLogin = (token) => {
-    window._authToken = token;
-    setAuthRequired(false);
-  };
-
-  if (!authChecked) {
-    return h('div', { className: 'min-h-screen bg-slate-950 flex items-center justify-center' },
-      h('div', { className: 'text-slate-500 text-sm' }, '加载中...')
-    );
-  }
-
-  if (authRequired) {
-    return h('div', { className: 'min-h-screen bg-slate-950 text-slate-100' },
-      h(ToastContainer),
-      h(LoginPage, { onLogin: handleLogin })
-    );
-  }
+  // Auth removed
 
   const [page, setPage] = useState(() => {
     const hash = location.hash.slice(2) || 'dashboard';

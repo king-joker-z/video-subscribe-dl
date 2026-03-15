@@ -114,6 +114,8 @@ type VideoDetail struct {
 		Title string `json:"title"`
 	} `json:"ugc_season"`
 	RedirectURL string `json:"redirect_url"`
+	Tid         int    `json:"tid"`         // 分区 ID
+	TName       string `json:"tname"`       // 分区名称
 	State       int    `json:"state"` // -1=待审 -2=退回 -4=未过审 -6=删除
 	Pages []struct {
 		CID  int64  `json:"cid"`
@@ -138,10 +140,13 @@ func (v *VideoDetail) IsChargePlus() bool {
 }
 
 type VideoStat struct {
-	View    int64 `json:"view"`
-	Danmaku int64 `json:"danmaku"`
-	Like    int64 `json:"like"`
-	Coin    int64 `json:"coin"`
+	View     int64 `json:"view"`
+	Danmaku  int64 `json:"danmaku"`
+	Like     int64 `json:"like"`
+	Coin     int64 `json:"coin"`
+	Reply    int64 `json:"reply"`
+	Favorite int64 `json:"favorite"`
+	Share    int64 `json:"share"`
 }
 
 type SeasonMeta struct {
