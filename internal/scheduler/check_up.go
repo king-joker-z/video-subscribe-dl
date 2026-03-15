@@ -253,6 +253,12 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 }
 
 func (s *Scheduler) fullScanUP(src db.Source) {
+	// 开头就检查冷却状态，避免冷却期内浪费请求
+	if s.isInCooldown() {
+		log.Printf("[full-scan] %s: 当前处于风控冷却期，跳过", src.Name)
+		return
+	}
+
 	client := s.clientForSource(src)
 
 	mid, err := bilibili.ExtractMID(src.URL)
@@ -261,17 +267,25 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		return
 	}
 
-	upInfo, err := s.getUPInfoCached(client, mid)
+	// 优先用 DB 中已有的名称，避免不必要的 API 请求
+	uploaderName := src.Name
+	uploaderDir := bilibili.SanitizePath(uploaderName)
+
+	// 尝试从缓存获取 UP 主信息（缓存命中不消耗 API 请求）
+	var upInfo *bilibili.UPInfo
+	upInfo, err = s.getUPInfoCached(client, mid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
+			log.Printf("[full-scan] %s: 获取 UP 主信息触发风控", uploaderName)
+			return
 		}
-		log.Printf("[full-scan] Get UP info failed (mid=%d): %v", mid, err)
-		return
+		// 非风控错误：用 DB 名称继续，upInfo 留 nil
+		log.Printf("[full-scan] Get UP info failed (mid=%d): %v, using DB name", mid, err)
+	} else if upInfo.Name != "" {
+		uploaderName = upInfo.Name
+		uploaderDir = bilibili.SanitizePath(uploaderName)
 	}
-
-	uploaderName := upInfo.Name
-	uploaderDir := bilibili.SanitizePath(uploaderName)
 
 	// 全量扫描：使用投稿 API（非动态 API），翻完所有页
 	pageSize := 30
