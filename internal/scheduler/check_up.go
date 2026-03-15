@@ -278,16 +278,6 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 	if uploaderName == "" || uploaderName == "未命名" {
 		uploaderName = fmt.Sprintf("mid_%d", mid)
 	}
-	uploaderDir := bilibili.SanitizePath(uploaderName)
-
-	// 仅从缓存取 upInfo（用于 processOneVideo 写 NFO），不发请求
-	var upInfo *bilibili.UPInfo
-	s.upInfoCacheMu.RLock()
-	if entry, ok := s.upInfoCache[mid]; ok {
-		upInfo = entry.info
-	}
-	s.upInfoCacheMu.RUnlock()
-
 	// 全量扫描：先用投稿 API 拉取所有 BVID 列表，再批量过滤已下载的，最后只处理缺失的
 	// 第一阶段：拉取所有 BVID（只消耗翻页请求，不调 GetVideoDetail）
 	pageSize := 30
@@ -355,20 +345,30 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		return
 	}
 
-	// 第三阶段：逐个处理缺失视频（每个会调 GetVideoDetail）
-	for i, v := range missing {
-		if s.isInCooldown() {
-			log.Printf("[full-scan] %s: 风控冷却中，已处理 %d/%d 个缺失视频", uploaderName, i, len(missing))
-			return
+	// 第三阶段：直接创建 pending 下载记录（不调 GetVideoDetail，零额外 API 请求）
+	created := 0
+	for _, v := range missing {
+		dl := &db.Download{
+			SourceID:  src.ID,
+			VideoID:   v.BvID,
+			Title:     v.Title,
+			Uploader:  uploaderName,
+			Thumbnail: v.Pic,
+			Status:    "pending",
 		}
-		s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
-		// 每个视频间隔，减少风控
-		if i < len(missing)-1 {
-			time.Sleep(time.Duration(1000+rand.Intn(500)) * time.Millisecond)
+		if _, err := s.db.CreateDownload(dl); err != nil {
+			log.Printf("[full-scan] 创建下载记录失败 %s: %v", v.BvID, err)
+			continue
 		}
+		created++
 	}
 
-	log.Printf("[full-scan] %s: 扫描完成，处理 %d 个缺失视频", uploaderName, len(missing))
+	log.Printf("[full-scan] %s: 扫描完成，创建 %d 个待下载任务", uploaderName, created)
+
+	// 触发 pending 处理
+	if created > 0 {
+		go s.ProcessAllPending()
+	}
 }
 
 const upInfoCacheTTL = 6 * time.Hour
