@@ -484,7 +484,8 @@ func (d *Downloader) download(job *Job) *Result {
 		ext := filepath.Ext(outputPath)
 		baseName := strings.TrimSuffix(filepath.Base(outputPath), ext)
 		xmlPath := filepath.Join(videoDir, baseName+".danmaku.xml")
-		assPath := filepath.Join(videoDir, baseName+".danmaku.ass")
+		// 使用 bili-sync 风格命名: .zh-CN.default.ass
+		assPath := filepath.Join(videoDir, baseName+".zh-CN.default.ass")
 
 		if err := danmaku.DownloadDanmakuXML(job.CID, xmlPath); err != nil {
 			log.Printf("  Danmaku download failed: %v", err)
