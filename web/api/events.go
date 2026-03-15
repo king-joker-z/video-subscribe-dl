@@ -332,9 +332,10 @@ func (h *EventsHandler) HandleWSLogs(w http.ResponseWriter, r *http.Request) {
 		ws.close()
 	}()
 
-	// 推送历史日志
+	// 推送历史日志（除非客户端请求跳过）
 	appLogger := logger.Default()
-	if appLogger != nil {
+	noHistory := r.URL.Query().Get("no_history") == "1"
+	if appLogger != nil && !noHistory {
 		history := appLogger.GetLogs(200, 0)
 		for _, entry := range history {
 			data := logger.MarshalEntry(entry)

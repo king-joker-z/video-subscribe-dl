@@ -10,6 +10,7 @@ export function LogsPage() {
   const [connType, setConnType] = useState(''); // 'ws' | 'sse'
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
+  const skipHistoryRef = useRef(false);
   const reconnectKey = useRef(0); // 用于强制重连
 
   // 连接管理：WebSocket 优先，SSE 降级
@@ -25,7 +26,9 @@ export function LogsPage() {
     const wsUrl = `${proto}//${location.host}/api/ws/logs`;
     
     try {
-      const ws = new WebSocket(wsUrl);
+      const finalWsUrl = skipHistoryRef.current ? wsUrl + (wsUrl.includes('?') ? '&' : '?') + 'no_history=1' : wsUrl;
+      skipHistoryRef.current = false;
+      const ws = new WebSocket(finalWsUrl);
       let wsConnected = false;
       
       ws.onopen = () => {
@@ -133,6 +136,7 @@ export function LogsPage() {
       connectionRef.current.close();
       connectionRef.current = null;
     }
+    skipHistoryRef.current = true;
     setTimeout(() => connect(), 300);
   };
 
