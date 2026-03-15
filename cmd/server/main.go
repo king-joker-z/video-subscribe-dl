@@ -140,6 +140,7 @@ func main() {
 	server.SetProcessPendingFunc(sched.ProcessAllPending)
 	server.SetRedownloadFunc(sched.RedownloadByID)
 	server.SetNotifier(sched.GetNotifier())
+	server.SetBiliClientFunc(sched.GetBiliClient)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

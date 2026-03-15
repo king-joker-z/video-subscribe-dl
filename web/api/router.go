@@ -19,6 +19,7 @@ type Router struct {
 	settings   *SettingsHandler
 	credential *CredentialHandler
 	events     *EventsHandler
+	me         *MeHandler
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {
@@ -31,6 +32,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		settings:   NewSettingsHandler(database),
 		credential: NewCredentialHandler(database),
 		events:     NewEventsHandler(dl),
+		me:         NewMeHandler(database),
 	}
 }
 
@@ -53,6 +55,11 @@ func (rt *Router) SetCallbacks(
 	rt.settings.SetRefreshRateFunc(onRefreshRate)
 	rt.uploaders.SetRedownloadFunc(onRedownload)
 	rt.uploaders.SetProcessPendingFunc(onProcessPending)
+}
+
+// SetBiliClientFunc 设置获取 bilibili client 的回调
+func (rt *Router) SetBiliClientFunc(fn func() *bilibili.Client) {
+	rt.me.SetBiliClientFunc(fn)
 }
 
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
@@ -122,7 +129,28 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Events (SSE) & Logs
 	mux.HandleFunc("/api/events", rt.events.HandleEvents)
-	mux.HandleFunc("/api/logs", rt.events.HandleLogs)
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			rt.events.HandleLogs(w, r)
+		case "POST":
+			// POST /api/logs — 清空日志 buffer
+			rt.events.HandleLogsClear(w, r)
+		default:
+			apiError(w, CodeMethodNotAllow, "method not allowed")
+		}
+	})
+
+	// Me — 关注列表 & 收藏夹
+	mux.HandleFunc("/api/me/favorites", rt.me.HandleFavorites)
+	mux.HandleFunc("/api/me/uppers", rt.me.HandleUppers)
+	mux.HandleFunc("/api/me/subscribe", rt.me.HandleSubscribe)
+
+	// Auth — token 登录
+	mux.HandleFunc("/api/login/token", rt.settings.HandleTokenLogin)
+
+	// WebSocket 日志
+	mux.HandleFunc("/api/ws/logs", rt.events.HandleWSLogs)
 
 	// Version
 	mux.HandleFunc("/api/version", rt.task.HandleVersion)

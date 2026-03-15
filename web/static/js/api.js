@@ -107,3 +107,34 @@ export function createEventSource(onProgress, onLog, onConnected) {
   es.onerror = () => { /* 自动重连 */ };
   return es;
 }
+
+// WebSocket 日志连接（带 SSE 降级）
+export function createLogSocket(onLog, onConnected) {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${location.host}/api/ws/logs`;
+  
+  let ws;
+  try {
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => { if (onConnected) onConnected('websocket'); };
+    ws.onmessage = (e) => {
+      try {
+        const entry = JSON.parse(e.data);
+        if (onLog) onLog(entry);
+      } catch(err) {}
+    };
+    ws.onerror = () => {
+      // WebSocket 失败，降级到 SSE
+      console.log('WebSocket failed, falling back to SSE');
+      ws.close();
+    };
+    ws.onclose = () => {};
+  } catch(e) {
+    // 不支持 WebSocket
+  }
+  
+  return {
+    close: () => { if (ws) ws.close(); },
+    ws,
+  };
+}

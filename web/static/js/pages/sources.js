@@ -165,10 +165,97 @@ function EditModal({ source, onSave, onClose }) {
   );
 }
 
+
+// 从关注列表导入选项卡
+function ImportFollowTab({ onDone }) {
+  const [uppers, setUppers] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [subscribing, setSubscribing] = useState(false);
+  const pageSize = 20;
+
+  const loadUppers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.getMyUppers(page, pageSize, search);
+      setUppers(res.data?.items || []);
+      setTotal(res.data?.total || 0);
+    } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  }, [page, search]);
+
+  useEffect(() => { loadUppers(); }, [loadUppers]);
+
+  const toggle = (mid) => {
+    const s = new Set(selected);
+    s.has(mid) ? s.delete(mid) : s.add(mid);
+    setSelected(s);
+  };
+
+  const selectAll = () => {
+    const unsubscribed = uppers.filter(u => !u.subscribed).map(u => u.mid);
+    setSelected(new Set(unsubscribed));
+  };
+
+  const handleSubscribe = async () => {
+    if (selected.size === 0) return;
+    setSubscribing(true);
+    try {
+      const res = await api.batchSubscribe({ mids: [...selected], type: "up" });
+      toast.success(`已订阅 ${res.data?.created || 0} 个 UP 主`);
+      setSelected(new Set());
+      loadUppers();
+      if (onDone) onDone();
+    } catch (e) { toast.error(e.message); }
+    finally { setSubscribing(false); }
+  };
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  return h("div", { className: "space-y-3" },
+    // 搜索框
+    h("div", { className: "flex gap-2" },
+      h("input", {
+        type: "text", value: search, placeholder: "搜索 UP 主...",
+        onChange: (e) => { setSearch(e.target.value); setPage(1); },
+        className: "flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+      }),
+      h(Button, { onClick: selectAll, size: "sm", variant: "secondary" }, "全选未订阅")
+    ),
+    // 列表
+    loading
+      ? h("div", { className: "text-center text-slate-500 py-8" }, "加载中...")
+      : uppers.length === 0
+        ? h("div", { className: "text-center text-slate-500 py-8" }, "未找到关注的 UP 主（请先登录 B 站）")
+        : h("div", { className: "space-y-1 max-h-60 overflow-y-auto" },
+            uppers.map(u =>
+              h("label", { key: u.mid, className: cn("flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-700/50", selected.has(u.mid) && "bg-slate-700/30") },
+                h("input", { type: "checkbox", checked: selected.has(u.mid) || u.subscribed, disabled: u.subscribed, onChange: () => toggle(u.mid), className: "rounded bg-slate-700 border-slate-600" }),
+                h("span", { className: "text-sm text-slate-200 flex-1 truncate" }, u.uname || u.name),
+                u.subscribed && h(Badge, { variant: "success" }, "已订阅")
+              )
+            )
+          ),
+    // 分页
+    totalPages > 1 && h("div", { className: "flex items-center justify-center gap-2" },
+      h(Button, { onClick: () => setPage(p => Math.max(1, p - 1)), disabled: page <= 1, size: "sm", variant: "ghost" }, "上一页"),
+      h("span", { className: "text-xs text-slate-500" }, `${page} / ${totalPages}`),
+      h(Button, { onClick: () => setPage(p => Math.min(totalPages, p + 1)), disabled: page >= totalPages, size: "sm", variant: "ghost" }, "下一页")
+    ),
+    // 订阅按钮
+    selected.size > 0 && h("div", { className: "flex justify-end" },
+      h(Button, { onClick: handleSubscribe, disabled: subscribing, size: "md" }, subscribing ? "订阅中..." : `一键订阅 ${selected.size} 个 UP 主`)
+    )
+  );
+}
 export function SourcesPage({ onNavigate }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [addTab, setAddTab] = useState("url"); // "url" | "import"
   const [newURL, setNewURL] = useState('');
   const [adding, setAdding] = useState(false);
   const [editSource, setEditSource] = useState(null);
@@ -266,91 +353,89 @@ export function SourcesPage({ onNavigate }) {
           h('button', { onClick: resetAddModal, className: 'p-1 rounded hover:bg-slate-700 text-slate-400' }, h(Icon, { name: 'x', size: 18 }))
         ),
 
-        // URL 输入 + 解析按钮
-        h('div', null,
-          h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站链接（必填）'),
-          h('div', { className: 'flex gap-2' },
-            h('input', {
-              type: 'text', value: newURL, placeholder: 'https://space.bilibili.com/xxx',
-              onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
-              onKeyDown: (e) => e.key === 'Enter' && handleParse(),
-              className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'
-            }),
-            h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
-          )
+        // 选项卡切换
+        h('div', { className: 'flex gap-1 bg-slate-900/50 rounded-lg p-1' },
+          h('button', { onClick: () => setAddTab('url'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addTab === 'url' ? 'bg-slate-700 text-slate-200' : 'text-slate-400 hover:text-slate-300') }, '输入链接'),
+          h('button', { onClick: () => setAddTab('import'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addTab === 'import' ? 'bg-slate-700 text-slate-200' : 'text-slate-400 hover:text-slate-300') }, '从关注导入')
         ),
 
-        // 解析结果展示
-        parseResult && h('div', { className: 'bg-slate-900/50 border border-slate-700/50 rounded-lg px-4 py-3 space-y-3' },
-          h('div', { className: 'flex items-center gap-2' },
-            h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
-            parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
-          ),
-
-          // 显示名称（可编辑）
+        // === 输入链接选项卡 ===
+        addTab === 'url' && h('div', { className: 'space-y-4' },
+          // URL 输入 + 解析按钮
           h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, '显示名称'),
-            h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
-          ),
-
-          // 启用开关
-          h('div', { className: 'flex items-center justify-between' },
-            h('label', { className: 'text-sm text-slate-400' }, '启用'),
-            h('button', {
-              onClick: () => updateAddForm('enabled', !addForm.enabled),
-              className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-600')
-            }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
-          ),
-
-          // 画质偏好
-          h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, '画质偏好'),
-            h('select', { value: addForm.download_quality, onChange: (e) => updateAddForm('download_quality', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
-              qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站链接（必填）'),
+            h('div', { className: 'flex gap-2' },
+              h('input', {
+                type: 'text', value: newURL, placeholder: 'https://space.bilibili.com/xxx',
+                onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+                onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+                className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'
+              }),
+              h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
             )
           ),
 
-          // 编码偏好
-          h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, '视频编码'),
-            h('select', { value: addForm.download_codec, onChange: (e) => updateAddForm('download_codec', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
-              h('option', { value: 'all' }, '自动'),
-              h('option', { value: 'avc' }, 'H.264 (AVC)'),
-              h('option', { value: 'hevc' }, 'H.265 (HEVC)'),
-              h('option', { value: 'av1' }, 'AV1')
-            )
-          ),
-
-          // 标题过滤关键词
-          h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, '标题过滤关键词（匹配才下载，留空不过滤）'),
-            h('input', { type: 'text', value: addForm.download_filter, onChange: (e) => updateAddForm('download_filter', e.target.value), placeholder: '关键词1|关键词2', className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
-          ),
-
-          // 检查间隔
-          h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, '检查间隔（秒）'),
-            h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
-          ),
-
-          // 开关组
-          h('div', { className: 'grid grid-cols-2 gap-3' },
+          // 解析结果展示
+          parseResult && h('div', { className: 'bg-slate-900/50 border border-slate-700/50 rounded-lg px-4 py-3 space-y-3' },
             h('div', { className: 'flex items-center gap-2' },
-              h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
-              h('label', { className: 'text-sm text-slate-400' }, '跳过 NFO')
+              h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
+              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
             ),
-            h('div', { className: 'flex items-center gap-2' },
-              h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
-              h('label', { className: 'text-sm text-slate-400' }, '跳过封面')
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-400 mb-1' }, '显示名称'),
+              h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+            ),
+            h('div', { className: 'flex items-center justify-between' },
+              h('label', { className: 'text-sm text-slate-400' }, '启用'),
+              h('button', {
+                onClick: () => updateAddForm('enabled', !addForm.enabled),
+                className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-600')
+              }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-400 mb-1' }, '画质偏好'),
+              h('select', { value: addForm.download_quality, onChange: (e) => updateAddForm('download_quality', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
+                qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
+              )
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-400 mb-1' }, '视频编码'),
+              h('select', { value: addForm.download_codec, onChange: (e) => updateAddForm('download_codec', e.target.value), className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' },
+                h('option', { value: 'all' }, '自动'),
+                h('option', { value: 'avc' }, 'H.264 (AVC)'),
+                h('option', { value: 'hevc' }, 'H.265 (HEVC)'),
+                h('option', { value: 'av1' }, 'AV1')
+              )
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-400 mb-1' }, '标题过滤关键词（匹配才下载，留空不过滤）'),
+              h('input', { type: 'text', value: addForm.download_filter, onChange: (e) => updateAddForm('download_filter', e.target.value), placeholder: '关键词1|关键词2', className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-400 mb-1' }, '检查间隔（秒）'),
+              h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500' })
+            ),
+            h('div', { className: 'grid grid-cols-2 gap-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
+                h('label', { className: 'text-sm text-slate-400' }, '跳过 NFO')
+              ),
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
+                h('label', { className: 'text-sm text-slate-400' }, '跳过封面')
+              )
             )
+          ),
+
+          // 底部按钮
+          h('div', { className: 'flex justify-end gap-2 pt-2' },
+            h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
           )
         ),
 
-        // 底部按钮
-        h('div', { className: 'flex justify-end gap-2 pt-2' },
-          h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
-          h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
-        )
+        // === 从关注导入选项卡 ===
+        addTab === 'import' && h(ImportFollowTab, { onDone: () => { resetAddModal(); load(); } })
       )
     ),
     // 列表

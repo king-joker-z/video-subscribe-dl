@@ -84,3 +84,37 @@ func (h *SettingsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	apiOK(w, map[string]interface{}{"message": "设置已更新"})
 }
+
+// POST /api/login/token — Token 认证
+func (h *SettingsHandler) HandleTokenLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		apiError(w, CodeMethodNotAllow, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := parseJSON(r, &req); err != nil {
+		apiError(w, CodeInvalidParam, "参数错误")
+		return
+	}
+
+	stored, _ := h.db.GetSetting("auth_token")
+	if stored == "" || req.Token != stored {
+		apiError(w, CodeUnauthorized, "Token 无效")
+		return
+	}
+
+	// 设置 cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "auth_token",
+		Value:    req.Token,
+		Path:     "/",
+		MaxAge:   86400 * 30, // 30 天
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	apiOK(w, map[string]string{"message": "登录成功"})
+}

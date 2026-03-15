@@ -67,6 +67,13 @@ func (s *Scheduler) GetNotifier() *notify.Notifier {
 }
 
 // getBili 线程安全地获取 bilibili client
+// GetBiliClient 公开方法：线程安全地获取 bilibili client
+func (s *Scheduler) GetBiliClient() *bilibili.Client {
+	s.biliMu.RLock()
+	defer s.biliMu.RUnlock()
+	return s.bili
+}
+
 func (s *Scheduler) getBili() *bilibili.Client {
 	s.biliMu.RLock()
 	defer s.biliMu.RUnlock()

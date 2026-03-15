@@ -953,3 +953,130 @@ func (c *Client) GetSeriesVideosSorted(mid, seriesID int64, page, pageSize int, 
 	}
 	return resp.Data.Archives, resp.Data.Page.Total, nil
 }
+
+// === /me 接口：关注列表 & 收藏夹 ===
+
+// FavoriteItem 我的收藏夹（list-all 接口返回）
+type FavoriteItem struct {
+	ID         int64  `json:"id"`
+	FID        int64  `json:"fid"`
+	MID        int64  `json:"mid"`
+	Title      string `json:"title"`
+	MediaCount int    `json:"media_count"`
+	AttrStr    string `json:"attr"`
+}
+
+// FollowedUpper 关注的 UP 主
+type FollowedUpper struct {
+	MID    int64  `json:"mid"`
+	Name   string `json:"uname"`
+	Face   string `json:"face"`
+	Sign   string `json:"sign"`
+}
+
+// FollowedUppers 关注列表分页响应
+type FollowedUppers struct {
+	List  []FollowedUpper `json:"list"`
+	Total int             `json:"total"`
+}
+
+// GetMyFavorites 获取我的收藏夹列表
+// GET https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={dedeuserid}
+func (c *Client) GetMyFavorites() ([]FavoriteItem, error) {
+	uid := c.getDedeUserID()
+	if uid == "" {
+		return nil, fmt.Errorf("未登录：缺少 DedeUserID")
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			List []FavoriteItem `json:"list"`
+		} `json:"data"`
+	}
+	err := c.get(fmt.Sprintf("https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=%s", uid), &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	return resp.Data.List, nil
+}
+
+// GetFollowedUppers 获取我关注的 UP 主列表（分页）
+// GET https://api.bilibili.com/x/relation/followings?vmid={dedeuserid}&pn={page}&ps={pageSize}
+func (c *Client) GetFollowedUppers(page, pageSize int) (*FollowedUppers, error) {
+	uid := c.getDedeUserID()
+	if uid == "" {
+		return nil, fmt.Errorf("未登录：缺少 DedeUserID")
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			List  []FollowedUpper `json:"list"`
+			Total int             `json:"total"`
+		} `json:"data"`
+	}
+	err := c.get(fmt.Sprintf("https://api.bilibili.com/x/relation/followings?vmid=%s&pn=%d&ps=%d", uid, page, pageSize), &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	return &FollowedUppers{List: resp.Data.List, Total: resp.Data.Total}, nil
+}
+
+// SearchFollowedUppers 搜索关注的 UP 主
+// GET https://api.bilibili.com/x/relation/followings/search?vmid={dedeuserid}&name={name}&pn={page}&ps={pageSize}
+func (c *Client) SearchFollowedUppers(name string, page, pageSize int) (*FollowedUppers, error) {
+	uid := c.getDedeUserID()
+	if uid == "" {
+		return nil, fmt.Errorf("未登录：缺少 DedeUserID")
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			List  []FollowedUpper `json:"list"`
+			Total int             `json:"total"`
+		} `json:"data"`
+	}
+	encodedName := url.QueryEscape(name)
+	err := c.get(fmt.Sprintf("https://api.bilibili.com/x/relation/followings/search?vmid=%s&name=%s&pn=%d&ps=%d", uid, encodedName, page, pageSize), &resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	return &FollowedUppers{List: resp.Data.List, Total: resp.Data.Total}, nil
+}
+
+// getDedeUserID 从 credential 或 cookie 中提取 DedeUserID
+func (c *Client) getDedeUserID() string {
+	if c.credential != nil && c.credential.DedeUserID != "" {
+		return c.credential.DedeUserID
+	}
+	// 从 cookie 字符串解析
+	if c.cookie != "" {
+		for _, part := range strings.Split(c.cookie, ";") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "DedeUserID=") {
+				return strings.TrimPrefix(part, "DedeUserID=")
+			}
+		}
+	}
+	return ""
+}
+
+// ExtractMIDFromURL 从 B 站 URL 提取 mid
+func ExtractMIDFromURL(rawURL string) string {
+	m := reSpaceMID.FindStringSubmatch(rawURL)
+	if len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}

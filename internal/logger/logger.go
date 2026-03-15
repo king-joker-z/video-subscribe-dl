@@ -241,3 +241,12 @@ func MarshalEntry(entry LogEntry) []byte {
 	data, _ := json.Marshal(entry)
 	return data
 }
+
+// Clear 清空日志 ring buffer
+func (l *RingLogger) Clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = make([]LogEntry, l.maxSize)
+	l.writeIdx = 0
+	l.count = 0
+}
