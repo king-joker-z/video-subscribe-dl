@@ -267,25 +267,20 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		return
 	}
 
-	// 优先用 DB 中已有的名称，避免不必要的 API 请求
+	// 全量扫描不调 GetUPInfo，完全用 DB 已有信息，零额外 API 请求
 	uploaderName := src.Name
+	if uploaderName == "" || uploaderName == "未命名" {
+		uploaderName = fmt.Sprintf("mid_%d", mid)
+	}
 	uploaderDir := bilibili.SanitizePath(uploaderName)
 
-	// 尝试从缓存获取 UP 主信息（缓存命中不消耗 API 请求）
+	// 仅从缓存取 upInfo（用于 processOneVideo 写 NFO），不发请求
 	var upInfo *bilibili.UPInfo
-	upInfo, err = s.getUPInfoCached(client, mid)
-	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			log.Printf("[full-scan] %s: 获取 UP 主信息触发风控", uploaderName)
-			return
-		}
-		// 非风控错误：用 DB 名称继续，upInfo 留 nil
-		log.Printf("[full-scan] Get UP info failed (mid=%d): %v, using DB name", mid, err)
-	} else if upInfo.Name != "" {
-		uploaderName = upInfo.Name
-		uploaderDir = bilibili.SanitizePath(uploaderName)
+	s.upInfoCacheMu.RLock()
+	if entry, ok := s.upInfoCache[mid]; ok {
+		upInfo = entry.info
 	}
+	s.upInfoCacheMu.RUnlock()
 
 	// 全量扫描：使用投稿 API（非动态 API），翻完所有页
 	pageSize := 30
