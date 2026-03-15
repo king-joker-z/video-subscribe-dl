@@ -134,6 +134,7 @@ function App() {
     if (params) hash += '?' + new URLSearchParams(params).toString();
     location.hash = hash;
     setPage(target);
+    setHashParams(params || {});
     setMobileSidebar(false);
   }, []);
 

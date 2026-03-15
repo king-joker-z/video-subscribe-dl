@@ -33,7 +33,10 @@ export function VideosPage({ params = {} } = {}) {
 
   // 从 URL 参数同步 uploader
   useEffect(() => {
-    if (params.uploader !== undefined) setUploader(params.uploader || '');
+    if (params.uploader !== undefined) {
+      setUploader(params.uploader || '');
+      setPage(1);
+    }
   }, [params.uploader]);
 
   // SSE 进度
