@@ -213,12 +213,12 @@ func (s *Server) Start() error {
 	s.setupRoutes()
 
 	// 自动生成 auth_token（如果未设置且未禁用）
-	s.ensureAuthToken()
+	// s.ensureAuthToken() // auth disabled
 
 	addr := fmt.Sprintf(":%d", s.port)
 	s.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           s.rateLimitMiddleware(s.authMiddleware(s.mux)),
+		Handler:           s.rateLimitMiddleware(s.mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       120 * time.Second,

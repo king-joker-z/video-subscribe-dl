@@ -162,6 +162,16 @@ func (s *Scheduler) isInCooldown() bool {
 	return time.Now().Before(s.rateLimitUntil)
 }
 
+// GetCooldownInfo 返回风控冷却状态（供 API 使用）
+func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	if time.Now().Before(s.rateLimitUntil) {
+		return true, int(time.Until(s.rateLimitUntil).Seconds())
+	}
+	return false, 0
+}
+
 // triggerCooldown 触发风控冷却
 func (s *Scheduler) triggerCooldown() {
 	s.rateLimitMu.Lock()
