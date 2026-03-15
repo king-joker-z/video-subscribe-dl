@@ -230,19 +230,97 @@ func (h *SourcesHandler) HandleGet(w http.ResponseWriter, r *http.Request, id in
 	apiOK(w, result)
 }
 
-// PUT /api/sources/:id
+// PUT /api/sources/:id — 支持部分更新
 func (h *SourcesHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id int64) {
-	var source db.Source
-	if err := parseJSON(r, &source); err != nil {
+	// 先读取现有记录
+	existing, err := h.db.GetSource(id)
+	if err != nil {
+		apiError(w, CodeSourceNotFound, "订阅源不存在")
+		return
+	}
+
+	// 解析请求体为 map 以支持部分更新
+	var body map[string]interface{}
+	if err := parseJSON(r, &body); err != nil {
 		apiError(w, CodeInvalidParam, "请求参数错误")
 		return
 	}
-	source.ID = id
-	if err := h.db.UpdateSource(&source); err != nil {
+
+	// 逐字段合并
+	if v, ok := body["name"]; ok {
+		if s, ok := v.(string); ok {
+			existing.Name = s
+		}
+	}
+	if v, ok := body["enabled"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.Enabled = val
+		case float64:
+			existing.Enabled = val != 0
+		}
+	}
+	if v, ok := body["download_quality"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DownloadQuality = s
+		}
+	}
+	if v, ok := body["download_codec"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DownloadCodec = s
+		}
+	}
+	if v, ok := body["download_danmaku"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.DownloadDanmaku = val
+		case float64:
+			existing.DownloadDanmaku = val != 0
+		}
+	}
+	if v, ok := body["download_filter"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DownloadFilter = s
+		}
+	}
+	if v, ok := body["download_quality_min"]; ok {
+		if s, ok := v.(string); ok {
+			existing.DownloadQualityMin = s
+		}
+	}
+	if v, ok := body["skip_nfo"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.SkipNFO = val
+		case float64:
+			existing.SkipNFO = val != 0
+		}
+	}
+	if v, ok := body["skip_poster"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.SkipPoster = val
+		case float64:
+			existing.SkipPoster = val != 0
+		}
+	}
+	if v, ok := body["check_interval"]; ok {
+		if f, ok := v.(float64); ok {
+			existing.CheckInterval = int(f)
+		}
+	}
+	if v, ok := body["cookies_file"]; ok {
+		if s, ok := v.(string); ok {
+			existing.CookiesFile = s
+		}
+	}
+
+	if err := h.db.UpdateSource(existing); err != nil {
 		apiError(w, CodeInternal, "更新失败: "+err.Error())
 		return
 	}
-	apiOK(w, map[string]interface{}{"id": id})
+	log.Printf("[source] Updated: id=%d, name=%s", id, existing.Name)
+	apiOK(w, existing)
 }
 
 // DELETE /api/sources/:id
