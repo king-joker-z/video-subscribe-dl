@@ -332,6 +332,9 @@ func (c *Client) GetUPVideos(mid int64, page, pageSize int) ([]VideoItem, int, e
 	params.Set("ps", fmt.Sprintf("%d", pageSize))
 	params.Set("pn", fmt.Sprintf("%d", page))
 	params.Set("order", "pubdate")
+	params.Set("order_avoided", "true")
+	params.Set("platform", "web")
+	params.Set("web_location", "1550101")
 	if err := c.getWbi("https://api.bilibili.com/x/space/wbi/arc/search", params, &resp); err != nil {
 		return nil, 0, err
 	}

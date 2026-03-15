@@ -282,32 +282,53 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 	}
 	s.upInfoCacheMu.RUnlock()
 
-	// 全量扫描：使用动态 API（风控比投稿 API 宽松），latestVideoAt=0 表示不截止
-	log.Printf("[full-scan] %s: 使用动态 API 全量拉取", uploaderName)
-	videos, err := client.FetchDynamicVideosIncremental(mid, 0)
-	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-		}
-		log.Printf("[full-scan] %s: 拉取动态失败: %v (已获取 %d 条)", uploaderName, err, len(videos))
-		// 即使出错，已获取的部分也继续处理
-	}
-
+	// 全量扫描：使用投稿 API 翻完所有页（已修复缺失的 platform/web_location 参数）
+	pageSize := 30
+	page := 1
 	processedBVIDs := map[string]bool{}
-	totalNew := 0
+	totalChecked := 0
 
-	for _, v := range videos {
-		if processedBVIDs[v.BvID] {
-			continue
+	for {
+		if s.isInCooldown() {
+			log.Printf("[full-scan] %s: 风控冷却中，已检查 %d 个视频", uploaderName, totalChecked)
+			return
 		}
-		processedBVIDs[v.BvID] = true
 
-		// processOneVideo 内部会检查 IsVideoDownloaded，已有的会跳过
-		s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
-		totalNew++
+		videos, total, err := client.GetUPVideos(mid, page, pageSize)
+		if err != nil {
+			if bilibili.IsRiskControl(err) {
+				s.triggerCooldown()
+				log.Printf("[full-scan] %s: 触发风控，已检查 %d 个视频", uploaderName, totalChecked)
+				return
+			}
+			log.Printf("[full-scan] Get videos page %d failed: %v", page, err)
+			break
+		}
+		if page == 1 {
+			log.Printf("[full-scan] %s: 共 %d 个视频，开始全量补漏（投稿 API）", uploaderName, total)
+		}
+
+		for _, v := range videos {
+			if processedBVIDs[v.BvID] {
+				continue
+			}
+			processedBVIDs[v.BvID] = true
+
+			// processOneVideo 内部会检查 IsVideoDownloaded，已有的会跳过
+			s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+		}
+
+		totalChecked = len(processedBVIDs)
+
+		if totalChecked >= total || len(videos) < pageSize {
+			break
+		}
+
+		page++
+		time.Sleep(time.Duration(1500+rand.Intn(1000)) * time.Millisecond)
 	}
 
-	log.Printf("[full-scan] %s: 扫描完成，动态 API 返回 %d 条，去重后 %d 条", uploaderName, len(videos), len(processedBVIDs))
+	log.Printf("[full-scan] %s: 扫描完成，共检查 %d 个视频，翻页 %d", uploaderName, totalChecked, page)
 }
 
 const upInfoCacheTTL = 6 * time.Hour
