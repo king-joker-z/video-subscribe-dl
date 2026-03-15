@@ -3,13 +3,14 @@ import { api } from '../api.js';
 import { cn, formatBytes, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
-export function VideosPage() {
+export function VideosPage({ params = {} } = {}) {
   const [videos, setVideos] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [uploader, setUploader] = useState(params.uploader || '');
   const [sort, setSort] = useState('created_desc');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
@@ -20,15 +21,20 @@ export function VideosPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getVideos({ page, page_size: pageSize, status, search, sort });
+      const res = await api.getVideos({ page, page_size: pageSize, status, search, sort, uploader });
       const d = res.data || {};
       setVideos(d.items || []);
       setTotal(d.total || 0);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, [page, pageSize, status, search, sort]);
+  }, [page, pageSize, status, search, sort, uploader]);
 
   useEffect(() => { load(); }, [load]);
+
+  // 从 URL 参数同步 uploader
+  useEffect(() => {
+    if (params.uploader !== undefined) setUploader(params.uploader || '');
+  }, [params.uploader]);
 
   // SSE 进度
   useEffect(() => {
@@ -94,14 +100,18 @@ export function VideosPage() {
           className: 'bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-64'
         })
       ),
-      h('div', { className: 'flex gap-1' },
+      h('div', { className: 'flex gap-1 flex-wrap' },
         statusFilters.map(f =>
           h('button', {
             key: f.value,
             onClick: () => { setStatus(f.value); setPage(1); },
             className: cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors', status === f.value ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-slate-300')
           }, f.label)
-        )
+        ),
+        uploader && h('button', {
+          onClick: () => { setUploader(''); setPage(1); location.hash = '#/videos'; },
+          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/20 text-purple-400 flex items-center gap-1'
+        }, 'UP主: ' + uploader, ' ', h(Icon, { name: 'x', size: 12 }))
       ),
       h('select', {
         value: sort,

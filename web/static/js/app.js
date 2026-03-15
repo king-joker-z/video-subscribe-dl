@@ -101,7 +101,8 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
 function App() {
   const [page, setPage] = useState(() => {
     const hash = location.hash.slice(2) || 'dashboard';
-    return hash.split('/')[0] || 'dashboard';
+    const qIdx = hash.indexOf('?');
+    return ((qIdx === -1 ? hash : hash.slice(0, qIdx)).split('/')[0]) || 'dashboard';
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
@@ -110,11 +111,23 @@ function App() {
   useEffect(() => {
     const handler = () => {
       const hash = location.hash.slice(2) || 'dashboard';
-      setPage(hash.split('/')[0] || 'dashboard');
+      const qIdx = hash.indexOf('?');
+      setPage((qIdx === -1 ? hash : hash.slice(0, qIdx)).split('/')[0] || 'dashboard');
+      setHashParams(qIdx === -1 ? {} : Object.fromEntries(new URLSearchParams(hash.slice(qIdx + 1))));
     };
     window.addEventListener('hashchange', handler);
     return () => window.removeEventListener('hashchange', handler);
   }, []);
+
+  // URL 参数解析
+  const getHashParams = () => {
+    const hash = location.hash.slice(2) || '';
+    const qIdx = hash.indexOf('?');
+    if (qIdx === -1) return {};
+    return Object.fromEntries(new URLSearchParams(hash.slice(qIdx + 1)));
+  };
+
+  const [hashParams, setHashParams] = useState(getHashParams);
 
   const navigate = useCallback((target, params) => {
     let hash = '#/' + target;
@@ -128,7 +141,7 @@ function App() {
     switch (page) {
       case 'dashboard': return h(DashboardPage);
       case 'sources': return h(SourcesPage, { onNavigate: navigate });
-      case 'videos': return h(VideosPage);
+      case 'videos': return h(VideosPage, { params: hashParams });
       case 'uploaders': return h(UploadersPage, { onNavigate: navigate });
       case 'settings': return h(SettingsPage);
       case 'logs': return h(LogsPage);
