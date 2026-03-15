@@ -64,6 +64,20 @@ func (s *Scheduler) getBili() *bilibili.Client {
 	return s.bili
 }
 
+// resetCaches 清除 WBI 签名缓存，在 cookie 更新/风控恢复等场景下调用
+func (s *Scheduler) resetCaches() {
+	bilibili.ClearWbiCache()
+}
+
+// applyNewClient 创建新的 bilibili client 并同步更新 scheduler 和 downloader
+func (s *Scheduler) applyNewClient(client *bilibili.Client) {
+	s.biliMu.Lock()
+	s.bili = client
+	s.biliMu.Unlock()
+	s.dl.UpdateClient(client)
+	s.resetCaches()
+}
+
 func (s *Scheduler) Start() {
 	// 初始化 cookiePath 缓存
 	if s.cookiePath == "" {
@@ -195,11 +209,7 @@ func (s *Scheduler) CheckOneSource(sourceID int64) {
 func (s *Scheduler) UpdateCookie(cookiePath string) {
 	s.cookiePath = cookiePath // 同步更新缓存
 	cookie := bilibili.ReadCookieFile(cookiePath)
-	s.biliMu.Lock()
-	s.bili = bilibili.NewClient(cookie)
-	client := s.bili
-	s.biliMu.Unlock()
-	s.dl.UpdateClient(client)
+	s.applyNewClient(bilibili.NewClient(cookie))
 }
 
 func (s *Scheduler) checkAll() {
@@ -388,7 +398,8 @@ func (s *Scheduler) tryCookieRefresh(trigger string) {
 
 	if refreshResult.Success {
 		log.Printf("[INFO] Cookie 自动刷新成功 (trigger: %s)", trigger)
-		// 刷新下载器的 client
+		// 刷新下载器的 client 并清除缓存
+		s.resetCaches()
 		s.dl.UpdateClient(s.getBili())
 	} else {
 		log.Printf("[WARN] Cookie 刷新失败: %s (trigger: %s). 请手动更新 Cookie。", refreshResult.Message, trigger)

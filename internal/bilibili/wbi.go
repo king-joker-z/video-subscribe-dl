@@ -175,3 +175,12 @@ func (c *Client) getWbi(baseURL string, params url.Values, result interface{}) e
 	// get() 内部已包含风控检测（-352/-401/-412 → ErrRateLimited）
 	return c.get(baseURL+"?"+signed.Encode(), result)
 }
+
+// ClearWbiCache 清除 WBI 签名密钥缓存，强制下次请求重新获取
+func ClearWbiCache() {
+	wbiCacheInstance.mu.Lock()
+	defer wbiCacheInstance.mu.Unlock()
+	wbiCacheInstance.imgKey = ""
+	wbiCacheInstance.subKey = ""
+	wbiCacheInstance.fetchedAt = time.Time{}
+}
