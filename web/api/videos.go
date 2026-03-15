@@ -179,14 +179,9 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// 删除旧文件及关联文件
+	// 删除旧文件所在的整个视频目录（包含 NFO、封面、弹幕等）
 	if dl.FilePath != "" {
-		if _, err := os.Stat(dl.FilePath); err == nil {
-			os.Remove(dl.FilePath)
-			log.Printf("[video] Removed old file for redownload: %s", dl.FilePath)
-		}
-		util.RemoveAssociatedFiles(dl.FilePath)
-		util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+		util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 	}
 
 	// 重置状态为 pending
@@ -209,16 +204,33 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, _ := h.db.GetDownload(id)
 	if dl != nil && dl.FilePath != "" {
-		if _, err := os.Stat(dl.FilePath); err == nil {
-			os.Remove(dl.FilePath)
-			log.Printf("[video] Removed file: %s", dl.FilePath)
-		}
-		util.RemoveAssociatedFiles(dl.FilePath)
-		util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+		util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 	}
 	h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
 	log.Printf("[video] Deleted record %d", id)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
+}
+
+// POST /api/videos/:id/delete-files — 只删除本地文件，不改数据库状态
+func (h *VideosHandler) HandleDeleteFiles(w http.ResponseWriter, r *http.Request, id int64) {
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+
+	if dl.FilePath == "" {
+		apiError(w, CodeInvalidParam, "没有关联的本地文件")
+		return
+	}
+
+	util.RemoveVideoDir(dl.FilePath, h.downloadDir)
+
+	// 清空文件路径和大小，但不改状态
+	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+
+	log.Printf("[video] Deleted files for %d (%s): %s", id, dl.Title, dl.FilePath)
+	apiOK(w, map[string]interface{}{"id": id, "message": "本地文件已删除"})
 }
 
 // POST /api/videos/batch — 批量操作
@@ -228,7 +240,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string  `json:"action"` // retry | cancel | delete | redownload
+		Action string  `json:"action"` // retry | cancel | delete | redownload | delete_files
 		IDs    []int64 `json:"ids"`
 	}
 	if err := parseJSON(r, &req); err != nil {
@@ -256,11 +268,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && (dl.Status == "completed" || dl.Status == "relocated") {
 				if dl.FilePath != "" {
-					if _, err := os.Stat(dl.FilePath); err == nil {
-						os.Remove(dl.FilePath)
-					}
-					util.RemoveAssociatedFiles(dl.FilePath)
-					util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+					util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 				}
 				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 				h.db.ResetRetryCount(id)
@@ -273,14 +281,17 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 		case "delete":
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
-				if _, err := os.Stat(dl.FilePath); err == nil {
-					os.Remove(dl.FilePath)
-				}
-				util.RemoveAssociatedFiles(dl.FilePath)
-				util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 			}
 			h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
 			affected++
+		case "delete_files":
+			dl, _ := h.db.GetDownload(id)
+			if dl != nil && dl.FilePath != "" {
+				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
+				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+				affected++
+			}
 		default:
 			apiError(w, CodeInvalidParam, "未知操作: "+req.Action)
 			return
@@ -332,6 +343,18 @@ func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.HandleRedownload(w, r, id)
+		return
+	}
+
+	// /api/videos/:id/delete-files
+	if strings.HasSuffix(path, "/delete-files") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/delete-files")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleDeleteFiles(w, r, id)
 		return
 	}
 

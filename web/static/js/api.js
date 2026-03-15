@@ -39,6 +39,7 @@ export const api = {
   redownloadVideo: (id) => request(`/api/videos/${id}/redownload`, { method: 'POST' }),
   cancelVideo: (id) => request(`/api/videos/${id}/cancel`, { method: 'POST' }),
   deleteVideo: (id) => request(`/api/videos/${id}`, { method: 'DELETE' }),
+  deleteVideoFiles: (id) => request(`/api/videos/${id}/delete-files`, { method: 'POST' }),
   detectCharge: () => request('/api/videos/detect-charge', { method: 'POST' }),
   batchVideos: (action, ids) => request('/api/videos/batch', {
     method: 'POST', body: JSON.stringify({ action, ids })

@@ -128,9 +128,13 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 		premiered = time.Unix(allArchives[0].PubDate, 0).Format("2006-01-02")
 	}
 	if !src.SkipNFO {
+		uploaderFace := ""
+		if upInfo != nil {
+			uploaderFace = upInfo.Face
+		}
 		nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
 			Title: meta.Title, Plot: meta.Intro, UploaderName: uploaderName,
-			UploaderFace: upInfo.Face, Premiered: premiered, Poster: meta.Cover,
+			UploaderFace: uploaderFace, Premiered: premiered, Poster: meta.Cover,
 		}, collectionDir)
 	}
 
@@ -429,11 +433,19 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 
 	// 优先使用订阅源的 UP 主名字，保持同一订阅源下 uploader 一致
 	// detail.Owner.Name 可能是视频原作者（转载/合作视频时不同）
-	uploaderName := upInfo.Name
-	if uploaderName == "" {
+	// nil guard: detail 和 upInfo 可能在 API 异常时为 nil
+	uploaderName := ""
+	if upInfo != nil {
+		uploaderName = upInfo.Name
+	}
+	if uploaderName == "" && detail != nil {
 		uploaderName = detail.Owner.Name
 	}
-	s.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Pic, detail.Duration)
+	if detail != nil {
+		s.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Pic, detail.Duration)
+	} else {
+		s.db.UpdateDownloadMeta(dlID, uploaderName, "", "", 0)
+	}
 
 	// 从 videoID 中提取真实 BV 号（多P格式为 BVxxx_P2）
 	actualBvID := videoID
@@ -445,12 +457,23 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 	tags, _ := s.getBili().GetVideoTags(actualBvID)
 
 	// 生成 NFO (受 SkipOption 控制)
-	if skipNFO {
-		log.Printf("  NFO skipped (skip_nfo=true)")
+	if skipNFO || detail == nil {
+		if detail == nil {
+			log.Printf("  NFO skipped (detail is nil)")
+		} else {
+			log.Printf("  NFO skipped (skip_nfo=true)")
+		}
 	} else {
+	uploaderFace := ""
+	if upInfo != nil {
+		uploaderFace = upInfo.Face
+	}
+	if uploaderFace == "" {
+		uploaderFace = detail.Owner.Face
+	}
 	meta := &nfo.VideoMeta{
 		BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
-		UploaderName: uploaderName, UploaderFace: detail.Owner.Face,
+		UploaderName: uploaderName, UploaderFace: uploaderFace,
 		UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,
 		Tags: tags, ViewCount: detail.Stat.View, LikeCount: detail.Stat.Like,
 		Thumbnail:  detail.Pic,
@@ -462,11 +485,15 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 	} // end skipNFO
 
 	// 下载封面图并记录路径 (受 SkipOption 控制)
-	if !skipPoster && detail.Pic != "" && result.FilePath != "" {
+	detailPic := ""
+	if detail != nil {
+		detailPic = detail.Pic
+	}
+	if !skipPoster && detailPic != "" && result.FilePath != "" {
 		ext := filepath.Ext(result.FilePath)
 		thumbPath := strings.TrimSuffix(result.FilePath, ext) + "-thumb.jpg"
 		if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-			if err := bilibili.DownloadFile(detail.Pic, thumbPath); err != nil {
+			if err := bilibili.DownloadFile(detailPic, thumbPath); err != nil {
 				log.Printf("Thumbnail download failed for %s: %v", videoID, err)
 			} else {
 				s.db.UpdateThumbPath(dlID, thumbPath)
@@ -478,6 +505,10 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		}
 	}
 
+	detailTitle := videoID
+	if detail != nil {
+		detailTitle = detail.Title
+	}
 	log.Printf("Completed: %s -> %s", videoID, result.FilePath)
-	s.notifier.Send(notify.EventDownloadComplete, "下载完成: "+detail.Title, result.FilePath)
+	s.notifier.Send(notify.EventDownloadComplete, "下载完成: "+detailTitle, result.FilePath)
 }

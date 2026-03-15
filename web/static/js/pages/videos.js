@@ -58,9 +58,10 @@ export function VideosPage({ params = {} } = {}) {
     if (selected.size === 0) return;
     if (action === 'redownload' && !confirm('将删除旧文件并重新下载，确认？')) return;
     if (action === 'delete' && !confirm('确定批量删除？')) return;
+    if (action === 'delete_files' && !confirm('将删除选中视频的本地文件（不删数据库记录），确认？')) return;
     try {
       await api.batchVideos(action, Array.from(selected));
-      const labels = { retry: '重试', cancel: '取消', delete: '删除', redownload: '重新下载' };
+      const labels = { retry: '重试', cancel: '取消', delete: '删除', redownload: '重新下载', delete_files: '删除文件' };
       toast.success(`批量${labels[action] || action}成功`);
       setSelected(new Set()); load();
     } catch (e) { toast.error(e.message); }
@@ -145,6 +146,7 @@ export function VideosPage({ params = {} } = {}) {
       h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm' }, '重试'),
       h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm' }, '重新下载'),
       h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm' }, '取消'),
+      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm' }, '删除文件'),
       h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm' }, '删除'),
       h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto' }, '清除选择')
     ),
@@ -198,6 +200,10 @@ export function VideosPage({ params = {} } = {}) {
                             onClick: async () => { if (confirm('将删除旧文件并重新下载，确认？')) { try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } } },
                             className: 'p-1.5 rounded hover:bg-blue-900/50 text-slate-400 hover:text-blue-400', title: '重新下载'
                           }, h(Icon, { name: 'refresh', size: 14 })),
+                          (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0 && h('button', {
+                            onClick: async () => { if (confirm('删除本地文件（保留记录）？')) { try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-orange-900/50 text-slate-400 hover:text-orange-400', title: '删除文件'
+                          }, h(Icon, { name: 'file-x', size: 14 })),
                           h('button', {
                             onClick: async () => { if (confirm('确定删除？')) { try { await api.deleteVideo(v.id); toast.success('已删除'); load(); } catch (e) { toast.error(e.message); } } },
                             className: 'p-1.5 rounded hover:bg-red-900/50 text-slate-400 hover:text-red-400', title: '删除'

@@ -85,3 +85,33 @@ func RemoveEmptyDirs(dir, boundary string, maxLevels int) {
 		dir = filepath.Dir(dir) // 向上一级
 	}
 }
+
+// RemoveVideoDir 删除视频文件所在的父目录（整个视频文件夹）
+// 视频通常存储在 downloadDir/UP主/视频标题 [BVxxx]/ 目录中
+// 此函数删除 [BVxxx] 目录及其所有内容（NFO、封面、弹幕、字幕等）
+// 然后清理空的上级目录（UP主目录等）
+func RemoveVideoDir(filePath, boundary string) {
+	if filePath == "" {
+		return
+	}
+	videoDir := filepath.Dir(filePath)
+	absVideoDir, _ := filepath.Abs(videoDir)
+	absBoundary, _ := filepath.Abs(boundary)
+
+	// 安全检查：不能删除 boundary 本身或 boundary 外的目录
+	if absVideoDir == absBoundary || !strings.HasPrefix(absVideoDir, absBoundary+string(filepath.Separator)) {
+		// filePath 直接在 boundary 根下，只删文件本身
+		os.Remove(filePath)
+		return
+	}
+
+	// 删除整个视频目录
+	if err := os.RemoveAll(videoDir); err != nil {
+		log.Printf("[cleanup] Failed to remove video dir %s: %v", videoDir, err)
+	} else {
+		log.Printf("[cleanup] Removed video dir: %s", videoDir)
+	}
+
+	// 向上清理空目录（UP主目录、合集目录等）
+	RemoveEmptyDirs(filepath.Dir(videoDir), boundary, 3)
+}
