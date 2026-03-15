@@ -30,6 +30,7 @@ function EditModal({ source, onSave, onClose }) {
     download_filter: source.download_filter || '',
     download_codec: source.download_codec || 'all',
     download_danmaku: source.download_danmaku || false,
+    download_subtitle: source.download_subtitle || false,
     skip_nfo: source.skip_nfo || false,
     skip_poster: source.skip_poster || false,
     use_dynamic_api: source.use_dynamic_api || false,
@@ -163,7 +164,9 @@ function EditModal({ source, onSave, onClose }) {
       h('div', { className: 'grid grid-cols-3 gap-3' },
         h('div', { className: 'flex items-center gap-2' },
           h('input', { type: 'checkbox', checked: form.download_danmaku, onChange: (e) => update('download_danmaku', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
-          h('label', { className: 'text-sm text-slate-400' }, '下载弹幕')
+          h('label', { className: 'text-sm text-slate-400' }, '下载弹幕'),
+          h('input', { type: 'checkbox', checked: form.download_subtitle, onChange: (e) => update('download_subtitle', e.target.checked), className: 'rounded bg-slate-700 border-slate-600 ml-4' }),
+          h('label', { className: 'text-sm text-slate-400' }, '下载字幕')
         ),
         h('div', { className: 'flex items-center gap-2' },
           h('input', { type: 'checkbox', checked: form.skip_nfo, onChange: (e) => update('skip_nfo', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),

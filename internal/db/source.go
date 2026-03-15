@@ -6,7 +6,7 @@ func (d *DB) CreateSource(s *Source) (int64, error) {
 	}
 	result, err := d.Exec(`
 		INSERT INTO sources (type, url, name, cookies_file, check_interval, download_quality, download_codec, download_danmaku, download_subtitle, enabled, filter_rules)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval, s.DownloadQuality, s.DownloadCodec, s.DownloadDanmaku, s.DownloadSubtitle, s.Enabled, s.FilterRules)
 	if err != nil {
 		return 0, err
@@ -31,15 +31,16 @@ func (d *DB) GetSources() ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
+		var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
+			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
 			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
+		s.DownloadSubtitle = subtitle == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
 		s.UseDynamicAPI = useDynamic == 1
@@ -68,15 +69,16 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
+		var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
+			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
 			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
+		s.DownloadSubtitle = subtitle == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
 		s.UseDynamicAPI = useDynamic == 1
@@ -90,7 +92,7 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 
 func (d *DB) GetSource(id int64) (*Source, error) {
 	var s Source
-	var enabled, danmaku, skipNFO, skipPoster, useDynamic int
+	var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
 	err := d.QueryRow(`
 		SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
@@ -99,7 +101,7 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 		FROM sources WHERE id = ?
 	`, id).Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
+		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
 		&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
 		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules)
 	if err != nil {
@@ -107,6 +109,7 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 	}
 	s.Enabled = enabled == 1
 	s.DownloadDanmaku = danmaku == 1
+	s.DownloadSubtitle = subtitle == 1
 	s.SkipNFO = skipNFO == 1
 	s.SkipPoster = skipPoster == 1
 	s.UseDynamicAPI = useDynamic == 1
@@ -130,6 +133,10 @@ func (d *DB) UpdateSource(s *Source) error {
 	if s.SkipPoster {
 		skipPoster = 1
 	}
+	subtitle := 0
+	if s.DownloadSubtitle {
+		subtitle = 1
+	}
 	useDynamic := 0
 	if s.UseDynamicAPI {
 		useDynamic = 1
@@ -141,7 +148,7 @@ func (d *DB) UpdateSource(s *Source) error {
 		use_dynamic_api=?, filter_rules=?, updated_at=CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval,
-		s.DownloadQuality, s.DownloadCodec, danmaku, enabled,
+		s.DownloadQuality, s.DownloadCodec, danmaku, subtitle, enabled,
 		s.DownloadFilter, s.DownloadQualityMin, skipNFO, skipPoster, useDynamic, s.FilterRules, s.ID)
 	return err
 }

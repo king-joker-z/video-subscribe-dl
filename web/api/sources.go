@@ -283,6 +283,14 @@ func (h *SourcesHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id
 			existing.DownloadDanmaku = val != 0
 		}
 	}
+	if v, ok := body["download_subtitle"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.DownloadSubtitle = val
+		case float64:
+			existing.DownloadSubtitle = val != 0
+		}
+	}
 	if v, ok := body["download_filter"]; ok {
 		if s, ok := v.(string); ok {
 			existing.DownloadFilter = s
