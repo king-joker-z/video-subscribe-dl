@@ -232,10 +232,12 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 		QualityMin:  src.DownloadQualityMin,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
-		Flat:        true,
-		CookiesFile: cookiesFile,
-		ResultCh:    resultCh,
-		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		Flat:             true,
+		UploaderName:     uploaderName,
+		FilenameTemplate: s.getFilenameTemplate(),
+		CookiesFile:      cookiesFile,
+		ResultCh:         resultCh,
+		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
 		log.Printf("[scheduler] Queue full for %s, keeping pending for next sync", videoID)
 		close(resultCh)
@@ -285,9 +287,11 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 		QualityMin:  src.DownloadQualityMin,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
-		CookiesFile: cookiesFile,
-		ResultCh:    resultCh,
-		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		UploaderName:     uploaderName,
+		FilenameTemplate: s.getFilenameTemplate(),
+		CookiesFile:      cookiesFile,
+		ResultCh:         resultCh,
+		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
 		// 队列满时保持 pending，下次同步会重新提交
 		log.Printf("[scheduler] Queue full for %s, keeping pending for next sync", videoID)

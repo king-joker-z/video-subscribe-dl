@@ -128,10 +128,12 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		Danmaku:     src.DownloadDanmaku,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
-		Flat:        flat,
-		CookiesFile: cookiesFile,
-		ResultCh:    resultCh,
-		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		Flat:             flat,
+		UploaderName:     dl.Uploader,
+		FilenameTemplate: s.getFilenameTemplate(),
+		CookiesFile:      cookiesFile,
+		ResultCh:         resultCh,
+		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	})
 
 	log.Printf("[retry-scheduler] Resubmitted %s (retry #%d)", dl.VideoID, dl.RetryCount+1)

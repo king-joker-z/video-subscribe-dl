@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	appconfig "video-subscribe-dl/internal/config"
+
 	"video-subscribe-dl/internal/db"
 )
 
@@ -127,4 +129,34 @@ func (h *SettingsHandler) HandleTokenLogin(w http.ResponseWriter, r *http.Reques
 	})
 
 	apiOK(w, map[string]string{"message": "登录成功"})
+}
+
+// POST /api/settings/preview-template — 预览文件名模板
+func (h *SettingsHandler) HandlePreviewTemplate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		apiError(w, CodeMethodNotAllow, "method not allowed")
+		return
+	}
+	var req struct {
+		Template string `json:"template"`
+	}
+	if err := parseJSON(r, &req); err != nil {
+		apiError(w, CodeInvalidParam, "参数错误")
+		return
+	}
+
+	vars := appconfig.FilenameVars{
+		Title:        "原神角色演示",
+		BvID:         "BV1xx411c7mD",
+		UploaderName: "测试UP主",
+		Quality:      "1080P",
+		Codec:        "hevc",
+		Duration:     300,
+		PartIndex:    1,
+		PartTitle:    "第一集",
+		PubDate:      "2024-01-15",
+	}
+
+	result := appconfig.RenderFilename(req.Template, vars)
+	apiOK(w, map[string]string{"preview": result})
 }

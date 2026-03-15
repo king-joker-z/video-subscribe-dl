@@ -510,3 +510,17 @@ func (s *Scheduler) ReloadConfig() {
 func (s *Scheduler) GetHotConfig() config.HotConfigSnapshot {
 	return s.hotConfig.Get()
 }
+
+// getFilenameTemplate 获取文件名模板（从热配置或 DB）
+func (s *Scheduler) getFilenameTemplate() string {
+	if s.hotConfig != nil {
+		snap := s.hotConfig.Get()
+		if snap.FilenameTemplate != "" {
+			return snap.FilenameTemplate
+		}
+	}
+	if tmpl, err := s.db.GetSetting("filename_template"); err == nil && tmpl != "" {
+		return tmpl
+	}
+	return config.DefaultFilenameTemplate
+}

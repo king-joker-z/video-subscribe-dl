@@ -443,3 +443,31 @@ func SanitizeFilename(name string) string {
 	}
 	return name
 }
+
+// QualityName 返回画质 ID 对应的名称
+func QualityName(qn int) string {
+	switch qn {
+	case 16:
+		return "360P"
+	case 32:
+		return "480P"
+	case 64:
+		return "720P"
+	case 80:
+		return "1080P"
+	case 112:
+		return "1080P+"
+	case 116:
+		return "1080P60"
+	case 120:
+		return "4K"
+	case 125:
+		return "HDR"
+	case 126:
+		return "DolbyVision"
+	case 127:
+		return "8K"
+	default:
+		return fmt.Sprintf("%d", qn)
+	}
+}

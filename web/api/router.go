@@ -125,6 +125,8 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		}
 	})
 
+	mux.HandleFunc("/api/settings/preview-template", rt.settings.HandlePreviewTemplate)
+
 	// Credential & Login
 	mux.HandleFunc("/api/credential", rt.credential.HandleStatus)
 	mux.HandleFunc("/api/credential/refresh", rt.credential.HandleRefresh)

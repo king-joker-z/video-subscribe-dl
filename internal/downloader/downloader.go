@@ -75,8 +75,13 @@ type Job struct {
 	Flat        bool   // Flat 模式: 直接用 OutputDir 输出，不创建子目录
 	Subtitle    bool   // 是否下载字幕
 	SkipNFO     bool   // 跳过 NFO 生成
-	SkipPoster  bool   // 跳过封面下载
-	CookiesFile string
+	SkipPoster       bool   // 跳过封面下载
+	UploaderName     string // UP 主名称（用于文件名模板）
+	PubDate          string // 发布日期（YYYY-MM-DD，用于文件名模板）
+	PartIndex        int    // 分P 索引
+	PartTitle        string // 分P 标题
+	FilenameTemplate string // 文件名模板（空则使用默认）
+	CookiesFile      string
 	ResultCh    chan *Result
 	OnStart     func() // 开始下载时回调（用于更新 DB 状态）
 }
@@ -433,7 +438,18 @@ func (d *Downloader) download(job *Job) *Result {
 		videoDir = job.OutputDir
 		safeName = bilibili.SanitizeFilename(job.Title)
 	} else {
-		safeName = bilibili.SanitizeFilename(job.Title) + " [" + job.BvID + "]"
+		// 使用文件名模板生成目录名
+		vars := appconfig.FilenameVars{
+			Title:        job.Title,
+			BvID:         job.BvID,
+			UploaderName: job.UploaderName,
+			Quality:      bilibili.QualityName(bestVideo.ID),
+			Codec:        bestVideo.Codecs,
+			PartIndex:    job.PartIndex,
+			PartTitle:    job.PartTitle,
+			PubDate:      job.PubDate,
+		}
+		safeName = appconfig.RenderFilename(job.FilenameTemplate, vars)
 		videoDir = filepath.Join(job.OutputDir, safeName)
 	}
 	os.MkdirAll(videoDir, 0755)
