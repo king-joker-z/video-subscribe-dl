@@ -20,6 +20,7 @@ type Router struct {
 	credential *CredentialHandler
 	events     *EventsHandler
 	me         *MeHandler
+	onSyncAll  func()
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {

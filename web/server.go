@@ -73,6 +73,7 @@ type Server struct {
 	onSyncSource       func(int64)
 	onFullScanSource   func(int64)
 	onProcessPending   func()
+	onSyncAll          func()
 	onRedownload       func(int64)
 	getBiliClient      func() *bilibili.Client
 	onConfigReload     func()

@@ -35,9 +35,6 @@ func (c *Credential) IsEmpty() bool {
 
 // ToCookieString 转换为 Cookie 字符串（用于 HTTP 请求头）
 func (c *Credential) getUA() string {
-	if c.UA != "" {
-		return c.UA
-	}
 	return randUA()
 }
 
@@ -392,7 +389,7 @@ func GetBuvid3(httpClient *http.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", c.getUA())
+	req.Header.Set("User-Agent", randUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 
 	resp, err := httpClient.Do(req)
