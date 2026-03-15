@@ -79,6 +79,7 @@ func (s *Scheduler) checkUP(src db.Source) {
 	processedBVIDs := map[string]bool{}
 	totalFetched := 0
 	totalNew := 0
+	firstScanPendingCreated := 0
 	var maxCreated int64
 	stopped := false
 
@@ -101,7 +102,7 @@ func (s *Scheduler) checkUP(src db.Source) {
 		}
 		if page == 1 {
 			if isFirstScan {
-				log.Printf("[首次全量] %s: 共 %d 个视频", uploaderName, total)
+				log.Printf("[首次全量] %s: 共 %d 个视频（懒加载模式：先建记录后补详情）", uploaderName, total)
 			} else {
 				log.Printf("[增量] %s: 共 %d 个视频，增量检查中...", uploaderName, total)
 			}
@@ -133,7 +134,32 @@ func (s *Scheduler) checkUP(src db.Source) {
 				continue
 			}
 			processedBVIDs[v.BvID] = true
-			s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+
+			if isFirstScan {
+				// 首次扫描：只创建 pending 记录，不调 GetVideoDetail（避免风控）
+				// 详情在 retryOneDownload/ProcessAllPending 处理时按需获取
+				exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+				if !exists {
+					dl := &db.Download{
+						SourceID:  src.ID,
+						VideoID:   v.BvID,
+						Title:     v.Title,
+						Uploader:  uploaderName,
+						Thumbnail: v.Pic,
+						Status:    "pending",
+					}
+					if _, err := s.db.CreateDownload(dl); err != nil {
+						log.Printf("[首次全量] 创建 pending 记录失败 %s: %v", v.BvID, err)
+					} else {
+						firstScanPendingCreated++
+					}
+				}
+			} else {
+				// 增量扫描：保持现有 processOneVideo 逻辑，但加请求间隔降低风控风险
+				s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+				// 增量通常只有几个新视频，1-2s 延迟不影响体验
+				time.Sleep(time.Duration(1000+rand.Intn(1000)) * time.Millisecond)
+			}
 		}
 
 		totalFetched += len(videos)
@@ -153,7 +179,8 @@ func (s *Scheduler) checkUP(src db.Source) {
 		}
 
 		page++
-		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
+		// 翻页间隔统一为 1.5-2.5s（与 fullScanUP 一致，降低风控风险）
+		time.Sleep(time.Duration(1500+rand.Intn(1000)) * time.Millisecond)
 	}
 
 	// 更新 latest_video_at
@@ -164,8 +191,12 @@ func (s *Scheduler) checkUP(src db.Source) {
 	}
 
 	if isFirstScan {
-		log.Printf("[首次全量] %s: 获取 %d 个新视频 (共检查 %d, 翻页 %d)",
-			uploaderName, totalNew, totalFetched, page)
+		log.Printf("[首次全量] %s: 获取 %d 个新视频，创建 %d 个 pending 记录 (共检查 %d, 翻页 %d)",
+			uploaderName, totalNew, firstScanPendingCreated, totalFetched, page)
+		// 首次扫描完成后触发 pending 处理（懒加载：下载时再获取详情）
+		if firstScanPendingCreated > 0 {
+			go s.ProcessAllPending()
+		}
 	} else if stopped {
 		log.Printf("[增量] %s: 获取 %d 个新视频 (共检查 %d, 在第 %d 页停止)",
 			uploaderName, totalNew, totalFetched, page)
@@ -180,7 +211,7 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 	upInfo *bilibili.UPInfo, uploaderName, uploaderDir string, latestVideoAt int64, isFirstScan bool, firstScanPages int) {
 
 	if isFirstScan {
-		log.Printf("[动态API·首次全量] %s (mid=%d): 开始全量扫描", uploaderName, mid)
+		log.Printf("[动态API·首次全量] %s (mid=%d): 开始全量扫描（懒加载模式）", uploaderName, mid)
 	} else {
 		log.Printf("[动态API·增量] %s (mid=%d): 基准时间 %s",
 			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
@@ -199,6 +230,7 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 
 	processedBVIDs := map[string]bool{}
 	totalNew := 0
+	firstScanPendingCreated := 0
 	var maxCreated int64
 
 	// 首次扫描数量限制（每页约 12 条，用 firstScanPages * 12 近似）
@@ -224,7 +256,29 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 			break
 		}
 
-		s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
+		if isFirstScan {
+			// 首次扫描：只创建 pending 记录，不调 GetVideoDetail（避免风控）
+			exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+			if !exists {
+				dl := &db.Download{
+					SourceID:  src.ID,
+					VideoID:   v.BvID,
+					Title:     v.Title,
+					Uploader:  uploaderName,
+					Thumbnail: v.Cover,
+					Status:    "pending",
+				}
+				if _, err := s.db.CreateDownload(dl); err != nil {
+					log.Printf("[动态API·首次全量] 创建 pending 记录失败 %s: %v", v.BvID, err)
+				} else {
+					firstScanPendingCreated++
+				}
+			}
+		} else {
+			// 增量扫描：保持现有逻辑，加请求间隔
+			s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
+			time.Sleep(time.Duration(1000+rand.Intn(1000)) * time.Millisecond)
+		}
 	}
 
 	// 更新 latest_video_at
@@ -234,7 +288,15 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 		}
 	}
 
-	log.Printf("[动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
+	if isFirstScan {
+		log.Printf("[动态API] %s: 获取 %d 个新视频，创建 %d 个 pending 记录 (共返回 %d)",
+			uploaderName, totalNew, firstScanPendingCreated, len(videos))
+		if firstScanPendingCreated > 0 {
+			go s.ProcessAllPending()
+		}
+	} else {
+		log.Printf("[动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
+	}
 }
 
 // FullScanSource 全量补漏扫描指定 source（忽略增量基准，扫描所有视频，跳过已下载的）

@@ -133,3 +133,12 @@
 - [x] source_id=0 标识快速下载记录，与订阅源记录区分
 - [x] 7 个单元测试覆盖 ExtractBVID 各种输入场景
 - [x] go build + go vet + go test 全量通过
+
+## 迭代 #17 (v2.6.1) — 首次扫描风控优化
+- [x] checkUP 首次扫描改为"懒加载"模式：只创建 pending 记录，不调 GetVideoDetail
+- [x] checkUPDynamic 首次扫描同步改为懒加载模式
+- [x] 增量扫描在 processOneVideo 调用间加 1-2s 随机延迟
+- [x] 翻页间隔从 500-1000ms 提高到 1500-2500ms（与 fullScanUP 一致）
+- [x] 首次扫描完成后自动触发 ProcessAllPending（下载时按需获取详情）
+- [x] 参考 bili-sync 的两阶段策略：扫描阶段只拉列表，处理阶段再补详情
+- [x] go build + go vet 全量通过
