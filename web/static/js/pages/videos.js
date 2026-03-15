@@ -51,6 +51,13 @@ export function VideosPage({ params = {} } = {}) {
     return () => { if (es) es.close(); };
   }, []);
 
+  // 监听全局下载事件，自动刷新视频列表
+  useEffect(() => {
+    const handler = () => { setTimeout(load, 500); };
+    window.addEventListener('vsd:download-event', handler);
+    return () => window.removeEventListener('vsd:download-event', handler);
+  }, [load]);
+
   const handleSearch = (value) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => { setSearch(value); setPage(1); }, 300);

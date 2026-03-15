@@ -168,3 +168,16 @@
 - [x] 中间件优化：/api/stream/ 路径跳过请求日志记录
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.8.0
+
+## 迭代 #20 (v2.8.1) — SSE 下载事件实时通知
+- [x] 新增 DownloadEvent 结构体：描述下载完成/失败事件（type/bvid/title/file_size/error）
+- [x] Downloader 新增事件订阅机制：SubscribeEvents / UnsubscribeEvents / emitEvent
+- [x] 下载完成/失败时自动广播事件给所有 SSE 订阅者
+- [x] SSE 端点新增 download_event 事件类型推送
+- [x] 前端全局 SSE 监听：下载完成弹 toast（✅ + 标题 + 文件大小）
+- [x] 前端全局 SSE 监听：下载失败弹 toast（❌ + 标题 + 错误原因）
+- [x] 自定义 DOM 事件 vsd:download-event，触发页面自动刷新
+- [x] 视频列表页监听事件自动刷新列表数据
+- [x] 仪表盘页监听事件自动刷新统计数据
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.8.1

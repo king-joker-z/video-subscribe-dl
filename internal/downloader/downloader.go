@@ -42,6 +42,15 @@ type ProgressInfo struct {
 	Total      int64   `json:"total"`      // bytes
 }
 
+// DownloadEvent 描述一个下载完成/失败事件，用于 SSE 推送给前端
+type DownloadEvent struct {
+	Type     string `json:"type"`      // "completed", "failed"
+	BvID     string `json:"bvid"`
+	Title    string `json:"title"`
+	FileSize int64  `json:"file_size"` // bytes, 0 for failed
+	Error    string `json:"error"`     // 失败原因
+}
+
 type Downloader struct {
 	config         Config
 	bili           *bilibili.Client
@@ -61,6 +70,10 @@ type Downloader struct {
 	// 进度追踪
 	progressMu sync.RWMutex
 	progress   map[string]*ProgressInfo // key = bvid
+
+	// 下载事件订阅（SSE 推送）
+	eventMu     sync.RWMutex
+	eventSubs   []chan DownloadEvent
 }
 
 type Job struct {
@@ -148,6 +161,23 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 		job.OnStart()
 	}
 	result := d.downloadWithRetry(job)
+
+	// 广播下载事件给 SSE 订阅者
+	if result.Success {
+		d.emitEvent(DownloadEvent{
+			Type:     "completed",
+			BvID:     job.BvID,
+			Title:    job.Title,
+			FileSize: result.FileSize,
+		})
+	} else if result.Error != nil {
+		d.emitEvent(DownloadEvent{
+			Type:  "failed",
+			BvID:  job.BvID,
+			Title: job.Title,
+			Error: result.Error.Error(),
+		})
+	}
 	if job.ResultCh != nil {
 		job.ResultCh <- result
 	}
@@ -245,6 +275,41 @@ func (d *Downloader) GetProgress() []ProgressInfo {
 		result = append(result, *p)
 	}
 	return result
+}
+
+// SubscribeEvents 订阅下载事件（completed/failed），返回事件 channel
+func (d *Downloader) SubscribeEvents() chan DownloadEvent {
+	ch := make(chan DownloadEvent, 16)
+	d.eventMu.Lock()
+	d.eventSubs = append(d.eventSubs, ch)
+	d.eventMu.Unlock()
+	return ch
+}
+
+// UnsubscribeEvents 取消订阅下载事件
+func (d *Downloader) UnsubscribeEvents(ch chan DownloadEvent) {
+	d.eventMu.Lock()
+	defer d.eventMu.Unlock()
+	for i, sub := range d.eventSubs {
+		if sub == ch {
+			d.eventSubs = append(d.eventSubs[:i], d.eventSubs[i+1:]...)
+			close(ch)
+			return
+		}
+	}
+}
+
+// emitEvent 广播下载事件给所有订阅者
+func (d *Downloader) emitEvent(evt DownloadEvent) {
+	d.eventMu.RLock()
+	defer d.eventMu.RUnlock()
+	for _, ch := range d.eventSubs {
+		select {
+		case ch <- evt:
+		default:
+			// channel 满了就丢弃，避免阻塞下载流程
+		}
+	}
 }
 
 // setProgress 更新某个 bvid 的下载进度

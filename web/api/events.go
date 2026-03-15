@@ -66,6 +66,13 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 		defer appLogger.Unsubscribe(logCh)
 	}
 
+	// 订阅下载完成/失败事件
+	var dlEventCh chan downloader.DownloadEvent
+	if h.downloader != nil {
+		dlEventCh = h.downloader.SubscribeEvents()
+		defer h.downloader.UnsubscribeEvents(dlEventCh)
+	}
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -90,6 +97,14 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			data := logger.MarshalEntry(entry)
 			fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+			flusher.Flush()
+
+		case evt, ok := <-dlEventCh:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(evt)
+			fmt.Fprintf(w, "event: download_event\ndata: %s\n\n", data)
 			flusher.Flush()
 		}
 	}

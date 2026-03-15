@@ -28,6 +28,13 @@ export function DashboardPage() {
 
   useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [load]);
 
+  // 监听全局下载事件，立即刷新仪表盘
+  useEffect(() => {
+    const handler = () => { setTimeout(load, 500); };
+    window.addEventListener('vsd:download-event', handler);
+    return () => window.removeEventListener('vsd:download-event', handler);
+  }, [load]);
+
   // 风控冷却倒计时
   useEffect(() => {
     if (cooldownRef.current) clearInterval(cooldownRef.current);

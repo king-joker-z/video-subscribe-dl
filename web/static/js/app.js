@@ -98,6 +98,19 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
   );
 }
 
+// ==================== 工具函数 ====================
+function formatBytesCompact(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function truncate(str, max) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '…' : str;
+}
+
 // ==================== 主应用 ====================
 function App() {
   // Auth removed
@@ -110,6 +123,30 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [quickDlOpen, setQuickDlOpen] = useState(false);
+
+  // 全局 SSE 下载事件监听：下载完成/失败时弹 toast 通知
+  useEffect(() => {
+    let es;
+    try {
+      es = new EventSource('/api/events');
+      es.addEventListener('download_event', (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+          if (evt.type === 'completed') {
+            const sizeStr = evt.file_size > 0 ? ` (${formatBytesCompact(evt.file_size)})` : '';
+            toast.success(`✅ 下载完成: ${truncate(evt.title, 40)}${sizeStr}`);
+            // 触发全局刷新事件，让当前页面自动更新数据
+            window.dispatchEvent(new CustomEvent('vsd:download-event', { detail: evt }));
+          } else if (evt.type === 'failed') {
+            const errStr = evt.error ? `: ${truncate(evt.error, 60)}` : '';
+            toast.error(`❌ 下载失败: ${truncate(evt.title, 40)}${errStr}`);
+            window.dispatchEvent(new CustomEvent('vsd:download-event', { detail: evt }));
+          }
+        } catch {}
+      });
+    } catch {}
+    return () => { if (es) es.close(); };
+  }, []);
 
   // 全局快捷键 Ctrl+D 打开快速下载
   useEffect(() => {
