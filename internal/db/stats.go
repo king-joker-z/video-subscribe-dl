@@ -131,3 +131,15 @@ func (d *DB) GetStatsByUploader(limit int) ([]UploaderStat, error) {
 	}
 	return stats, nil
 }
+
+
+// GetStats24h 最近 24 小时完成的下载数量
+func (d *DB) GetStats24h() (int, error) {
+	var count int
+	err := d.QueryRow(`
+		SELECT COUNT(*) FROM downloads
+		WHERE status IN ('completed', 'relocated')
+		  AND downloaded_at >= datetime('now', '-24 hours')
+	`).Scan(&count)
+	return count, err
+}

@@ -66,6 +66,7 @@ func (rt *Router) SetConfigReloadFunc(fn func()) {
 	rt.settings.SetConfigReloadFunc(fn)
 }
 
+func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) { rt.dashboard.SetCooldownInfoFunc(fn) }
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
 func (rt *Router) SetBuildTime(t string)        { rt.task.SetBuildTime(t) }
 func (rt *Router) SetStartTime(t time.Time)     { rt.task.SetStartTime(t) }

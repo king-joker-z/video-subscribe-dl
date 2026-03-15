@@ -10,13 +10,18 @@ import (
 
 // DashboardHandler 仪表盘 API
 type DashboardHandler struct {
-	db          *db.DB
-	downloader  *downloader.Downloader
-	downloadDir string
+	db               *db.DB
+	downloader       *downloader.Downloader
+	downloadDir      string
+	getCooldownInfo  func() (bool, int) // 返回 (inCooldown, remainingSec)
 }
 
 func NewDashboardHandler(database *db.DB, dl *downloader.Downloader, downloadDir string) *DashboardHandler {
 	return &DashboardHandler{db: database, downloader: dl, downloadDir: downloadDir}
+}
+
+func (h *DashboardHandler) SetCooldownInfoFunc(fn func() (bool, int)) {
+	h.getCooldownInfo = fn
 }
 
 // GET /api/dashboard
@@ -72,6 +77,20 @@ func (h *DashboardHandler) HandleDashboard(w http.ResponseWriter, r *http.Reques
 			recent[i].ThumbPath = ""
 		}
 		result["recent_downloads"] = recent
+	}
+
+	// 最近 24 小时下载数
+	if count24h, err := h.db.GetStats24h(); err == nil {
+		result["downloads_24h"] = count24h
+	}
+
+	// 风控冷却状态
+	if h.getCooldownInfo != nil {
+		inCooldown, remainingSec := h.getCooldownInfo()
+		result["cooldown"] = map[string]interface{}{
+			"active":        inCooldown,
+			"remaining_sec": remainingSec,
+		}
 	}
 
 	// 按月统计

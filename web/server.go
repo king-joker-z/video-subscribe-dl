@@ -65,6 +65,7 @@ type Server struct {
 	apiRouter      *newapi.Router
 
 	// Callbacks
+	getCooldownInfo     func() (bool, int)
 	onCheckNow          func()
 	onCookieUpdate      func(string)
 	onCredentialUpdate  func(*bilibili.Credential)
@@ -126,11 +127,18 @@ func (s *Server) setupRoutes() {
 			func(id int64) { if s.onRedownload != nil { s.onRedownload(id) } },
 		)
 		s.apiRouter.SetVersion(s.version)
+		if s.getCooldownInfo != nil {
+			s.apiRouter.SetCooldownInfoFunc(s.getCooldownInfo)
+		}
 		s.apiRouter.SetBuildTime(s.buildTime)
 		s.apiRouter.SetStartTime(s.startTime)
 		s.apiRouter.SetBiliClientFunc(s.getBiliClient)
 		s.apiRouter.SetConfigReloadFunc(s.onConfigReload)
 	}
+}
+
+func (s *Server) SetCooldownInfoFunc(fn func() (bool, int)) {
+	s.getCooldownInfo = fn
 }
 
 func (s *Server) SetCheckNowFunc(fn func()) {
