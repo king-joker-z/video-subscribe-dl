@@ -19,54 +19,64 @@ import (
 	"video-subscribe-dl/internal/util"
 )
 
-func (s *Scheduler) processCollection(src db.Source, client *bilibili.Client, mid, seasonID int64, uploaderName, uploaderDir string, upInfo *bilibili.UPInfo) {
-	// 全量翻页获取合集所有视频
+// fetchAndProcessSeason 统一处理合集（Season 类型）的翻页、去重、目录创建、NFO 生成、封面下载和视频遍历。
+// checkSeason（独立合集源）和 processCollection（UP 主空间内合集）均委托此方法。
+func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client, mid, seasonID int64, uploaderName, uploaderDir string, upInfo *bilibili.UPInfo) {
 	var allArchives []bilibili.SeasonArchive
 	var meta *bilibili.SeasonMeta
-	seasonPage := 1
-	seasonPageSize := 100
+	page := 1
+	pageSize := 100
 	for {
-		archives, m, err := client.GetSeasonVideos(mid, seasonID, seasonPage, seasonPageSize)
+		archives, m, err := client.GetSeasonVideos(mid, seasonID, page, pageSize)
 		if err != nil {
 			if errors.Is(err, bilibili.ErrRateLimited) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return
 			}
-			log.Printf("Get season %d page %d failed: %v", seasonID, seasonPage, err)
+			log.Printf("Get season %d page %d failed: %v", seasonID, page, err)
 			break
 		}
 		if meta == nil {
 			meta = m
 		}
 		allArchives = append(allArchives, archives...)
-		if len(archives) < seasonPageSize {
+		if len(archives) < pageSize {
 			break
 		}
-		seasonPage++
+		page++
 		time.Sleep(time.Duration(300+rand.Intn(300)) * time.Millisecond)
 	}
-	archives := allArchives
+
 	if meta == nil {
 		log.Printf("Get season %d failed: no metadata", seasonID)
 		return
 	}
 
+	// 自动更新源名称
+	if (src.Name == "" || src.Name == "未命名") && meta.Title != "" {
+		src.Name = meta.Title
+		s.db.UpdateSource(&src)
+	}
+
 	collectionName := bilibili.SanitizePath(meta.Title)
 	collectionDir := filepath.Join(s.downloadDir, uploaderDir, collectionName)
 	os.MkdirAll(collectionDir, 0755)
-	log.Printf("Collection: %s (%d videos)", collectionName, len(archives))
+
+	log.Printf("Season/Collection: %s by %s (%d videos, pages: %d)", meta.Title, uploaderName, len(allArchives), page)
 
 	premiered := ""
-	if len(archives) > 0 {
-		premiered = time.Unix(archives[0].PubDate, 0).Format("2006-01-02")
+	if len(allArchives) > 0 {
+		premiered = time.Unix(allArchives[0].PubDate, 0).Format("2006-01-02")
 	}
-	nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
-		Title: meta.Title, Plot: meta.Intro, UploaderName: uploaderName,
-		UploaderFace: upInfo.Face, Premiered: premiered, Poster: meta.Cover,
-	}, collectionDir)
+	if !src.SkipNFO {
+		nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
+			Title: meta.Title, Plot: meta.Intro, UploaderName: uploaderName,
+			UploaderFace: upInfo.Face, Premiered: premiered, Poster: meta.Cover,
+		}, collectionDir)
+	}
 
-	if meta.Cover != "" {
+	if !src.SkipPoster && meta.Cover != "" {
 		posterPath := filepath.Join(collectionDir, "poster.jpg")
 		if _, err := os.Stat(posterPath); os.IsNotExist(err) {
 			if err := bilibili.DownloadFile(meta.Cover, posterPath); err != nil {
@@ -77,9 +87,14 @@ func (s *Scheduler) processCollection(src db.Source, client *bilibili.Client, mi
 		}
 	}
 
-	for _, a := range archives {
+	for _, a := range allArchives {
 		s.processOneVideo(src, client, a.BvID, a.Title, a.Pic, uploaderName, uploaderDir, collectionName, upInfo)
 	}
+}
+
+// processCollection UP 主空间内合集，委托给 fetchAndProcessSeason
+func (s *Scheduler) processCollection(src db.Source, client *bilibili.Client, mid, seasonID int64, uploaderName, uploaderDir string, upInfo *bilibili.UPInfo) {
+	s.fetchAndProcessSeason(src, client, mid, seasonID, uploaderName, uploaderDir, upInfo)
 }
 
 // checkDiskSpace returns true if disk has enough free space
