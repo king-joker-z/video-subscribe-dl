@@ -290,7 +290,7 @@ func (s *Scheduler) checkAll() {
 		log.Printf("Get due sources failed: %v", err)
 		return
 	}
-	for _, src := range sources {
+	for i, src := range sources {
 		s.checkSource(src)
 		s.db.UpdateSourceLastCheck(src.ID)
 
@@ -298,6 +298,11 @@ func (s *Scheduler) checkAll() {
 		if s.isInCooldown() {
 			log.Printf("[scheduler] 风控冷却已触发，停止当前轮次剩余 source 检查")
 			return
+		}
+
+		// source 间隔 3 秒，避免触发风控
+		if i < len(sources)-1 {
+			time.Sleep(3 * time.Second)
 		}
 	}
 
@@ -315,9 +320,20 @@ func (s *Scheduler) checkAllForce() {
 		log.Printf("Get sources failed: %v", err)
 		return
 	}
-	for _, src := range sources {
+	for i, src := range sources {
 		s.checkSource(src)
 		s.db.UpdateSourceLastCheck(src.ID)
+
+		// 检查风控冷却
+		if s.isInCooldown() {
+			log.Printf("[scheduler] 风控冷却已触发，停止当前轮次剩余 source 检查")
+			break
+		}
+
+		// source 间隔 3 秒，避免触发风控
+		if i < len(sources)-1 {
+			time.Sleep(3 * time.Second)
+		}
 	}
 	log.Println("Manual sync completed")
 }
