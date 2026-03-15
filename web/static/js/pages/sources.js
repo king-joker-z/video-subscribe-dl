@@ -515,7 +515,13 @@ export function SourcesPage({ onNavigate }) {
                 h('div', null, h('div', { className: 'text-lg font-bold text-red-400' }, s.failed_count || 0), h('div', { className: 'text-xs text-slate-500' }, '失败')),
                 h('div', null, h('div', { className: 'text-lg font-bold text-amber-400' }, s.pending_count || 0), h('div', { className: 'text-xs text-slate-500' }, '待处理'))
               ),
-              h('div', { className: 'mt-3 text-xs text-slate-600 truncate' }, s.url)
+              h('div', { className: 'flex items-center justify-between mt-3' },
+                h('div', { className: 'text-xs text-slate-600 truncate flex-1 min-w-0' }, s.url),
+                h('button', {
+                  onClick: () => onNavigate('videos', { source_id: String(s.id), source_name: s.name || '' }),
+                  className: 'ml-2 flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0'
+                }, '查看视频', h(Icon, { name: 'chevron-right', size: 12 }))
+              )
             ))
           )
   );

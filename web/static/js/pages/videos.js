@@ -12,6 +12,8 @@ export function VideosPage({ params = {} } = {}) {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [uploader, setUploader] = useState(params.uploader || '');
+  const [sourceId, setSourceId] = useState(params.source_id || '');
+  const [sourceName, setSourceName] = useState(params.source_name || '');
   const [sort, setSort] = useState('created_desc');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
@@ -23,13 +25,13 @@ export function VideosPage({ params = {} } = {}) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getVideos({ page, page_size: pageSize, status, search, sort, uploader });
+      const res = await api.getVideos({ page, page_size: pageSize, status, search, sort, uploader, source_id: sourceId });
       const d = res.data || {};
       setVideos(d.items || []);
       setTotal(d.total || 0);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, [page, pageSize, status, search, sort, uploader]);
+  }, [page, pageSize, status, search, sort, uploader, sourceId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -40,6 +42,15 @@ export function VideosPage({ params = {} } = {}) {
       setPage(1);
     }
   }, [params.uploader]);
+
+  // 从 URL 参数同步 source_id
+  useEffect(() => {
+    if (params.source_id !== undefined) {
+      setSourceId(params.source_id || '');
+      setSourceName(params.source_name || '');
+      setPage(1);
+    }
+  }, [params.source_id, params.source_name]);
 
   // SSE 进度
   useEffect(() => {
@@ -170,7 +181,11 @@ export function VideosPage({ params = {} } = {}) {
         uploader && h('button', {
           onClick: () => { setUploader(''); setPage(1); location.hash = '#/videos'; },
           className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/20 text-purple-400 flex items-center gap-1'
-        }, 'UP主: ' + uploader, ' ', h(Icon, { name: 'x', size: 12 }))
+        }, 'UP主: ' + uploader, ' ', h(Icon, { name: 'x', size: 12 })),
+        sourceId && h('button', {
+          onClick: () => { setSourceId(''); setSourceName(''); setPage(1); location.hash = '#/videos'; },
+          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/20 text-cyan-400 flex items-center gap-1'
+        }, '订阅源: ' + (sourceName || '#' + sourceId), ' ', h(Icon, { name: 'x', size: 12 }))
       ),
       h('select', {
         value: sort,
@@ -181,6 +196,7 @@ export function VideosPage({ params = {} } = {}) {
         h('option', { value: 'created_asc' }, '最早'),
         h('option', { value: 'title_asc' }, '标题 A-Z'),
         h('option', { value: 'size_desc' }, '文件最大'),
+        h('option', { value: 'downloaded_desc' }, '最近下载'),
       ),
     ),
     // 批量操作栏

@@ -96,11 +96,12 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if pg.Sort != "" {
 		// 白名单验证排序字段
 		allowedSorts := map[string]string{
-			"created":  "d.created_at",
-			"title":    "d.title",
-			"status":   "d.status",
-			"size":     "d.file_size",
-			"uploader": "d.uploader",
+			"created":    "d.created_at",
+			"title":      "d.title",
+			"status":     "d.status",
+			"size":       "d.file_size",
+			"uploader":   "d.uploader",
+			"downloaded": "d.downloaded_at",
 		}
 		if col, ok := allowedSorts[pg.Sort]; ok {
 			orderBy = col + " " + strings.ToUpper(pg.Order)
