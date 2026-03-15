@@ -68,9 +68,18 @@ func (s *Scheduler) checkUP(src db.Source) {
 			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
 	}
 
-	// 动态 API 模式
+	// 动态 API 模式：先走动态 API，再用投稿 API 第一页补漏（不发动态的视频只有投稿 API 能查到）
 	if src.UseDynamicAPI {
 		s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
+		// 风控了就不继续
+		if s.isInCooldown() {
+			return
+		}
+		// 非首次扫描时，用投稿 API 第一页做补漏（覆盖不发动态的视频）
+		if !isFirstScan {
+			time.Sleep(2 * time.Second) // 间隔一下
+			s.supplementFromSubmission(src, client, mid, uploaderName, uploaderDir, latestVideoAt, upInfo)
+		}
 		return
 	}
 
@@ -234,6 +243,34 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 }
 
 
+
+// supplementFromSubmission 用投稿 API 第一页做增量补漏（补充不发动态的视频）
+func (s *Scheduler) supplementFromSubmission(src db.Source, client *bilibili.Client, mid int64, uploaderName, uploaderDir string, latestVideoAt int64, upInfo *bilibili.UPInfo) {
+	videos, _, err := client.GetUPVideos(mid, 1, 30)
+	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.triggerCooldown()
+			s.dl.Pause()
+		} else {
+			log.Printf("[投稿补漏] %s: 获取失败: %v", uploaderName, err)
+		}
+		return
+	}
+
+	newCount := 0
+	for _, v := range videos {
+		// 只处理增量基准之后的新视频
+		if latestVideoAt > 0 && v.Created <= latestVideoAt {
+			break // 按发布时间倒序，遇到旧的就停
+		}
+		// processOneVideo 内部会去重，已在动态 API 处理过的会跳过
+		s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+		newCount++
+	}
+	if newCount > 0 {
+		log.Printf("[投稿补漏] %s: 发现 %d 个不在动态中的新视频", uploaderName, newCount)
+	}
+}
 
 // FullScanSource 全量补漏扫描指定 source（忽略增量基准，扫描所有视频，跳过已下载的）
 func (s *Scheduler) FullScanSource(sourceID int64) {
