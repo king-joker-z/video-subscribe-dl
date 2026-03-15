@@ -27,6 +27,7 @@ export const api = {
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSource: (id) => request(`/api/sources/${id}`, { method: 'DELETE' }),
   syncSource: (id) => request(`/api/sources/${id}/sync`, { method: 'POST' }),
+  fullScanSource: (id) => request(`/api/sources/${id}/fullscan`, { method: 'POST' }),
 
   // Videos
   getVideos: (params = {}) => {

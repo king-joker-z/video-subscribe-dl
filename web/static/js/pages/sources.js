@@ -371,6 +371,12 @@ export function SourcesPage({ onNavigate }) {
     catch (e) { toast.error(e.message); }
   };
 
+  const handleFullScan = async (id) => {
+    if (!confirm('确认全量补漏扫描？将翻完所有投稿页，已下载的会自动跳过。')) return;
+    try { await api.fullScanSource(id); toast.success('全量补漏扫描已触发'); }
+    catch (e) { toast.error(e.message); }
+  };
+
   return h('div', { className: 'page-enter space-y-4' },
     // 编辑弹窗
     editSource && h(EditModal, {
@@ -496,6 +502,7 @@ export function SourcesPage({ onNavigate }) {
                 h('div', { className: 'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity' },
                   h('button', { onClick: () => setEditSource(s), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '编辑' }, h(Icon, { name: 'edit', size: 14 })),
                   h('button', { onClick: () => handleSync(s.id), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '同步' }, h(Icon, { name: 'sync', size: 14 })),
+                  h('button', { onClick: () => handleFullScan(s.id), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '全量补漏' }, h(Icon, { name: 'hard-drive', size: 14 })),
                   h('button', { onClick: () => handleDelete(s.id, s.name), className: 'p-1.5 rounded hover:bg-red-900/50 text-slate-400 hover:text-red-400', title: '删除' }, h(Icon, { name: 'trash', size: 14 }))
                 )
               ),
