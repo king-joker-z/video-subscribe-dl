@@ -12,6 +12,9 @@ import (
 	"video-subscribe-dl/internal/nfo"
 )
 
+// 预编译正则
+var reBVID = regexp.MustCompile(`\[(BV[a-zA-Z0-9]+)\]`)
+
 type Scanner struct {
 	db          *db.DB
 	downloadDir string
@@ -149,7 +152,7 @@ func findVideoNear(infoPath string) string {
 }
 
 func ExtractBvID(filename string) string {
-	re := regexp.MustCompile(`\[(BV[a-zA-Z0-9]+)\]`)
+	re := reBVID
 	m := re.FindStringSubmatch(filename)
 	if len(m) > 1 {
 		return m[1]

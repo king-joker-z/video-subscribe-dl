@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// 预编译正则
+var (
+	reWbiImgURL = regexp.MustCompile(`"img_url"\s*:\s*"([^"]+)"`)
+	reWbiSubURL = regexp.MustCompile(`"sub_url"\s*:\s*"([^"]+)"`)
+)
+
 // WBI 签名实现
 // 参考: https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/misc/sign/wbi.md
 
@@ -72,8 +78,8 @@ func (c *Client) getWbiKeys() (string, string, error) {
 	body, _ := io.ReadAll(resp.Body)
 
 	// 提取 img_url 和 sub_url
-	imgRe := regexp.MustCompile(`"img_url"\s*:\s*"([^"]+)"`)
-	subRe := regexp.MustCompile(`"sub_url"\s*:\s*"([^"]+)"`)
+	imgRe := reWbiImgURL
+	subRe := reWbiSubURL
 
 	imgMatch := imgRe.FindSubmatch(body)
 	subMatch := subRe.FindSubmatch(body)

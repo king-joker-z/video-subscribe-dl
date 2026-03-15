@@ -64,11 +64,23 @@ type VideoDetail struct {
 		ID    int64  `json:"id"`
 		Title string `json:"title"`
 	} `json:"ugc_season"`
+	RedirectURL string `json:"redirect_url"`
+	State       int    `json:"state"` // -1=待审 -2=退回 -4=未过审 -6=删除
 	Pages []struct {
 		CID  int64  `json:"cid"`
 		Page int    `json:"page"`
 		Part string `json:"part"`
 	} `json:"pages"`
+}
+
+// IsBangumi 检测番剧/影视重定向
+func (v *VideoDetail) IsBangumi() bool {
+	return v.RedirectURL != "" && (strings.Contains(v.RedirectURL, "bangumi") || strings.Contains(v.RedirectURL, "ep"))
+}
+
+// IsUnavailable 检测视频不可用状态（已删除/审核中/隐藏等）
+func (v *VideoDetail) IsUnavailable() bool {
+	return v.State != 0
 }
 
 type VideoStat struct {
@@ -251,12 +263,24 @@ func checkRateLimitCode(body []byte) error {
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
 		return ErrRateLimited
 	}
+
+	// v_voucher 风控检测: data.v_voucher 非空即触发
+	var voucherCheck struct {
+		Data struct {
+			VVoucher string `json:"v_voucher"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &voucherCheck); err == nil && voucherCheck.Data.VVoucher != "" {
+		log.Printf("[WARN] B站风控: v_voucher detected (需要人机验证)")
+		return ErrRateLimited
+	}
+
 	return nil
 }
 
 // ExtractMID 从 space.bilibili.com/xxx 提取 MID
 func ExtractMID(rawURL string) (int64, error) {
-	re := regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
+	re := reSpaceMID
 	m := re.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		var mid int64
@@ -349,6 +373,14 @@ func DownloadFile(rawURL, dest string) error {
 	return err
 }
 
+// 预编译正则表达式
+var (
+	reSpaceMID  = regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
+	reFID       = regexp.MustCompile(`fid=(\d+)`)
+	reListsID   = regexp.MustCompile(`/lists/(\d+)`)
+	reSID       = regexp.MustCompile(`sid=(\d+)`)
+)
+
 var uas = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
@@ -381,12 +413,19 @@ type FavoriteVideoItem struct {
 	Pic      string `json:"pic"`
 	Duration int    `json:"duration"`
 	PubDate  int64  `json:"pubdate"`
+	Attr     int    `json:"attr"`   // 收藏夹属性, 9=失效
+	Type     int    `json:"type"`   // 类型
 	Owner    struct {
 		MID  int64  `json:"mid"`
 		Name string `json:"name"`
 		Face string `json:"face"`
 	} `json:"owner"`
 	SeasonID int64 `json:"season_id"`
+}
+
+// IsInvalid 检测收藏夹中的失效视频
+func (f *FavoriteVideoItem) IsInvalid() bool {
+	return f.Attr == 9 || f.Title == "已失效视频"
 }
 
 // WatchLaterVideoItem 稍后再看视频
@@ -469,13 +508,13 @@ func (c *Client) GetWatchLater() ([]WatchLaterVideoItem, error) {
 // 支持: https://space.bilibili.com/{mid}/favlist?fid={mediaID}
 func ExtractFavoriteInfo(rawURL string) (mid int64, mediaID int64, err error) {
 	// 提取 mid
-	reMid := regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
+	reMid := reSpaceMID
 	m := reMid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		fmt.Sscanf(m[1], "%d", &mid)
 	}
 	// 提取 mediaID (fid)
-	reFid := regexp.MustCompile(`fid=(\d+)`)
+	reFid := reFID
 	m = reFid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		fmt.Sscanf(m[1], "%d", &mediaID)
@@ -503,14 +542,14 @@ func ExtractWatchLaterInfo(rawURL string) (mid int64, err error) {
 // 支持: https://space.bilibili.com/{mid}/lists/{seasonID}?type=season
 //        https://space.bilibili.com/{mid}/channel/collectiondetail?sid={seasonID}
 func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
-	reMid := regexp.MustCompile(`space\.bilibili\.com/(\d+)`)
+	reMid := reSpaceMID
 	m := reMid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		fmt.Sscanf(m[1], "%d", &mid)
 	}
 
 	// /lists/{id}?type=season
-	reLists := regexp.MustCompile(`/lists/(\d+)`)
+	reLists := reListsID
 	m = reLists.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
 		fmt.Sscanf(m[1], "%d", &seasonID)
@@ -518,7 +557,7 @@ func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
 
 	// collectiondetail?sid={id}
 	if seasonID == 0 {
-		reSid := regexp.MustCompile(`sid=(\d+)`)
+		reSid := reSID
 		m = reSid.FindStringSubmatch(rawURL)
 		if len(m) > 1 {
 			fmt.Sscanf(m[1], "%d", &seasonID)
