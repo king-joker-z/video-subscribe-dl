@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/util"
 )
 
 // GET /api/thumb/{id} — 提供本地封面图（fallback: 302 到 bilibili CDN）
@@ -105,11 +106,14 @@ func (s *Server) handleDownloadByID(w http.ResponseWriter, r *http.Request) {
 		// 先查记录拿到文件路径
 		dl, _ := s.db.GetDownload(id)
 		if dl != nil && dl.FilePath != "" {
-			dir := filepath.Dir(dl.FilePath)
-			if dir != "" && dir != "." && dir != "/" {
-				os.RemoveAll(dir)
-				log.Printf("[delete] Removed files: %s", dir)
+			// 精确删除视频文件及关联文件（NFO/缩略图/弹幕/字幕），不误删同目录其他视频
+			if _, err := os.Stat(dl.FilePath); err == nil {
+				os.Remove(dl.FilePath)
+				log.Printf("[delete] Removed video file: %s", dl.FilePath)
 			}
+			util.RemoveAssociatedFiles(dl.FilePath)
+			// 清理空目录（向上3级，不超出 downloadDir）
+			util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), s.downloadDir, 3)
 		}
 		_, err = s.db.Exec("DELETE FROM downloads WHERE id = ?", id)
 		if err != nil {
