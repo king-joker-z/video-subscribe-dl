@@ -234,6 +234,109 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 }
 
 
+
+// FullScanSource 全量补漏扫描指定 source（忽略增量基准，扫描所有视频，跳过已下载的）
+func (s *Scheduler) FullScanSource(sourceID int64) {
+	src, err := s.db.GetSource(sourceID)
+	if err != nil || src == nil {
+		log.Printf("[full-scan] Source %d not found", sourceID)
+		return
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		log.Printf("[full-scan] 开始全量补漏扫描: %s (id=%d)", src.Name, src.ID)
+		s.fullScanUP(*src)
+		log.Printf("[full-scan] 全量补漏扫描完成: %s (id=%d)", src.Name, src.ID)
+	}()
+}
+
+func (s *Scheduler) fullScanUP(src db.Source) {
+	client := s.clientForSource(src)
+
+	mid, err := bilibili.ExtractMID(src.URL)
+	if err != nil {
+		log.Printf("[full-scan] Extract MID failed: %v", err)
+		return
+	}
+
+	upInfo, err := s.getUPInfoCached(client, mid)
+	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.triggerCooldown()
+		}
+		log.Printf("[full-scan] Get UP info failed (mid=%d): %v", mid, err)
+		return
+	}
+
+	uploaderName := upInfo.Name
+	uploaderDir := bilibili.SanitizePath(uploaderName)
+
+	// 全量扫描：使用投稿 API（非动态 API），翻完所有页
+	pageSize := 30
+	page := 1
+	processedSeasons := map[int64]bool{}
+	processedBVIDs := map[string]bool{}
+	totalChecked := 0
+	totalNew := 0
+
+	for {
+		// 风控检查
+		if s.isInCooldown() {
+			log.Printf("[full-scan] %s: 风控冷却中，已检查 %d 个视频，新增 %d 个", uploaderName, totalChecked, totalNew)
+			return
+		}
+
+		videos, total, err := client.GetUPVideos(mid, page, pageSize)
+		if err != nil {
+			if bilibili.IsRiskControl(err) {
+				s.triggerCooldown()
+				log.Printf("[full-scan] %s: 触发风控，已检查 %d/%d 个视频，新增 %d 个", uploaderName, totalChecked, total, totalNew)
+				return
+			}
+			log.Printf("[full-scan] Get videos page %d failed: %v", page, err)
+			break
+		}
+		if page == 1 {
+			log.Printf("[full-scan] %s: 共 %d 个视频，开始全量补漏", uploaderName, total)
+		}
+
+		for _, v := range videos {
+			if processedBVIDs[v.BvID] {
+				continue
+			}
+			processedBVIDs[v.BvID] = true
+			totalChecked++
+
+			// 合集单独处理
+			if v.IsSeason && v.SeasonID > 0 && !processedSeasons[v.SeasonID] {
+				processedSeasons[v.SeasonID] = true
+				s.processCollection(src, client, mid, v.SeasonID, uploaderName, uploaderDir, upInfo)
+			}
+			if v.IsSeason {
+				continue
+			}
+
+			// processOneVideo 内部会检查 IsVideoDownloaded，已有的会跳过
+			s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", upInfo)
+			totalNew++ // 这里其实包含已跳过的，但 processOneVideo 内部会去重
+		}
+
+		totalChecked = len(processedBVIDs) // 实际去重后的数量
+
+		if totalChecked >= total || len(videos) < pageSize {
+			break
+		}
+
+		page++
+		// 全量扫描翻页间隔稍长，减少风控风险
+		time.Sleep(time.Duration(1000+rand.Intn(1000)) * time.Millisecond)
+	}
+
+	log.Printf("[full-scan] %s: 扫描完成，共检查 %d 个视频，翻页 %d", uploaderName, totalChecked, page)
+}
+
 const upInfoCacheTTL = 6 * time.Hour
 
 // getUPInfoCached 带缓存的 UP 主信息获取，减少 API 请求量

@@ -57,6 +57,11 @@ func (rt *Router) SetCallbacks(
 	rt.uploaders.SetProcessPendingFunc(onProcessPending)
 }
 
+// SetFullScanSourceFunc 设置全量补漏扫描回调
+func (rt *Router) SetFullScanSourceFunc(fn func(int64)) {
+	rt.sources.SetFullScanSourceFunc(fn)
+}
+
 // SetBiliClientFunc 设置获取 bilibili client 的回调
 func (rt *Router) SetBiliClientFunc(fn func() *bilibili.Client) {
 	rt.me.SetBiliClientFunc(fn)

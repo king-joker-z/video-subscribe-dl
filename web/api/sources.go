@@ -15,10 +15,15 @@ import (
 type SourcesHandler struct {
 	db                 *db.DB
 	onSyncSource       func(int64)
+	onFullScanSource   func(int64)
 }
 
 func NewSourcesHandler(database *db.DB) *SourcesHandler {
 	return &SourcesHandler{db: database}
+}
+
+func (h *SourcesHandler) SetFullScanSourceFunc(fn func(int64)) {
+	h.onFullScanSource = fn
 }
 
 func (h *SourcesHandler) SetSyncSourceFunc(fn func(int64)) {
@@ -350,6 +355,14 @@ func (h *SourcesHandler) HandleSync(w http.ResponseWriter, r *http.Request, id i
 }
 
 
+// POST /api/sources/:id/fullscan — 全量补漏扫描
+func (h *SourcesHandler) HandleFullScan(w http.ResponseWriter, r *http.Request, id int64) {
+	if h.onFullScanSource != nil {
+		h.onFullScanSource(id)
+	}
+	apiOK(w, map[string]interface{}{"id": id, "message": "全量补漏扫描已触发"})
+}
+
 // POST /api/sources/parse — 解析 URL，返回类型和名称
 func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	if !MethodGuard("POST", w, r) {
@@ -471,6 +484,18 @@ func (h *SourcesHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.HandleSync(w, r, id)
+		return
+	}
+
+	// /api/sources/:id/fullscan — 全量补漏扫描
+	if strings.HasSuffix(path, "/fullscan") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/fullscan")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleFullScan(w, r, id)
 		return
 	}
 

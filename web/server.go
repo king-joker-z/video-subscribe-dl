@@ -71,6 +71,7 @@ type Server struct {
 	onCredentialUpdate  func(*bilibili.Credential)
 	onRetryDownload     func(int64)
 	onSyncSource        func(int64)
+	onFullScanSource    func(int64)
 	onProcessPending    func()
 	onRedownload        func(int64)
 	getBiliClient      func() *bilibili.Client
@@ -132,6 +133,9 @@ func (s *Server) setupRoutes() {
 		}
 		s.apiRouter.SetBuildTime(s.buildTime)
 		s.apiRouter.SetStartTime(s.startTime)
+		if s.onFullScanSource != nil {
+			s.apiRouter.SetFullScanSourceFunc(func(id int64) { s.onFullScanSource(id) })
+		}
 		s.apiRouter.SetBiliClientFunc(s.getBiliClient)
 		s.apiRouter.SetConfigReloadFunc(s.onConfigReload)
 	}
@@ -159,6 +163,10 @@ func (s *Server) SetRetryDownloadFunc(fn func(int64)) {
 
 func (s *Server) SetSyncSourceFunc(fn func(int64)) {
 	s.onSyncSource = fn
+}
+
+func (s *Server) SetFullScanSourceFunc(fn func(int64)) {
+	s.onFullScanSource = fn
 }
 
 func (s *Server) SetProcessPendingFunc(fn func()) {

@@ -52,6 +52,10 @@ type Scheduler struct {
 	// UP 主信息缓存（减少 API 请求）
 	upInfoCache   map[int64]*upInfoCacheEntry
 	upInfoCacheMu sync.RWMutex
+
+	// 风控断点续检：被中断的 source 列表
+	pendingSourcesMu sync.Mutex
+	pendingSources   []db.Source
 }
 
 type upInfoCacheEntry struct {
@@ -287,6 +291,20 @@ func (s *Scheduler) checkAll() {
 	// Retry failed downloads
 	s.retryFailedDownloads()
 
+	// 优先处理风控断点续检
+	s.pendingSourcesMu.Lock()
+	resumeSources := s.pendingSources
+	s.pendingSources = nil
+	s.pendingSourcesMu.Unlock()
+
+	if len(resumeSources) > 0 {
+		log.Printf("[scheduler] 风控断点续检: 恢复 %d 个未检查的 source", len(resumeSources))
+		s.checkSourceList(resumeSources)
+		// 断点续检完毕后处理 pending 下载
+		s.ProcessAllPending()
+		return // 本轮只做断点恢复，不再拉新的 due sources
+	}
+
 	// 读取全局 check_interval_minutes 设置
 	globalInterval := 0
 	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
@@ -300,26 +318,37 @@ func (s *Scheduler) checkAll() {
 		log.Printf("Get due sources failed: %v", err)
 		return
 	}
+	s.checkSourceList(sources)
+
+	// 所有 source 检查完后，处理遗留的 pending 下载
+	s.ProcessAllPending()
+
+	// Auto-cleanup: retention-based and disk-pressure
+}
+
+// checkSourceList 检查一组 source，风控时保存剩余到断点队列
+func (s *Scheduler) checkSourceList(sources []db.Source) {
 	for i, src := range sources {
 		s.checkSource(src)
 		s.db.UpdateSourceLastCheck(src.ID)
 
 		// 检查风控冷却
 		if s.isInCooldown() {
-			log.Printf("[scheduler] 风控冷却已触发，停止当前轮次剩余 source 检查")
+			remaining := sources[i+1:]
+			if len(remaining) > 0 {
+				s.pendingSourcesMu.Lock()
+				s.pendingSources = remaining
+				s.pendingSourcesMu.Unlock()
+				log.Printf("[scheduler] 风控冷却已触发，保存 %d 个剩余 source 到断点队列", len(remaining))
+			}
 			return
 		}
 
-		// source 间隔 3 秒，避免触发风控
+		// source 间隔 5 秒，避免触发风控
 		if i < len(sources)-1 {
 			time.Sleep(5 * time.Second)
 		}
 	}
-
-	// 所有 source 检查完后，处理遗留的 pending 下载
-	s.ProcessAllPending()
-
-	// Auto-cleanup: retention-based and disk-pressure
 }
 
 func (s *Scheduler) checkAllForce() {

@@ -138,6 +138,7 @@ func main() {
 	server.SetCredentialUpdateFunc(sched.UpdateCredential)
 	server.SetRetryDownloadFunc(sched.RetryByID)
 	server.SetSyncSourceFunc(sched.CheckOneSource)
+	server.SetFullScanSourceFunc(sched.FullScanSource)
 	server.SetProcessPendingFunc(sched.ProcessAllPending)
 	server.SetRedownloadFunc(sched.RedownloadByID)
 	server.SetNotifier(sched.GetNotifier())
