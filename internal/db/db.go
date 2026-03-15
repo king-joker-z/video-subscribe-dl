@@ -90,6 +90,7 @@ type Source struct {
 	DownloadQuality string     `json:"download_quality"`
 	DownloadCodec   string     `json:"download_codec"`
 	DownloadDanmaku bool       `json:"download_danmaku"`
+	DownloadSubtitle bool      `json:"download_subtitle"`
 	DownloadFilter  string     `json:"download_filter"`
 	DownloadQualityMin string  `json:"download_quality_min"`
 	SkipNFO         bool       `json:"skip_nfo"`
@@ -120,6 +121,7 @@ type Download struct {
 	DownloadedAt *time.Time `json:"downloaded_at"`
 	ErrorMessage string     `json:"error_message"`
 	RetryCount   int        `json:"retry_count"`
+	DetailStatus int        `json:"detail_status"` // 位图: 1=封面 2=视频 4=NFO 8=弹幕 16=字幕
 	LastError    string     `json:"last_error"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
@@ -169,6 +171,8 @@ func Init(dataDir string) (*DB, error) {
 		"ALTER TABLE sources ADD COLUMN latest_video_at INTEGER DEFAULT 0",
 		"ALTER TABLE sources ADD COLUMN use_dynamic_api INTEGER DEFAULT 0",
 		"ALTER TABLE sources ADD COLUMN filter_rules TEXT DEFAULT ''",
+		"ALTER TABLE sources ADD COLUMN download_subtitle INTEGER DEFAULT 0",
+		"ALTER TABLE downloads ADD COLUMN detail_status INTEGER DEFAULT 0",
 	}
 	for _, m := range migrations {
 		db.Exec(m)

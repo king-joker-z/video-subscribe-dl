@@ -21,6 +21,7 @@ type VideoInfo struct {
 	Duration int    // 时长（秒）
 	PubDate  string // 发布日期 YYYY-MM-DD
 	Pages    int    // 分P 数量
+	Tags     string // 标签（逗号分隔）
 }
 
 // matchesFilter 检查标题是否匹配过滤条件（兼容旧格式）
@@ -101,6 +102,8 @@ func matchOneRule(rule FilterRule, info VideoInfo) bool {
 		return matchStringRule(info.PubDate, rule.Condition, rule.Value)
 	case "pages":
 		return matchNumericRule(info.Pages, rule.Condition, rule.Value, rule.Value2)
+	case "tags":
+		return matchStringRule(info.Tags, rule.Condition, rule.Value)
 	default:
 		return true // 未知 target 不过滤
 	}

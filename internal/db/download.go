@@ -5,6 +5,15 @@ import (
 	"fmt"
 )
 
+// 下载状态位图常量
+const (
+	StatusBitThumb    = 1  // 封面已下载
+	StatusBitVideo    = 2  // 视频已下载
+	StatusBitNFO      = 4  // NFO 已生成
+	StatusBitDanmaku  = 8  // 弹幕已下载
+	StatusBitSubtitle = 16 // 字幕已下载
+)
+
 func (d *DB) CreateDownload(dl *Download) (int64, error) {
 	result, err := d.Exec(`
 		INSERT OR IGNORE INTO downloads (source_id, video_id, title, filename, status, uploader, description, thumbnail, duration)
@@ -572,4 +581,17 @@ func (d *DB) DeleteAllCompleted() (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+// UpdateDetailStatus 更新下载记录的 detail_status 位图（OR 合并）
+func (d *DB) UpdateDetailStatus(id int64, bits int) error {
+	_, err := d.Exec("UPDATE downloads SET detail_status = detail_status | ? WHERE id = ?", bits, id)
+	return err
+}
+
+// GetDetailStatus 获取 detail_status 位图
+func (d *DB) GetDetailStatus(id int64) (int, error) {
+	var status int
+	err := d.QueryRow("SELECT COALESCE(detail_status, 0) FROM downloads WHERE id = ?", id).Scan(&status)
+	return status, err
 }

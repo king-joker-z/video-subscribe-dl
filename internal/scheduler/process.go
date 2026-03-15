@@ -229,6 +229,7 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 		Quality:     src.DownloadQuality,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		Subtitle:    src.DownloadSubtitle,
 		QualityMin:  src.DownloadQualityMin,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
@@ -284,6 +285,7 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 		Quality:     src.DownloadQuality,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		Subtitle:    src.DownloadSubtitle,
 		QualityMin:  src.DownloadQualityMin,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
@@ -345,8 +347,9 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 	}
 
 	// 充电专属/付费视频检查
-	if detail.IsChargePlus() {
-		log.Printf("视频 %s (%s) 为充电专属/付费内容，跳过下载", title, bvid)
+	tryUpower, _ := s.db.GetSetting("try_upower")
+	if detail.IsChargePlus() && tryUpower != "true" {
+		log.Printf("视频 %s (%s) 为充电专属/付费内容，跳过下载 (try_upower=false)", title, bvid)
 		// 创建 charge_blocked 记录（不算失败）
 		exists, _ := s.db.IsVideoDownloaded(src.ID, bvid)
 		if !exists {
@@ -542,6 +545,16 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 			s.db.UpdateThumbPath(dlID, thumbPath)
 		}
 	}
+
+	// 更新 detail_status 位图（video 已完成 = bit 2）
+	statusBits := db.StatusBitVideo
+	if !skipNFO && detail != nil {
+		statusBits |= db.StatusBitNFO
+	}
+	if !skipPoster && detailPic != "" {
+		statusBits |= db.StatusBitThumb
+	}
+	s.db.UpdateDetailStatus(dlID, statusBits)
 
 	detailTitle := videoID
 	if detail != nil {

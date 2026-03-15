@@ -19,6 +19,7 @@ type VideoMeta struct {
 	UploaderName  string
 	UploaderFace  string
 	UploadDate    time.Time
+	FavDate       time.Time // 收藏时间（可选，nfo_time_type=favtime 时使用）
 	Duration      int // 秒
 	Tags          []string
 	ViewCount     int64
@@ -236,8 +237,13 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 		outline = string([]rune(outline)[:200]) + "..."
 	}
 
-	year := meta.UploadDate.Year()
-	premiered := meta.UploadDate.Format("2006-01-02")
+	// 根据 FavDate 是否设置来决定 NFO 中的日期
+	dateForNFO := meta.UploadDate
+	if !meta.FavDate.IsZero() {
+		dateForNFO = meta.FavDate
+	}
+	year := dateForNFO.Year()
+	premiered := dateForNFO.Format("2006-01-02")
 
 	runtime := 0
 	if meta.Duration > 0 {

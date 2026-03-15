@@ -126,6 +126,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		QualityMin:  src.DownloadQualityMin,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		Subtitle:    src.DownloadSubtitle,
 		SkipNFO:     src.SkipNFO,
 		SkipPoster:  src.SkipPoster,
 		Flat:             flat,

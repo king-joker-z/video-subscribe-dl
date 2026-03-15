@@ -31,7 +31,7 @@ func (h *SettingsHandler) SetRefreshRateFunc(fn func()) {
 var settingsKeys = []string{
 	"download_quality", "max_concurrent", "request_interval", "cookie_path",
 	"nfo_type", "download_danmaku", "check_interval_minutes",
-	"notify_type", "webhook_url", "telegram_bot_token", "telegram_chat_id",
+	"nfo_time_type", "try_upower", "schedule_cron", "concurrent_video", "concurrent_page", "notify_type", "webhook_url", "telegram_bot_token", "telegram_chat_id",
 	"bark_server", "bark_key",
 	"notify_on_complete", "notify_on_error", "notify_on_cookie_expire", "notify_on_sync",
 	"download_chunks", "max_download_speed_mb", "min_disk_free_gb",

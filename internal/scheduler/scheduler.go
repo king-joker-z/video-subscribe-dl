@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
@@ -52,6 +53,9 @@ type Scheduler struct {
 	// UP 主信息缓存（减少 API 请求）
 	upInfoCache   map[int64]*upInfoCacheEntry
 	upInfoCacheMu sync.RWMutex
+
+	// cron 调度器
+	cronScheduler *cron.Cron
 
 	// 风控断点续检：被中断的 source 列表
 	pendingSourcesMu sync.Mutex
@@ -142,7 +146,44 @@ func (s *Scheduler) Start() {
 		// 启动时处理容器重启前遗留的 pending 下载
 		s.ProcessAllPending()
 		s.checkAll()
-		ticker := time.NewTicker(config.DefaultSchedulerTick)
+
+		// 检查是否配置了 cron 表达式
+		cronExpr, _ := s.db.GetSetting("schedule_cron")
+		if cronExpr != "" {
+			s.cronScheduler = cron.New()
+			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
+				if s.isInCooldown() {
+					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
+					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
+					return
+				}
+				if s.dl.IsPaused() {
+					s.dl.Resume()
+					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
+				}
+				s.periodicCookieCheck()
+				s.checkAll()
+			})
+			if err != nil {
+				log.Printf("[scheduler] Cron 表达式无效 (%s): %v，降级为固定间隔", cronExpr, err)
+			} else {
+				log.Printf("[scheduler] 使用 Cron 调度: %s", cronExpr)
+				s.cronScheduler.Start()
+				<-s.stopCh
+				s.cronScheduler.Stop()
+				return
+			}
+		}
+
+		// 降级：固定间隔调度
+		interval := config.DefaultSchedulerTick
+		if v, err := s.db.GetSetting("check_interval_minutes"); err == nil && v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				interval = time.Duration(n) * time.Minute
+			}
+		}
+		log.Printf("[scheduler] 使用固定间隔调度: %v", interval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
