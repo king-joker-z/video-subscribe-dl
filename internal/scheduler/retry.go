@@ -174,3 +174,23 @@ func (s *Scheduler) RetryByID(dlID int64) {
 	s.db.ResetRetryCount(dlID)
 	s.retryOneDownload(*dl)
 }
+
+// RedownloadByID 重新下载指定记录（由 Web API redownload 调用）
+// 和 RetryByID 类似，但不检查状态，直接根据 pending 记录重新获取视频信息并提交下载
+func (s *Scheduler) RedownloadByID(dlID int64) {
+	dl, err := s.db.GetDownload(dlID)
+	if err != nil || dl == nil {
+		log.Printf("[redownload] Download %d not found", dlID)
+		return
+	}
+	if dl.Status != "pending" {
+		log.Printf("[redownload] Download %d status is %s, expected pending", dlID, dl.Status)
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.retryOneDownload(*dl)
+		log.Printf("[redownload] Submitted download %d (%s) for redownload", dlID, dl.VideoID)
+	}()
+}

@@ -69,6 +69,7 @@ type Server struct {
 	onRetryDownload     func(int64)
 	onSyncSource        func(int64)
 	onProcessPending    func()
+	onRedownload        func(int64)
 
 	version        string
 	buildTime      string
@@ -118,6 +119,7 @@ func (s *Server) setupRoutes() {
 			func(id int64) { if s.onSyncSource != nil { s.onSyncSource(id) } },
 			func() { if s.onProcessPending != nil { s.onProcessPending() } },
 			s.RefreshRateLimit,
+			func(id int64) { if s.onRedownload != nil { s.onRedownload(id) } },
 		)
 		s.apiRouter.SetVersion(s.version)
 		s.apiRouter.SetBuildTime(s.buildTime)
@@ -147,6 +149,10 @@ func (s *Server) SetSyncSourceFunc(fn func(int64)) {
 
 func (s *Server) SetProcessPendingFunc(fn func()) {
 	s.onProcessPending = fn
+}
+
+func (s *Server) SetRedownloadFunc(fn func(int64)) {
+	s.onRedownload = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

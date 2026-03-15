@@ -42,11 +42,13 @@ func (rt *Router) SetCallbacks(
 	onSyncSource func(int64),
 	onProcessPending func(),
 	onRefreshRate func(),
+	onRedownload func(int64),
 ) {
 	rt.task.SetCheckNowFunc(onCheckNow)
 	rt.credential.SetCredentialUpdateFunc(onCredentialUpdate)
 	rt.videos.SetRetryDownloadFunc(onRetryDownload)
 	rt.videos.SetProcessPendingFunc(onProcessPending)
+	rt.videos.SetRedownloadFunc(onRedownload)
 	rt.sources.SetSyncSourceFunc(onSyncSource)
 	rt.settings.SetRefreshRateFunc(onRefreshRate)
 }

@@ -21,6 +21,7 @@ type VideosHandler struct {
 	downloadDir     string
 	onRetryDownload func(int64)
 	onProcessPending func()
+	onRedownload    func(int64)
 }
 
 func NewVideosHandler(database *db.DB, downloadDir string) *VideosHandler {
@@ -33,6 +34,10 @@ func (h *VideosHandler) SetRetryDownloadFunc(fn func(int64)) {
 
 func (h *VideosHandler) SetProcessPendingFunc(fn func()) {
 	h.onProcessPending = fn
+}
+
+func (h *VideosHandler) SetRedownloadFunc(fn func(int64)) {
+	h.onRedownload = fn
 }
 
 // GET /api/videos — 视频列表（分页 + 筛选 + 排序）
@@ -190,8 +195,10 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 	// 清空旧的 file_path 和 thumb_path
 	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
 
-	// 触发 pending 处理
-	if h.onProcessPending != nil {
+	// 直接提交到下载队列（不依赖 sync 增量拉取）
+	if h.onRedownload != nil {
+		go h.onRedownload(id)
+	} else if h.onProcessPending != nil {
 		go h.onProcessPending()
 	}
 
@@ -206,6 +213,12 @@ func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request
 	if dl != nil && dl.FilePath != "" {
 		util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 	}
+
+	// 回退 source 的 latest_video_at，确保下次同步能扫到被删除的视频
+	if dl != nil && dl.SourceID > 0 {
+		h.rewindLatestVideoAt(dl.SourceID, dl.VideoID)
+	}
+
 	h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
 	log.Printf("[video] Deleted record %d", id)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
@@ -254,6 +267,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var affected int
+	var redownloadIDs []int64
 	for _, id := range req.IDs {
 		switch req.Action {
 		case "retry":
@@ -273,6 +287,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 				h.db.ResetRetryCount(id)
 				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
+				redownloadIDs = append(redownloadIDs, id)
 				affected++
 			}
 		case "cancel":
@@ -282,6 +297,9 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
 				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
+			}
+			if dl != nil && dl.SourceID > 0 {
+				h.rewindLatestVideoAt(dl.SourceID, dl.VideoID)
 			}
 			h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
 			affected++
@@ -299,8 +317,14 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 批量重新下载后触发 pending 处理
-	if req.Action == "redownload" && h.onProcessPending != nil {
-		go h.onProcessPending()
+	if req.Action == "redownload" {
+		if h.onRedownload != nil {
+			for _, id := range redownloadIDs {
+				go h.onRedownload(id)
+			}
+		} else if h.onProcessPending != nil {
+			go h.onProcessPending()
+		}
 	}
 
 	log.Printf("[video] Batch %s: %d items", req.Action, affected)
@@ -502,4 +526,23 @@ func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiError(w, CodeNotFound, "无封面图")
+}
+
+// rewindLatestVideoAt 回退 source 的 latest_video_at，确保下次同步时能扫到被删除的视频
+// 通过查询被删除视频的 created_at 来决定是否需要回退
+func (h *VideosHandler) rewindLatestVideoAt(sourceID int64, videoID string) {
+	// 获取被删除视频的 bilibili 发布时间
+	// 由于 downloads 表没有存 bilibili 的原始发布时间戳，我们需要查 source 的 latest_video_at
+	// 如果删了某条记录，直接把 latest_video_at 设为 0，让下次同步做一次全量扫描
+	// 这是最安全的方案：虽然会多扫一次，但保证不遗漏
+
+	var latestVideoAt int64
+	err := h.db.QueryRow("SELECT COALESCE(latest_video_at, 0) FROM sources WHERE id = ?", sourceID).Scan(&latestVideoAt)
+	if err != nil || latestVideoAt == 0 {
+		return // source 不存在或已经是 0，无需回退
+	}
+
+	// 重置为 0，下次同步时做全量扫描
+	h.db.Exec("UPDATE sources SET latest_video_at = 0 WHERE id = ?", sourceID)
+	log.Printf("[video] Reset latest_video_at for source %d (was %d) due to video deletion (%s)", sourceID, latestVideoAt, videoID)
 }

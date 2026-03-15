@@ -135,6 +135,7 @@ func main() {
 	server.SetRetryDownloadFunc(sched.RetryByID)
 	server.SetSyncSourceFunc(sched.CheckOneSource)
 	server.SetProcessPendingFunc(sched.ProcessAllPending)
+	server.SetRedownloadFunc(sched.RedownloadByID)
 	server.SetNotifier(sched.GetNotifier())
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
