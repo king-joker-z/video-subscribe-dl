@@ -48,6 +48,15 @@ type Scheduler struct {
 	// 热配置
 	hotConfig     *config.HotConfig
 	configWatcher *config.ConfigWatcher
+
+	// UP 主信息缓存（减少 API 请求）
+	upInfoCache   map[int64]*upInfoCacheEntry
+	upInfoCacheMu sync.RWMutex
+}
+
+type upInfoCacheEntry struct {
+	info      *bilibili.UPInfo
+	fetchedAt time.Time
 }
 
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
@@ -61,6 +70,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		notifier:    notify.New(database),
 		stopCh:      make(chan struct{}),
 		hotConfig:   config.NewHotConfig(),
+		upInfoCache: make(map[int64]*upInfoCacheEntry),
 		videoSema:   bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:    bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}

@@ -63,8 +63,12 @@ func (c *Client) getWbiKeys() (string, string, error) {
 		return wbiCacheInstance.imgKey, wbiCacheInstance.subKey, nil
 	}
 
+	// nav 请求也走令牌桶限流
+	if c.limiter != nil {
+		c.limiter.Acquire()
+	}
 	req, _ := http.NewRequest("GET", "https://api.bilibili.com/x/web-interface/nav", nil)
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	if c.cookie != "" {
 		req.Header.Set("Cookie", c.cookie)

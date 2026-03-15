@@ -54,7 +54,7 @@ func (c *Client) RefreshCookie(cookiePath string) (*CookieRefreshResult, error) 
 	}
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	if c.cookie != "" {
 		req.Header.Set("Cookie", c.cookie)

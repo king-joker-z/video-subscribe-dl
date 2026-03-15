@@ -51,6 +51,7 @@ type Client struct {
 	cookie     string
 	credential *Credential
 	limiter    *RateLimiter // API 请求令牌桶限流（下载流不走限流）
+	ua         string       // 固定 User-Agent（创建时随机选定，后续复用）
 }
 
 func NewClient(cookie string) *Client {
@@ -58,6 +59,7 @@ func NewClient(cookie string) *Client {
 		http:    &http.Client{Timeout: 30 * time.Second},
 		cookie:  cookie,
 		limiter: DefaultRateLimiter(),
+		ua:      randUA(),
 	}
 }
 
@@ -71,6 +73,7 @@ func NewClientWithCredential(cred *Credential) *Client {
 		credential: cred,
 		cookie:     cred.ToCookieString(),
 		limiter:    DefaultRateLimiter(),
+		ua:         randUA(),
 	}
 }
 
@@ -482,7 +485,7 @@ func (c *Client) get(rawURL string, result interface{}) error {
 		c.limiter.Acquire()
 	}
 	req, _ := http.NewRequest("GET", rawURL, nil)
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	if c.cookie != "" {
 		req.Header.Set("Cookie", c.cookie)

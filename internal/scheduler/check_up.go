@@ -21,8 +21,8 @@ func (s *Scheduler) checkUP(src db.Source) {
 		return
 	}
 
-	// UP 主信息
-	upInfo, err := client.GetUPInfo(mid)
+	// UP 主信息（优先缓存，6 小时内不重复请求）
+	upInfo, err := s.getUPInfoCached(client, mid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
@@ -231,4 +231,28 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 	}
 
 	log.Printf("[动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
+}
+
+
+const upInfoCacheTTL = 6 * time.Hour
+
+// getUPInfoCached 带缓存的 UP 主信息获取，减少 API 请求量
+func (s *Scheduler) getUPInfoCached(client *bilibili.Client, mid int64) (*bilibili.UPInfo, error) {
+	s.upInfoCacheMu.RLock()
+	if entry, ok := s.upInfoCache[mid]; ok && time.Since(entry.fetchedAt) < upInfoCacheTTL {
+		s.upInfoCacheMu.RUnlock()
+		return entry.info, nil
+	}
+	s.upInfoCacheMu.RUnlock()
+
+	info, err := client.GetUPInfo(mid)
+	if err != nil {
+		return nil, err
+	}
+
+	s.upInfoCacheMu.Lock()
+	s.upInfoCache[mid] = &upInfoCacheEntry{info: info, fetchedAt: time.Now()}
+	s.upInfoCacheMu.Unlock()
+
+	return info, nil
 }
