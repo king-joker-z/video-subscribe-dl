@@ -3,6 +3,7 @@ package bilibili
 import (
 	"context"
 	"fmt"
+	"sync"
 	"io"
 	"log"
 	"net/http"
@@ -30,6 +31,7 @@ func DownloadDashWithProgress(ctx context.Context, video, audio *DashStream, out
 
 // DownloadDashWithProgressChunked 下载 DASH 流（支持分块并行下载）
 // numChunks: 并行分块数（仅大文件生效）
+// 视频和音频流并行下载，完成后 ffmpeg 合并
 func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStream, outputDir, filename string, onProgress ProgressCallback, rateLimitBps int64, numChunks int) (string, error) {
 	os.MkdirAll(outputDir, 0755)
 
@@ -37,17 +39,39 @@ func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStre
 	audioTmp := filepath.Join(outputDir, ".audio.m4s")
 	outputPath := filepath.Join(outputDir, filename+".mkv")
 
-	// 下载视频流
-	log.Printf("Downloading video: %dx%d %s (%d kbps)", video.Width, video.Height, video.Codecs, video.Bandwidth/1000)
-	if err := downloadStreamWithProgressChunked(ctx, video, videoTmp, "video", onProgress, rateLimitBps, numChunks); err != nil {
-		return "", fmt.Errorf("download video: %w", err)
+	// 并行下载视频和音频流
+	var videoErr, audioErr error
+	var wg sync.WaitGroup
+
+	// 限速平分给视频和音频
+	videoRateLimit := rateLimitBps
+	audioRateLimit := rateLimitBps
+	if rateLimitBps > 0 {
+		videoRateLimit = rateLimitBps * 3 / 4 // 视频分 75%
+		audioRateLimit = rateLimitBps / 4      // 音频分 25%
 	}
 
-	// 下载音频流
-	log.Printf("Downloading audio: %s (%d kbps)", audio.Codecs, audio.Bandwidth/1000)
-	if err := downloadStreamWithProgressChunked(ctx, audio, audioTmp, "audio", onProgress, rateLimitBps, numChunks); err != nil {
-		// 保留 videoTmp 供断点续传，不删除
-		return "", fmt.Errorf("download audio: %w", err)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Printf("Downloading video: %dx%d %s (%d kbps)", video.Width, video.Height, video.Codecs, video.Bandwidth/1000)
+		videoErr = downloadStreamWithProgressChunked(ctx, video, videoTmp, "video", onProgress, videoRateLimit, numChunks)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Printf("Downloading audio: %s (%d kbps)", audio.Codecs, audio.Bandwidth/1000)
+		audioErr = downloadStreamWithProgressChunked(ctx, audio, audioTmp, "audio", onProgress, audioRateLimit, numChunks)
+	}()
+
+	wg.Wait()
+
+	if videoErr != nil {
+		return "", fmt.Errorf("download video: %w", videoErr)
+	}
+	if audioErr != nil {
+		return "", fmt.Errorf("download audio: %w", audioErr)
 	}
 
 	// ffmpeg 合并 — 通知前端
