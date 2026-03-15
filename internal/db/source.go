@@ -151,3 +151,16 @@ func (d *DB) CleanSource(id int64) (int, error) {
 
 	return count, nil
 }
+
+// UpdateSourceLatestVideoAt 更新源的最新视频时间戳
+func (d *DB) UpdateSourceLatestVideoAt(id int64, ts int64) error {
+	_, err := d.Exec("UPDATE sources SET latest_video_at = ? WHERE id = ?", ts, id)
+	return err
+}
+
+// GetSourceLatestVideoAt 获取源的最新视频时间戳
+func (d *DB) GetSourceLatestVideoAt(id int64) (int64, error) {
+	var ts int64
+	err := d.QueryRow("SELECT COALESCE(latest_video_at, 0) FROM sources WHERE id = ?", id).Scan(&ts)
+	return ts, err
+}

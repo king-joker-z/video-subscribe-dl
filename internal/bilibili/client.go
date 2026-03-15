@@ -737,3 +737,27 @@ func ExtractCollectionInfo(rawURL string) (*CollectionInfo, error) {
 
 	return nil, fmt.Errorf("cannot extract collection info from: %s", rawURL)
 }
+
+// GetSeriesVideosSorted 获取 Series 内视频列表（分页，支持排序方向）
+// sortOrder: "asc" 或 "desc"
+func (c *Client) GetSeriesVideosSorted(mid, seriesID int64, page, pageSize int, sortOrder string) ([]SeriesArchive, int, error) {
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			Archives []SeriesArchive `json:"archives"`
+			Page     struct {
+				Total int `json:"total"`
+			} `json:"page"`
+		} `json:"data"`
+	}
+	url := fmt.Sprintf("https://api.bilibili.com/x/series/archives?mid=%d&series_id=%d&pn=%d&ps=%d&sort=%s",
+		mid, seriesID, page, pageSize, sortOrder)
+	if err := c.get(url, &resp); err != nil {
+		return nil, 0, err
+	}
+	if resp.Code != 0 {
+		return nil, 0, fmt.Errorf("bilibili: %d %s", resp.Code, resp.Msg)
+	}
+	return resp.Data.Archives, resp.Data.Page.Total, nil
+}

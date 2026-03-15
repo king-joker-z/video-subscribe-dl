@@ -20,11 +20,28 @@ import (
 
 // fetchAndProcessSeason 统一处理合集（Season 类型）的翻页、去重、目录创建、NFO 生成、封面下载和视频遍历。
 // checkSeason（独立合集源）和 processCollection（UP 主空间内合集）均委托此方法。
+// 支持增量拉取：根据 source 的 latest_video_at 判断是否需要全量翻页。
 func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client, mid, seasonID int64, uploaderName, uploaderDir string, upInfo *bilibili.UPInfo) {
+	// 获取增量基准时间
+	latestVideoAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
+	isFirstScan := latestVideoAt == 0
+
+	// 首次扫描页数限制
+	firstScanPages := 0
+	if val, err := s.db.GetSetting("first_scan_pages"); err == nil && val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			firstScanPages = n
+		}
+	}
+
 	var allArchives []bilibili.SeasonArchive
 	var meta *bilibili.SeasonMeta
 	page := 1
 	pageSize := 100
+	totalChecked := 0
+	var maxPubDate int64
+	stopped := false
+
 	for {
 		archives, m, err := client.GetSeasonVideos(mid, seasonID, page, pageSize)
 		if err != nil {
@@ -39,10 +56,36 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 		if meta == nil {
 			meta = m
 		}
-		allArchives = append(allArchives, archives...)
+
+		for _, a := range archives {
+			totalChecked++
+
+			// 增量检查: 合集视频按发布时间倒序排列，遇到旧视频就停止
+			if !isFirstScan && a.PubDate <= latestVideoAt {
+				stopped = true
+				break
+			}
+
+			if a.PubDate > maxPubDate {
+				maxPubDate = a.PubDate
+			}
+
+			allArchives = append(allArchives, a)
+		}
+
+		if stopped {
+			break
+		}
 		if len(archives) < pageSize {
 			break
 		}
+
+		// 首次扫描页数限制
+		if isFirstScan && firstScanPages > 0 && page >= firstScanPages {
+			log.Printf("[season][首次全量] 达到页数限制 %d 页，停止翻页", firstScanPages)
+			break
+		}
+
 		page++
 		time.Sleep(time.Duration(300+rand.Intn(300)) * time.Millisecond)
 	}
@@ -50,6 +93,13 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 	if meta == nil {
 		log.Printf("Get season %d failed: no metadata", seasonID)
 		return
+	}
+
+	// 更新 latest_video_at
+	if maxPubDate > latestVideoAt {
+		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxPubDate); err != nil {
+			log.Printf("[season][WARN] 更新 latest_video_at 失败: %v", err)
+		}
 	}
 
 	// 自动更新源名称
@@ -62,7 +112,16 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 	collectionDir := filepath.Join(s.downloadDir, uploaderDir, collectionName)
 	os.MkdirAll(collectionDir, 0755)
 
-	log.Printf("Season/Collection: %s by %s (%d videos, pages: %d)", meta.Title, uploaderName, len(allArchives), page)
+	if isFirstScan {
+		log.Printf("[season][首次全量] %s by %s: %d 个视频 (翻页 %d)",
+			meta.Title, uploaderName, len(allArchives), page)
+	} else if stopped {
+		log.Printf("[season][增量] %s by %s: %d 个新视频 (共检查 %d, 在第 %d 页停止)",
+			meta.Title, uploaderName, len(allArchives), totalChecked, page)
+	} else {
+		log.Printf("[season][增量] %s by %s: %d 个新视频 (共检查 %d, 翻页 %d)",
+			meta.Title, uploaderName, len(allArchives), totalChecked, page)
+	}
 
 	premiered := ""
 	if len(allArchives) > 0 {

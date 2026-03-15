@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 )
 
-// checkFavorite 检查收藏夹源，翻页获取所有视频
+// checkFavorite 检查收藏夹源，翻页获取所有视频（支持增量）
 func (s *Scheduler) checkFavorite(src db.Source) {
 	client := s.clientForSource(src)
 
@@ -23,7 +24,6 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 
 	// 如果 mediaID 为空但 URL 里有 fid，尝试解析
 	if mediaID == 0 {
-		// 可能只有 mid，获取所有收藏夹，取第一个（默认收藏夹）
 		folders, err := client.GetFavoriteList(mid)
 		if err != nil {
 			if errors.Is(err, bilibili.ErrRateLimited) {
@@ -63,10 +63,30 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 		s.db.UpsertPerson(fmt.Sprintf("%d", upInfo.MID), upInfo.Name, upInfo.Face)
 	}
 
-	// 翻页获取收藏夹内所有视频
+	// 增量基准
+	latestVideoAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
+	isFirstScan := latestVideoAt == 0
+
+	firstScanPages := 0
+	if val, err := s.db.GetSetting("first_scan_pages"); err == nil && val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			firstScanPages = n
+		}
+	}
+
+	if isFirstScan {
+		log.Printf("[favorite][首次全量] %s: 开始全量扫描", src.Name)
+	} else {
+		log.Printf("[favorite][增量] %s: 基准时间 %s",
+			src.Name, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
+	}
+
 	pageSize := 20
 	page := 1
 	totalFetched := 0
+	totalNew := 0
+	var maxPubDate int64
+	stopped := false
 
 	for {
 		videos, hasMore, err := client.GetFavoriteVideos(mediaID, page, pageSize)
@@ -80,13 +100,30 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 			break
 		}
 		if page == 1 {
-			log.Printf("Favorite: fetching videos (page %d, got %d)...", page, len(videos))
+			if isFirstScan {
+				log.Printf("[favorite][首次全量] 翻页获取中 (page %d, got %d)...", page, len(videos))
+			}
 		}
 
 		for _, v := range videos {
 			if v.BvID == "" {
-				continue // 已失效的视频
+				continue
 			}
+
+			totalFetched++
+
+			// 增量检查：收藏夹视频按收藏时间倒序，PubDate 为发布时间
+			if !isFirstScan && v.PubDate <= latestVideoAt {
+				stopped = true
+				break
+			}
+
+			if v.PubDate > maxPubDate {
+				maxPubDate = v.PubDate
+			}
+
+			totalNew++
+
 			uploaderName := v.Owner.Name
 			uploaderDir := bilibili.SanitizePath(uploaderName)
 			ownerInfo := &bilibili.UPInfo{MID: v.Owner.MID, Name: v.Owner.Name, Face: v.Owner.Face}
@@ -97,12 +134,37 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 			s.processOneVideo(src, client, v.BvID, v.Title, v.Pic, uploaderName, uploaderDir, "", ownerInfo)
 		}
 
-		totalFetched += len(videos)
+		if stopped {
+			break
+		}
 		if !hasMore || len(videos) < pageSize {
 			break
 		}
+
+		// 首次扫描页数限制
+		if isFirstScan && firstScanPages > 0 && page >= firstScanPages {
+			log.Printf("[favorite][首次全量] 达到页数限制 %d 页，停止翻页", firstScanPages)
+			break
+		}
+
 		page++
 		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
 	}
-	log.Printf("Favorite: fetched %d videos (pages: %d)", totalFetched, page)
+
+	// 更新 latest_video_at
+	if maxPubDate > latestVideoAt {
+		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxPubDate); err != nil {
+			log.Printf("[favorite][WARN] 更新 latest_video_at 失败: %v", err)
+		}
+	}
+
+	if isFirstScan {
+		log.Printf("[favorite][首次全量] %s: %d 个视频 (翻页 %d)", src.Name, totalNew, page)
+	} else if stopped {
+		log.Printf("[favorite][增量] %s: %d 个新视频 (共检查 %d, 在第 %d 页停止)",
+			src.Name, totalNew, totalFetched, page)
+	} else {
+		log.Printf("[favorite][增量] %s: %d 个新视频 (共检查 %d, 翻页 %d)",
+			src.Name, totalNew, totalFetched, page)
+	}
 }
