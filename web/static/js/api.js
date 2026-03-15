@@ -93,10 +93,7 @@ export const api = {
   // UP 主下载 pending（专用 endpoint）
   uploaderDownloadPending: (name) => request(`/api/uploaders/${encodeURIComponent(name)}/download-pending`, { method: 'POST' }),
 
-  // Old APIs (deprecated)
-  processAllPending: () => fetch('/api/downloads/batch/process-pending', { method: 'POST' }).then(r => r.json()),
-  retryAllFailed: () => fetch('/api/downloads/batch/retry-failed', { method: 'POST' }).then(r => r.json()),
-};
+  };
 
 // SSE 事件源
 export function createEventSource(onProgress, onLog, onConnected) {
