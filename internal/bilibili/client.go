@@ -305,10 +305,10 @@ func (c *Client) get(rawURL string, result interface{}) error {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == 412 {
 		log.Printf("[WARN] B站风控: HTTP 412 请求过于频繁, url=%s", rawURL)
-		return ErrRateLimited
+		return NewInvalidStatusCode(412, "请求过于频繁")
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return NewInvalidStatusCode(resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}
 	if err := json.Unmarshal(body, result); err != nil {
 		return err
@@ -317,7 +317,7 @@ func (c *Client) get(rawURL string, result interface{}) error {
 	return checkRateLimitCode(body)
 }
 
-// checkRateLimitCode 检测 B站 API 响应中的风控码
+// checkRateLimitCode 检测 B站 API 响应中的风控码，返回 *BiliError 或 nil
 func checkRateLimitCode(body []byte) error {
 	var base struct {
 		Code int `json:"code"`
@@ -328,13 +328,13 @@ func checkRateLimitCode(body []byte) error {
 	switch base.Code {
 	case -352:
 		log.Printf("[WARN] B站风控: code=-352 (风控校验失败)")
-		return ErrRateLimited
+		return NewErrorResponse(-352, "风控校验失败")
 	case -401:
 		log.Printf("[WARN] B站风控: code=-401 (未登录/鉴权失败)")
-		return ErrRateLimited
+		return NewErrorResponse(-401, "未登录/鉴权失败")
 	case -412:
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
-		return ErrRateLimited
+		return NewErrorResponse(-412, "请求过于频繁")
 	}
 
 	// v_voucher 风控检测: data.v_voucher 非空即触发
@@ -345,7 +345,7 @@ func checkRateLimitCode(body []byte) error {
 	}
 	if err := json.Unmarshal(body, &voucherCheck); err == nil && voucherCheck.Data.VVoucher != "" {
 		log.Printf("[WARN] B站风控: v_voucher detected (需要人机验证)")
-		return ErrRateLimited
+		return NewRiskControlError("v_voucher detected, 需要人机验证")
 	}
 
 	return nil

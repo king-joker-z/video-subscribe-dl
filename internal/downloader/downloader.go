@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -261,7 +260,7 @@ func isRetryableError(err error) bool {
 		return false
 	}
 	// 风控错误不重试，由 scheduler 层面统一处理冷却
-	if errors.Is(err, bilibili.ErrRateLimited) {
+	if bilibili.IsRiskControl(err) {
 		return false
 	}
 	errStr := err.Error()
@@ -301,7 +300,7 @@ func (d *Downloader) downloadWithRetry(job *Job) *Result {
 	}
 
 	// 风控错误：暂停下载队列，不重试
-	if errors.Is(result.Error, bilibili.ErrRateLimited) {
+	if bilibili.IsRiskControl(result.Error) {
 		log.Printf("[downloader] 风控错误，暂停下载队列: %s", job.BvID)
 		d.Pause()
 		return result

@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -29,7 +28,7 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 	for {
 		archives, m, err := client.GetSeasonVideos(mid, seasonID, page, pageSize)
 		if err != nil {
-			if errors.Is(err, bilibili.ErrRateLimited) {
+			if bilibili.IsRiskControl(err) {
 				s.triggerCooldown()
 				s.dl.Pause()
 				return
@@ -246,7 +245,7 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 
 	detail, err := client.GetVideoDetail(bvid)
 	if err != nil {
-		if errors.Is(err, bilibili.ErrRateLimited) {
+		if bilibili.IsRiskControl(err) {
 			s.triggerCooldown()
 			s.dl.Pause()
 		} else {
