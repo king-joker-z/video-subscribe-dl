@@ -1,6 +1,7 @@
 import React from 'react';
 import { api } from '../api.js';
 import { cn, formatBytes, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState } from '../components/utils.js';
+import { VideoDetailModal } from '../components/video-detail.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 export function VideosPage({ params = {} } = {}) {
@@ -15,6 +16,7 @@ export function VideosPage({ params = {} } = {}) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
   const [viewMode, setViewMode] = useState('table');
+  const [detailVideo, setDetailVideo] = useState(null);
   const searchTimer = useRef(null);
   const [progress, setProgress] = useState([]);
 
@@ -111,7 +113,22 @@ export function VideosPage({ params = {} } = {}) {
     } catch (e) { toast.error(e.message); }
   };
 
+  // 点击行打开详情（避免与 checkbox/按钮冲突）
+  const openDetail = (v, e) => {
+    // 如果点击的是 checkbox、button、a 标签则不打开详情
+    const tag = e.target.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'button' || tag === 'a') return;
+    if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) return;
+    setDetailVideo(v);
+  };
+
   return h('div', { className: 'page-enter space-y-4' },
+    // 视频详情弹窗
+    detailVideo && h(VideoDetailModal, {
+      video: detailVideo,
+      onClose: () => setDetailVideo(null),
+      onAction: () => { load(); }
+    }),
     // 顶栏
     h('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
       h('h2', { className: 'text-lg font-semibold' }, '视频列表'),
@@ -194,7 +211,11 @@ export function VideosPage({ params = {} } = {}) {
                 h('tbody', null,
                   videos.map(v => {
                     const prog = getProgress(v.id);
-                    return h('tr', { key: v.id, className: 'border-b border-slate-700/30 hover:bg-slate-800/50' },
+                    return h('tr', {
+                      key: v.id,
+                      className: 'border-b border-slate-700/30 hover:bg-slate-800/50 cursor-pointer',
+                      onClick: (e) => openDetail(v, e)
+                    },
                       h('td', { className: 'py-3 pr-3' },
                         h('input', { type: 'checkbox', checked: selected.has(v.id), onChange: () => toggleSelect(v.id), className: 'rounded' })
                       ),
@@ -244,17 +265,61 @@ export function VideosPage({ params = {} } = {}) {
               )
             )
           : h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
-              videos.map(v => h(Card, { key: v.id, hover: true, className: 'group' },
-                h('div', { className: 'min-w-0' },
-                  h('div', { className: 'text-sm font-medium truncate' }, v.title || v.video_id),
-                  h('div', { className: 'text-xs text-slate-500 mt-0.5' }, v.uploader || '--'),
-                  h('div', { className: 'flex items-center gap-2 mt-2' },
-                    h(StatusBadge, { status: v.status }),
-                    v.file_size > 0 && h('span', { className: 'text-xs text-slate-500' }, formatBytes(v.file_size))
-                  )
-                )
-              ))
+              videos.map(v => h(VideoCard, {
+                key: v.id, video: v,
+                progress: getProgress(v.id),
+                onClick: () => setDetailVideo(v)
+              }))
             ),
     h(Pagination, { page, pageSize, total, onChange: setPage })
   );
+}
+
+// 视频卡片组件（带封面图）
+function VideoCard({ video: v, progress: prog, onClick }) {
+  const [imgError, setImgError] = useState(false);
+  const thumbSrc = `/api/thumb/${v.id}`;
+
+  return h(Card, { hover: true, className: 'group overflow-hidden', onClick },
+    // 封面图区域
+    h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-900 overflow-hidden' },
+      !imgError
+        ? h('img', {
+            src: thumbSrc,
+            className: 'w-full h-full object-cover',
+            referrerPolicy: 'no-referrer',
+            loading: 'lazy',
+            onError: () => setImgError(true)
+          })
+        : h('div', { className: 'w-full h-full flex items-center justify-center text-slate-700' },
+            h(Icon, { name: 'video', size: 32 })
+          ),
+      // 时长标签
+      v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/75 text-white text-xs px-1.5 py-0.5 rounded' },
+        formatDurationShort(v.duration)
+      ),
+      // 进度条
+      prog && h('div', { className: 'absolute bottom-0 left-0 right-0 h-1 bg-black/30' },
+        h('div', { className: 'bg-blue-500 h-1 progress-bar', style: { width: (prog.percent || 0) + '%' } })
+      )
+    ),
+    // 信息
+    h('div', { className: 'min-w-0' },
+      h('div', { className: 'text-sm font-medium truncate leading-snug' }, v.title || v.video_id),
+      h('div', { className: 'text-xs text-slate-500 mt-1 truncate' }, v.uploader || '--'),
+      h('div', { className: 'flex items-center gap-2 mt-2' },
+        h(StatusBadge, { status: v.status }),
+        v.file_size > 0 && h('span', { className: 'text-xs text-slate-500' }, formatBytes(v.file_size))
+      )
+    )
+  );
+}
+
+function formatDurationShort(sec) {
+  if (!sec || sec <= 0) return '';
+  const hr = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (hr > 0) return `${hr}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
