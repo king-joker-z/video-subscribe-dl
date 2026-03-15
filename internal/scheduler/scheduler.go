@@ -433,6 +433,7 @@ func (s *Scheduler) checkAllForce() {
 			time.Sleep(5 * time.Second)
 		}
 	}
+	s.ProcessAllPending()
 	log.Println("Manual sync completed")
 }
 

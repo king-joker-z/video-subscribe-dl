@@ -57,9 +57,10 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
-	// 充电专属检测：failed 的视频重试时如果发现是充电专属，更新状态
-	if detail.IsChargePlus() {
-		log.Printf("[retry-scheduler] 视频 %s (%s) 为充电专属/付费内容，更新为 charge_blocked", dl.Title, dl.VideoID)
+	// 充电专属检测
+	tryUpower, _ := s.db.GetSetting("try_upower")
+	if detail.IsChargePlus() && tryUpower != "true" {
+		log.Printf("[retry-scheduler] 视频 %s (%s) 为充电专属/付费内容，更新为 charge_blocked (try_upower=false)", dl.Title, dl.VideoID)
 		s.db.UpdateDownloadStatus(dl.ID, "charge_blocked", "", 0, "充电专属/付费视频")
 		return
 	}

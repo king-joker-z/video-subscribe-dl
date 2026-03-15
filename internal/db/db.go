@@ -192,7 +192,7 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 		query = fmt.Sprintf(`
 			SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
 			       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
-			       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
+			       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
 			       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
 			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 			FROM sources 
@@ -203,7 +203,7 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 		query = `
 			SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
 			       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
-			       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
+			       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
 			       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
 			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
 			FROM sources 
@@ -221,15 +221,16 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
+		var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
+			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
 			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
+		s.DownloadSubtitle = subtitle == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
 		s.UseDynamicAPI = useDynamic == 1
