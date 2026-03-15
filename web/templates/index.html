@@ -74,7 +74,7 @@
 
         <!-- Cookie 未配置引导提示 -->
         <div id="cookieGuideBanner" class="cookie-guide-banner" style="display:none;">
-            <span class="cookie-guide-text">🍪 请先在设置页面配置 B站 Cookie，否则无法下载高画质视频</span>
+            <span class="cookie-guide-text">🔑 请先在设置页面登录 B站账号，否则无法下载高画质视频</span>
             <button class="btn btn-sm btn-primary" onclick="goToCookieSettings()">前往设置</button>
             <button class="btn btn-sm btn-secondary" onclick="dismissCookieGuide()" style="margin-left:4px;">×</button>
         </div>
@@ -258,17 +258,40 @@
                 </div>
 
                 <div class="settings-group">
-                    <h3>🍪 Cookie 设置</h3>
+                    <h3>🔑 B站账号</h3>
                     <div class="settings-body">
-                    <p class="info-text">上传 B站 Cookie 文件以下载 1080p+ 画质视频 (无 Cookie 最高480p)</p>
-                    <p class="info-text">获取方式：浏览器安装 "Get cookies.txt LOCALLY" 扩展，登录B站后导出 cookies.txt</p>
-                    <div class="cookie-upload">
-                        <input type="file" id="cookieFile" accept=".txt">
-                        <button id="uploadCookieBtn" class="btn btn-primary">上传 Cookie</button>
-                        <button id="verifyCookieBtn" class="btn btn-secondary">🔍 验证</button>
+                    <div id="credentialStatusArea">
+                        <div id="credentialStatus" class="verify-result" style="margin-bottom:12px;"></div>
                     </div>
-                    <p id="cookieStatus" class="info-text"></p>
-                    <div id="cookieVerifyResult" class="verify-result"></div>
+
+                    <div style="margin-bottom:16px;">
+                        <h4 style="margin:0 0 8px;font-size:14px;">📱 扫码登录（推荐）</h4>
+                        <p class="info-text">使用 B站手机 APP 扫码，无需手动导出 Cookie</p>
+                        <div class="btn-row" style="align-items:flex-start;gap:12px;">
+                            <button id="qrLoginBtn" class="btn btn-primary" onclick="startQRLogin()">📱 生成二维码</button>
+                            <button id="clearCredBtn" class="btn btn-danger" onclick="clearCredential()" style="display:none">🗑 清除登录</button>
+                        </div>
+                        <div id="qrCodeArea" style="display:none;margin-top:12px;">
+                            <div id="qrCodeContainer" style="text-align:center;">
+                                <div id="qrCodeImg" style="display:inline-block;background:#fff;padding:12px;border-radius:8px;"></div>
+                            </div>
+                            <p id="qrCodeStatus" class="info-text" style="text-align:center;margin-top:8px;">等待扫码...</p>
+                        </div>
+                    </div>
+
+                    <details style="margin-top:8px;">
+                        <summary style="cursor:pointer;color:var(--text3);font-size:13px;">📁 Cookie 文件上传（备选方案）</summary>
+                        <div style="margin-top:8px;">
+                        <p class="info-text">浏览器安装 "Get cookies.txt LOCALLY" 扩展，登录B站后导出 cookies.txt</p>
+                        <div class="cookie-upload">
+                            <input type="file" id="cookieFile" accept=".txt">
+                            <button id="uploadCookieBtn" class="btn btn-primary">上传 Cookie</button>
+                            <button id="verifyCookieBtn" class="btn btn-secondary">🔍 验证</button>
+                        </div>
+                        <p id="cookieStatus" class="info-text"></p>
+                        <div id="cookieVerifyResult" class="verify-result"></div>
+                        </div>
+                    </details>
                     </div>
                 </div>
 

@@ -321,6 +321,8 @@ let cookieGuideChecked = false;
 function checkCookieGuide() {
     if (cookieGuideChecked) return;
     cookieGuideChecked = true;
+    // 同时检查 credential 状态
+    loadCredentialStatus();
     authFetch(API + '/api/settings').then(r => r.json()).then(s => {
         const banner = document.getElementById('cookieGuideBanner');
         if (!banner) return;
@@ -373,7 +375,7 @@ async function loadSettings() {
         if (s.cookie_path) {
             document.getElementById('cookieStatus').textContent = '已配置: ' + s.cookie_path;
             loadCookieVerifyStatus();
-            // Hide cookie guide banner
+            // Hide cookie guide banner (credential status handles this now)
             const banner = document.getElementById('cookieGuideBanner');
             if (banner) banner.style.display = 'none';
         }
@@ -1408,3 +1410,181 @@ updatePauseBtn = function() {
         mobileBtn.className = paused ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
     }
 };
+
+
+// ========================================
+// 扫码登录 & 凭证管理
+// ========================================
+
+let qrPollTimer = null;
+
+async function loadCredentialStatus() {
+    try {
+        const r = await authFetch(`${API}/api/credential/status`);
+        const d = await r.json();
+        renderCredentialStatus(d);
+    } catch (e) {
+        console.warn('Load credential status failed:', e);
+    }
+}
+
+function renderCredentialStatus(d) {
+    const el = document.getElementById('credentialStatus');
+    const clearBtn = document.getElementById('clearCredBtn');
+    if (!el) return;
+
+    if (!d.has_credential) {
+        el.innerHTML = '<span style="color:var(--warning)">⚠️ 未登录 — 下载画质限制为 480p</span>';
+        el.classList.add('show');
+        if (clearBtn) clearBtn.style.display = 'none';
+        // 显示 cookie guide banner
+        const banner = document.getElementById('cookieGuideBanner');
+        if (banner) banner.style.display = '';
+        return;
+    }
+
+    // 隐藏 banner
+    const banner = document.getElementById('cookieGuideBanner');
+    if (banner) banner.style.display = 'none';
+    if (clearBtn) clearBtn.style.display = '';
+
+    let sourceLabel = d.source === 'qrcode' ? '扫码登录' : d.source === 'cookie_file' ? 'Cookie 文件' : d.source || '未知';
+    let html = '';
+    if (d.need_refresh) {
+        html = `<span style="color:var(--warning)">⚠️ 凭证需要刷新</span>
+            <button class="btn btn-sm btn-primary" onclick="refreshCredential()" style="margin-left:8px">🔄 刷新</button>`;
+    } else if (d.username) {
+        html = `<span style="color:var(--success)">✅ 已登录</span>
+            <div style="margin-top:6px"><b>用户名:</b> ${esc(d.username)} &nbsp; <b>VIP:</b> <span style="color:#e91e8c">${esc(d.vip_label||'-')}</span></div>
+            <div style="margin-top:4px;color:var(--text3);font-size:12px">最高画质: ${esc(d.max_quality||'-')} &nbsp; 最高音质: ${esc(d.max_audio||'-')} &nbsp; 来源: ${esc(sourceLabel)}${d.updated_at ? ' &nbsp; 更新: '+esc(d.updated_at) : ''}</div>`;
+    } else {
+        html = `<span style="color:var(--success)">✅ 凭证已配置</span> <span style="color:var(--text3);font-size:12px">(来源: ${esc(sourceLabel)})</span>`;
+    }
+    el.innerHTML = html;
+    el.classList.add('show');
+}
+
+async function startQRLogin() {
+    const btn = document.getElementById('qrLoginBtn');
+    const area = document.getElementById('qrCodeArea');
+    btn.disabled = true;
+    btn.textContent = '⏳ 生成中...';
+
+    try {
+        const r = await authFetch(`${API}/api/login/qrcode/generate`, {method:'POST'});
+        const d = await r.json();
+        if (!d.ok) { toast('生成二维码失败: ' + (d.error||''), 'error'); return; }
+
+        area.style.display = '';
+        // 生成二维码图片（使用公共 QR code API）
+        const qrImg = document.getElementById('qrCodeImg');
+        qrImg.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(d.url)}" alt="B站扫码登录" style="width:200px;height:200px;">`;
+        document.getElementById('qrCodeStatus').textContent = '请使用 B站手机 APP 扫描二维码';
+
+        btn.textContent = '📱 等待扫码...';
+
+        // 开始轮询
+        startQRPoll(d.qrcode_key);
+    } catch (e) {
+        toast('生成二维码失败: ' + e.message, 'error');
+    } finally {
+        if (btn.textContent === '⏳ 生成中...') {
+            btn.disabled = false;
+            btn.textContent = '📱 生成二维码';
+        }
+    }
+}
+
+function startQRPoll(qrcodeKey) {
+    if (qrPollTimer) clearInterval(qrPollTimer);
+    let elapsed = 0;
+    const maxWait = 180; // 3 分钟超时
+
+    qrPollTimer = setInterval(async () => {
+        elapsed += 2;
+        if (elapsed > maxWait) {
+            stopQRPoll();
+            document.getElementById('qrCodeStatus').textContent = '⏰ 二维码已超时，请重新生成';
+            resetQRButton();
+            return;
+        }
+
+        try {
+            const r = await authFetch(`${API}/api/login/qrcode/poll?qrcode_key=${encodeURIComponent(qrcodeKey)}`);
+            const d = await r.json();
+            const statusEl = document.getElementById('qrCodeStatus');
+
+            switch (d.status) {
+                case 0: // 成功
+                    stopQRPoll();
+                    statusEl.innerHTML = '<span style="color:var(--success)">✅ 登录成功！</span>';
+                    if (d.username) {
+                        statusEl.innerHTML += ` 欢迎 <b>${esc(d.username)}</b>`;
+                    }
+                    toast('B站登录成功', 'success');
+                    resetQRButton();
+                    // 刷新凭证状态
+                    setTimeout(() => {
+                        loadCredentialStatus();
+                        document.getElementById('qrCodeArea').style.display = 'none';
+                    }, 2000);
+                    break;
+                case 86090: // 已扫码
+                    statusEl.textContent = '📱 已扫码，请在手机上确认登录';
+                    break;
+                case 86038: // 过期
+                    stopQRPoll();
+                    statusEl.textContent = '⏰ 二维码已过期，请重新生成';
+                    resetQRButton();
+                    break;
+                case 86101: // 未扫描
+                    // 保持等待状态
+                    break;
+                default:
+                    statusEl.textContent = d.message || '未知状态';
+            }
+        } catch (e) {
+            console.warn('QR poll error:', e);
+        }
+    }, 2000);
+}
+
+function stopQRPoll() {
+    if (qrPollTimer) {
+        clearInterval(qrPollTimer);
+        qrPollTimer = null;
+    }
+}
+
+function resetQRButton() {
+    const btn = document.getElementById('qrLoginBtn');
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = '📱 生成二维码';
+    }
+}
+
+async function refreshCredential() {
+    try {
+        const r = await authFetch(`${API}/api/credential/refresh`, {method:'POST'});
+        const d = await r.json();
+        if (d.ok) {
+            toast('凭证刷新成功', 'success');
+            loadCredentialStatus();
+        } else {
+            toast('刷新失败: ' + (d.error||''), 'error');
+        }
+    } catch (e) { toast('刷新失败: ' + e.message, 'error'); }
+}
+
+async function clearCredential() {
+    if (!confirm('确定要清除登录凭证吗？清除后需要重新登录。')) return;
+    try {
+        const r = await authFetch(`${API}/api/credential/clear`, {method:'POST'});
+        const d = await r.json();
+        if (d.ok) {
+            toast('凭证已清除', 'success');
+            loadCredentialStatus();
+        }
+    } catch (e) { toast('清除失败: ' + e.message, 'error'); }
+}

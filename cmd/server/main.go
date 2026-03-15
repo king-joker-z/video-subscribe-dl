@@ -49,9 +49,34 @@ func main() {
 	}
 	defer database.Close()
 
+	// 优先从 DB 加载 Credential（新鉴权模式）
+	var biliClient *bilibili.Client
+	credJSON, _ := database.GetSetting("credential_json")
+	cred := bilibili.CredentialFromJSON(credJSON)
+	if cred != nil && !cred.IsEmpty() {
+		biliClient = bilibili.NewClientWithCredential(cred)
+		credSource, _ := database.GetSetting("credential_source")
+		log.Printf("Loaded credential from DB (source: %s, user: %s)", credSource, cred.DedeUserID)
+	} else {
+		// Fallback: 从 cookie 文件加载
+		cookiePath, _ := database.GetSetting("cookie_path")
+		cookie := bilibili.ReadCookieFile(cookiePath)
+		biliClient = bilibili.NewClient(cookie)
+		if cookie != "" {
+			log.Printf("Loaded cookie from file: %s", cookiePath)
+			// 自动转换为 Credential 存 DB
+			fileCred := bilibili.CredentialFromCookieFile(cookiePath)
+			if fileCred != nil {
+				database.SetSetting("credential_json", fileCred.ToJSON())
+				database.SetSetting("credential_source", "cookie_file")
+				biliClient = bilibili.NewClientWithCredential(fileCred)
+				log.Printf("Cookie file auto-converted to Credential")
+			}
+		} else {
+			log.Printf("No credential or cookie configured - downloads limited to 480p")
+		}
+	}
 	cookiePath, _ := database.GetSetting("cookie_path")
-	cookie := bilibili.ReadCookieFile(cookiePath)
-	biliClient := bilibili.NewClient(cookie)
 
 	dl := downloader.New(downloader.Config{
 		MaxConcurrent:   config.DefaultDownloadWorkers,
@@ -102,6 +127,7 @@ func main() {
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)
 	server.SetCheckNowFunc(sched.CheckNow)
 	server.SetCookieUpdateFunc(sched.UpdateCookie)
+	server.SetCredentialUpdateFunc(sched.UpdateCredential)
 	server.SetRetryDownloadFunc(sched.RetryByID)
 	server.SetSyncSourceFunc(sched.CheckOneSource)
 	server.SetProcessPendingFunc(sched.ProcessAllPending)

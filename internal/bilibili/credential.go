@@ -10,8 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/big"
-	"net/http"
+		"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -417,6 +416,3 @@ func VerifyCredential(cred *Credential, httpClient *http.Client) (*CookieVerifyR
 	client := NewClientWithCredential(cred)
 	return client.VerifyCookie()
 }
-
-// unused import guard for math/big
-var _ = big.NewInt
