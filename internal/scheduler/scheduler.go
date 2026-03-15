@@ -40,6 +40,10 @@ type Scheduler struct {
 
 	// Credential 管理
 	db2          *db.DB   // alias, same as db (for clarity in credential methods)
+
+	// 并发控制信号量（参考 bili-sync workflow.rs）
+	videoSema *bilibili.Semaphore // video 级别并发限制
+	pageSema  *bilibili.Semaphore // page 级别并发限制
 }
 
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
@@ -52,6 +56,8 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		cookiePath:  cookiePath,
 		notifier:    notify.New(database),
 		stopCh:      make(chan struct{}),
+		videoSema:   bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
+		pageSema:    bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}
 }
 

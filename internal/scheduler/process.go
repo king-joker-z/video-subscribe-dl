@@ -234,6 +234,12 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 }
 
 func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid, title, pic, uploaderName, uploaderDir, collectionName string, upInfo *bilibili.UPInfo) {
+	// video 级别信号量: 控制同时处理的视频数
+	if s.videoSema != nil {
+		s.videoSema.Acquire()
+		defer s.videoSema.Release()
+	}
+
 	// 标题过滤: 在 API 调用前预过滤，降低风控风险
 	if src.DownloadFilter != "" && !matchesFilter(title, src.DownloadFilter) {
 		return
