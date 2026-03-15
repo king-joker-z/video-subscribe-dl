@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"video-subscribe-dl/internal/notify"
 	"video-subscribe-dl/internal/scanner"
 	"video-subscribe-dl/internal/util"
+	newapi "video-subscribe-dl/web/api"
 )
 
 // Rate limiter 结构
@@ -37,7 +37,6 @@ var (
 )
 
 func init() {
-	// 每分钟重置 rateLimiter，防止 IP 条目无限增长导致内存泄漏
 	go func() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
@@ -61,17 +60,20 @@ type Server struct {
 	httpServer     *http.Server
 	templates      *template.Template
 	notifier       *notify.Notifier
-	onCheckNow     func()
+	apiRouter      *newapi.Router
+
+	// Callbacks
+	onCheckNow          func()
 	onCookieUpdate      func(string)
 	onCredentialUpdate  func(*bilibili.Credential)
-	onRetryDownload func(int64)
-	onSyncSource      func(int64)
-	onProcessPending  func()
+	onRetryDownload     func(int64)
+	onSyncSource        func(int64)
+	onProcessPending    func()
+
 	version        string
 	buildTime      string
 	startTime      time.Time
 
-	// 缓存 rate limit 设置值，避免每次请求读 DB
 	cachedRateLimit   int
 	rateLimitMu       sync.RWMutex
 }
@@ -85,7 +87,7 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 		dataDir:         dataDir,
 		downloadDir:     downloadDir,
 		mux:             http.NewServeMux(),
-		cachedRateLimit: 200, // 默认值
+		cachedRateLimit: 200,
 	}
 
 	// 启动时从 DB 读取 rate limit 设置
@@ -98,56 +100,29 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 	// 加载模板
 	s.templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
-	// API 路由（必须在 / 之前注册）
-	s.mux.HandleFunc("/api/progress/stream", s.handleProgressStream)
-	s.mux.HandleFunc("/api/sources/", s.handleSourceByID)
-	s.mux.HandleFunc("/api/sources", s.handleSources)
-	s.mux.HandleFunc("/api/downloads/batch/process-pending", s.handleBatchProcessPending)
-	s.mux.HandleFunc("/api/downloads/batch/retry-failed", s.handleBatchRetryFailed)
-	s.mux.HandleFunc("/api/downloads/batch/completed", s.handleBatchDeleteCompleted)
-	s.mux.HandleFunc("/api/downloads/", s.handleDownloadByID)
-	s.mux.HandleFunc("/api/downloads/uploaders", s.handleDownloadUploaders)
-	s.mux.HandleFunc("/api/downloads/by-uploader", s.handleDownloadsByUploader)
-	s.mux.HandleFunc("/api/downloads/actions", s.handleDownloadActions)
-	s.mux.HandleFunc("/api/downloads/stats-by-uploader", s.handleDownloadStatsByUploader)
-	s.mux.HandleFunc("/api/downloads/retry-failed-by-uploader", s.handleRetryFailedByUploader)
-	s.mux.HandleFunc("/api/downloads/process-pending-by-uploader", s.handleProcessPendingByUploader)
-	s.mux.HandleFunc("/api/downloads/completed-by-uploader", s.handleCompletedByUploader)
-	s.mux.HandleFunc("/api/downloads", s.handleDownloads)
-	s.mux.HandleFunc("/api/queue/run", s.handleQueueRun)
-	s.mux.HandleFunc("/api/queue/pause", s.handleQueuePause)
-	s.mux.HandleFunc("/api/queue/resume", s.handleQueueResume)
-	s.mux.HandleFunc("/api/queue", s.handleQueue)
-	s.mux.HandleFunc("/api/scan", s.handleScan)
-	s.mux.HandleFunc("/api/scan/status", s.handleScanStatus)
-	s.mux.HandleFunc("/api/scan/fix", s.handleScanFix)
-	s.mux.HandleFunc("/api/settings", s.handleSettings)
-	s.mux.HandleFunc("/api/settings/", s.handleSettingByKey)
-	s.mux.HandleFunc("/api/login/qrcode/generate", s.handleQRCodeGenerate)
-	s.mux.HandleFunc("/api/login/qrcode/poll", s.handleQRCodePoll)
-	s.mux.HandleFunc("/api/credential/status", s.handleCredentialStatus)
-	s.mux.HandleFunc("/api/credential/refresh", s.handleCredentialRefresh)
-	s.mux.HandleFunc("/api/credential/clear", s.handleCredentialClear)
-	s.mux.HandleFunc("/api/cookie/upload", s.handleCookieUpload)
-	s.mux.HandleFunc("/api/cookie/verify", s.handleCookieVerify)
-	s.mux.HandleFunc("/api/clean/source/", s.handleCleanSource)
-	s.mux.HandleFunc("/api/clean/uploader/", s.handleCleanUploader)
-	s.mux.HandleFunc("/api/people/", s.handlePeopleByName)
-	s.mux.HandleFunc("/api/people", s.handlePeople)
-	s.mux.HandleFunc("/api/stats", s.handleStats)
-	s.mux.HandleFunc("/api/logs/stream", s.handleLogStream)
-	s.mux.HandleFunc("/api/logs", s.handleLogs)
-	s.mux.HandleFunc("/api/thumb/", s.handleThumb)
-	s.mux.HandleFunc("/api/notify/test", s.handleNotifyTest)
-	s.mux.HandleFunc("/api/cleanup/stats", s.handleCleanupStats)
-	s.mux.HandleFunc("/api/cleanup/config", s.handleCleanupConfig)
-	s.mux.HandleFunc("/api/version", s.handleVersion)
-	s.mux.HandleFunc("/health", s.handleHealth)
-	staticSub, _ := fs.Sub(staticFS, "static")
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
-	s.mux.HandleFunc("/", s.handleIndex)
+	// 路由注册延迟到 setupAndStart()，等回调函数设置完毕
 
 	return s
+}
+
+// setupRoutes 设置所有路由（在 callback 全部设置后调用）
+func (s *Server) setupRoutes() {
+	s.registerRoutes()
+
+	// 设置新版 API router 的回调
+	if s.apiRouter != nil {
+		s.apiRouter.SetCallbacks(
+			func() { if s.onCheckNow != nil { go s.onCheckNow() } },
+			s.onCredentialUpdate,
+			func(id int64) { if s.onRetryDownload != nil { s.onRetryDownload(id) } },
+			func(id int64) { if s.onSyncSource != nil { s.onSyncSource(id) } },
+			func() { if s.onProcessPending != nil { s.onProcessPending() } },
+			s.RefreshRateLimit,
+		)
+		s.apiRouter.SetVersion(s.version)
+		s.apiRouter.SetBuildTime(s.buildTime)
+		s.apiRouter.SetStartTime(s.startTime)
+	}
 }
 
 func (s *Server) SetCheckNowFunc(fn func()) {
@@ -179,6 +154,9 @@ func (s *Server) SetNotifier(n *notify.Notifier) {
 }
 
 func (s *Server) Start() error {
+	// 在启动前设置路由（此时所有 callback 已设置）
+	s.setupRoutes()
+
 	addr := fmt.Sprintf(":%d", s.port)
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -186,13 +164,12 @@ func (s *Server) Start() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		MaxHeaderBytes:    1 << 20,
 	}
 	log.Printf("Web server listening on http://localhost%s", addr)
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the web server
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer != nil {
 		return s.httpServer.Shutdown(ctx)
@@ -200,7 +177,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// getAuthToken 获取有效的 auth token（优先环境变量，其次数据库）
 func (s *Server) getAuthToken() string {
 	if t := os.Getenv("AUTH_TOKEN"); t != "" {
 		return t
@@ -211,10 +187,8 @@ func (s *Server) getAuthToken() string {
 	return ""
 }
 
-// authMiddleware 鉴权中间件：token 为空时放行（向后兼容），否则校验
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 只拦截 /api/ 开头的请求（但排除 /api/settings/auth_token PUT — 设置密码本身需要先鉴权不矛盾）
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
@@ -222,12 +196,10 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		token := s.getAuthToken()
 		if token == "" {
-			// 未设置 token，不拦截
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 从 query param 或 Authorization header 获取请求 token
 		reqToken := r.URL.Query().Get("token")
 		if reqToken == "" {
 			auth := r.Header.Get("Authorization")
@@ -245,16 +217,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// rateLimitMiddleware IP 级别请求频率限制
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 只限制 /api/ 请求
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// 使用缓存的限制值
 		s.rateLimitMu.RLock()
 		limit := s.cachedRateLimit
 		s.rateLimitMu.RUnlock()
@@ -262,7 +231,6 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 			rateLimitMax = limit
 		}
 
-		// 获取客户端 IP
 		ip := r.RemoteAddr
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
 			ip = strings.Split(forwarded, ",")[0]
@@ -276,7 +244,6 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		})
 		entry := val.(*rateLimitEntry)
 
-		// 窗口过期，重置
 		if now.After(entry.windowEnd) {
 			entry.count.Store(0)
 			entry.windowEnd = now.Add(rateLimitWindow)
@@ -293,7 +260,6 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// RefreshRateLimit 刷新缓存的 rate limit 值（设置变更时调用）
 func (s *Server) RefreshRateLimit() {
 	if val, err := s.db.GetSetting("rate_limit_per_minute"); err == nil && val != "" {
 		if n, parseErr := strconv.Atoi(val); parseErr == nil && n > 0 {
@@ -303,11 +269,11 @@ func (s *Server) RefreshRateLimit() {
 			return
 		}
 	}
-	// 没有设置或解析失败，使用默认值
 	s.rateLimitMu.Lock()
 	s.cachedRateLimit = 200
 	s.rateLimitMu.Unlock()
 }
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -324,13 +290,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"uptime":  uptime.String(),
 		"uptime_seconds": int(uptime.Seconds()),
 	}
-	// Queue status
 	if s.downloader != nil {
 		progress := s.downloader.GetProgress()
 		health["active_downloads"] = len(progress)
 		health["queue_paused"] = s.downloader.IsPaused()
 	}
-	// Disk info
 	if diskInfo, err := util.GetDiskInfo(s.downloadDir); err == nil {
 		health["disk_free_gb"] = float64(diskInfo.Available) / 1024 / 1024 / 1024
 		health["disk_total_gb"] = float64(diskInfo.Total) / 1024 / 1024 / 1024
@@ -338,16 +302,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, health)
 }
 
-// SetVersion sets the server version string
-func (s *Server) SetVersion(v string) { s.version = v }
+func (s *Server) SetVersion(v string)          { s.version = v }
+func (s *Server) SetStartTime(t time.Time)     { s.startTime = t }
+func (s *Server) SetBuildTime(t string)         { s.buildTime = t }
 
-// SetStartTime sets the server start time for uptime calculation
-func (s *Server) SetStartTime(t time.Time) { s.startTime = t }
-
-// SetBuildTime sets the build time string
-func (s *Server) SetBuildTime(t string) { s.buildTime = t }
-
-// GET /api/version — version and build information
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]interface{}{
 		"version":    s.version,
@@ -357,7 +315,6 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleProgressStream SSE 端点：实时推送下载进度
 func (s *Server) handleProgressStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		jsonError(w, "method not allowed", 405)
@@ -377,7 +334,6 @@ func (s *Server) handleProgressStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 	}
 
-	// 立即发一条空的 progress 让前端知道连接已建立
 	fmt.Fprintf(w, "data: []\n\n")
 	flusher.Flush()
 
@@ -418,7 +374,6 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "method not allowed", 405)
 		return
 	}
-
 	stats, _ := s.db.GetStats()
 	stats["paused"] = 0
 	if s.downloader.IsPaused() {
@@ -427,7 +382,6 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, stats)
 }
 
-// POST /api/queue/run
 func (s *Server) handleQueueRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		jsonError(w, "method not allowed", 405)
@@ -440,7 +394,6 @@ func (s *Server) handleQueueRun(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]bool{"ok": true})
 }
 
-// POST /api/queue/pause
 func (s *Server) handleQueuePause(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		jsonError(w, "method not allowed", 405)
@@ -450,7 +403,6 @@ func (s *Server) handleQueuePause(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]bool{"ok": true})
 }
 
-// POST /api/queue/resume
 func (s *Server) handleQueueResume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		jsonError(w, "method not allowed", 405)
@@ -460,31 +412,25 @@ func (s *Server) handleQueueResume(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]bool{"ok": true})
 }
 
-// POST /api/notify/test — 发送测试通知
 func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		jsonError(w, "method not allowed", 405)
 		return
 	}
-
 	if s.notifier == nil {
 		jsonError(w, "notifier not initialized", 500)
 		return
 	}
-
 	if err := s.notifier.SendTest(); err != nil {
 		jsonError(w, "发送测试通知失败: "+err.Error(), 400)
 		return
 	}
-
 	jsonResponse(w, map[string]interface{}{
 		"ok":      true,
 		"message": "测试通知已发送",
 	})
 }
 
-// getCORSOrigin 返回 CORS 允许的 Origin
-// 默认不设置（同源访问不需要 CORS），仅当设置了 CORS_ORIGIN 环境变量时启用
 func getCORSOrigin() string {
 	return os.Getenv("CORS_ORIGIN")
 }

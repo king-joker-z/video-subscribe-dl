@@ -1,0 +1,334 @@
+package api
+
+import (
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/util"
+)
+
+// VideosHandler 视频/下载 API
+type VideosHandler struct {
+	db              *db.DB
+	downloadDir     string
+	onRetryDownload func(int64)
+	onProcessPending func()
+}
+
+func NewVideosHandler(database *db.DB, downloadDir string) *VideosHandler {
+	return &VideosHandler{db: database, downloadDir: downloadDir}
+}
+
+func (h *VideosHandler) SetRetryDownloadFunc(fn func(int64)) {
+	h.onRetryDownload = fn
+}
+
+func (h *VideosHandler) SetProcessPendingFunc(fn func()) {
+	h.onProcessPending = fn
+}
+
+// GET /api/videos — 视频列表（分页 + 筛选 + 排序）
+func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("GET", w, r) {
+		return
+	}
+
+	pg := ParsePagination(r)
+	status := r.URL.Query().Get("status")
+	sourceID := r.URL.Query().Get("source_id")
+	uploader := r.URL.Query().Get("uploader")
+	search := r.URL.Query().Get("search")
+
+	// 构建 WHERE 子句
+	where := "WHERE 1=1"
+	args := []interface{}{}
+
+	if status != "" && status != "all" {
+		if status == "failed" {
+			where += " AND d.status IN ('failed','permanent_failed')"
+		} else if status == "completed" {
+			where += " AND d.status IN ('completed','relocated')"
+		} else {
+			where += " AND d.status = ?"
+			args = append(args, status)
+		}
+	}
+	if sourceID != "" {
+		sid, _ := strconv.ParseInt(sourceID, 10, 64)
+		if sid > 0 {
+			where += " AND d.source_id = ?"
+			args = append(args, sid)
+		}
+	}
+	if uploader != "" {
+		where += " AND d.uploader = ?"
+		args = append(args, uploader)
+	}
+	if search != "" {
+		where += " AND (d.title LIKE ? OR d.uploader LIKE ?)"
+		args = append(args, "%"+search+"%", "%"+search+"%")
+	}
+
+	// 总数
+	countArgs := make([]interface{}, len(args))
+	copy(countArgs, args)
+	var total int
+	h.db.QueryRow("SELECT COUNT(*) FROM downloads d "+where, countArgs...).Scan(&total)
+
+	// 排序
+	orderBy := "d.created_at DESC"
+	if pg.Sort != "" {
+		// 白名单验证排序字段
+		allowedSorts := map[string]string{
+			"created":  "d.created_at",
+			"title":    "d.title",
+			"status":   "d.status",
+			"size":     "d.file_size",
+			"uploader": "d.uploader",
+		}
+		if col, ok := allowedSorts[pg.Sort]; ok {
+			orderBy = col + " " + strings.ToUpper(pg.Order)
+		}
+	}
+
+	// 查询
+	query := `
+		SELECT d.id, d.source_id, d.video_id, COALESCE(d.title,''), COALESCE(d.filename,''), d.status,
+		       COALESCE(d.file_path,''), d.file_size, COALESCE(d.uploader,''), COALESCE(d.description,''),
+		       COALESCE(d.thumbnail,''), COALESCE(d.thumb_path,''), d.duration,
+		       d.downloaded_at, COALESCE(d.error_message,''),
+		       COALESCE(d.retry_count,0), COALESCE(d.last_error,''), d.created_at
+		FROM downloads d ` + where + `
+		ORDER BY ` + orderBy + `
+		LIMIT ? OFFSET ?
+	`
+	args = append(args, pg.PageSize, pg.Offset)
+
+	rows, err := h.db.Query(query, args...)
+	if err != nil {
+		apiError(w, CodeInternal, "查询失败: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	var videos []db.Download
+	for rows.Next() {
+		var dl db.Download
+		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Thumbnail, &dl.ThumbPath, &dl.Duration, &dl.DownloadedAt,
+			&dl.ErrorMessage, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
+			apiError(w, CodeInternal, "解析数据失败")
+			return
+		}
+		videos = append(videos, dl)
+	}
+	if videos == nil {
+		videos = []db.Download{}
+	}
+
+	apiPaginated(w, videos, total, pg.Page, pg.PageSize)
+}
+
+// GET /api/videos/:id — 视频详情
+func (h *VideosHandler) HandleGet(w http.ResponseWriter, r *http.Request, id int64) {
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+	apiOK(w, dl)
+}
+
+// POST /api/videos/:id/retry — 重试下载
+func (h *VideosHandler) HandleRetry(w http.ResponseWriter, r *http.Request, id int64) {
+	if h.onRetryDownload != nil {
+		h.onRetryDownload(id)
+		log.Printf("[video] Retry download %d via API", id)
+	} else {
+		h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+		h.db.ResetRetryCount(id)
+	}
+	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重试"})
+}
+
+// POST /api/videos/:id/cancel — 取消下载
+func (h *VideosHandler) HandleCancel(w http.ResponseWriter, r *http.Request, id int64) {
+	h.db.UpdateDownloadStatus(id, "cancelled", "", 0, "手动取消")
+	log.Printf("[video] Cancelled download %d", id)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已取消"})
+}
+
+// DELETE /api/videos/:id — 删除下载记录及文件
+func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
+	dl, _ := h.db.GetDownload(id)
+	if dl != nil && dl.FilePath != "" {
+		if _, err := os.Stat(dl.FilePath); err == nil {
+			os.Remove(dl.FilePath)
+			log.Printf("[video] Removed file: %s", dl.FilePath)
+		}
+		util.RemoveAssociatedFiles(dl.FilePath)
+		util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+	}
+	h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
+	log.Printf("[video] Deleted record %d", id)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
+}
+
+// POST /api/videos/batch — 批量操作
+func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	var req struct {
+		Action string  `json:"action"` // retry | cancel | delete
+		IDs    []int64 `json:"ids"`
+	}
+	if err := parseJSON(r, &req); err != nil {
+		apiError(w, CodeInvalidParam, "请求参数错误")
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		apiError(w, CodeInvalidParam, "ids 不能为空")
+		return
+	}
+
+	var affected int
+	for _, id := range req.IDs {
+		switch req.Action {
+		case "retry":
+			if h.onRetryDownload != nil {
+				h.onRetryDownload(id)
+			} else {
+				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+				h.db.ResetRetryCount(id)
+			}
+			affected++
+		case "cancel":
+			h.db.UpdateDownloadStatus(id, "cancelled", "", 0, "批量取消")
+			affected++
+		case "delete":
+			dl, _ := h.db.GetDownload(id)
+			if dl != nil && dl.FilePath != "" {
+				if _, err := os.Stat(dl.FilePath); err == nil {
+					os.Remove(dl.FilePath)
+				}
+				util.RemoveAssociatedFiles(dl.FilePath)
+				util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+			}
+			h.db.Exec("DELETE FROM downloads WHERE id = ?", id)
+			affected++
+		default:
+			apiError(w, CodeInvalidParam, "未知操作: "+req.Action)
+			return
+		}
+	}
+
+	log.Printf("[video] Batch %s: %d items", req.Action, affected)
+	apiOK(w, map[string]interface{}{
+		"action":   req.Action,
+		"affected": affected,
+	})
+}
+
+// HandleByID 路由分发 /api/videos/:id
+func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/videos/")
+	if path == "" || path == "batch" {
+		if path == "batch" {
+			h.HandleBatch(w, r)
+			return
+		}
+		apiError(w, CodeInvalidParam, "缺少 ID")
+		return
+	}
+
+	// /api/videos/:id/retry
+	if strings.HasSuffix(path, "/retry") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/retry")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleRetry(w, r, id)
+		return
+	}
+
+	// /api/videos/:id/cancel
+	if strings.HasSuffix(path, "/cancel") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/cancel")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleCancel(w, r, id)
+		return
+	}
+
+	id, err := strconv.ParseInt(path, 10, 64)
+	if err != nil {
+		apiError(w, CodeInvalidParam, "无效的 ID")
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		h.HandleGet(w, r, id)
+	case "DELETE":
+		h.HandleDeleteVideo(w, r, id)
+	default:
+		apiError(w, CodeMethodNotAllow, "method not allowed")
+	}
+}
+
+// HandleThumb GET /api/thumb/:id — 封面图
+func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("GET", w, r) {
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/thumb/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		apiError(w, CodeInvalidParam, "无效的 ID")
+		return
+	}
+
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+
+	// 先尝试本地缩略图
+	if dl.ThumbPath != "" {
+		if _, err := os.Stat(dl.ThumbPath); err == nil {
+			http.ServeFile(w, r, dl.ThumbPath)
+			return
+		}
+	}
+	// 从 file_path 推算
+	if dl.FilePath != "" {
+		ext := filepath.Ext(dl.FilePath)
+		thumbPath := strings.TrimSuffix(dl.FilePath, ext) + "-thumb.jpg"
+		if _, err := os.Stat(thumbPath); err == nil {
+			http.ServeFile(w, r, thumbPath)
+			return
+		}
+	}
+	// 302 到 CDN
+	if dl.Thumbnail != "" {
+		http.Redirect(w, r, dl.Thumbnail, http.StatusFound)
+		return
+	}
+	apiError(w, CodeNotFound, "无封面图")
+}
