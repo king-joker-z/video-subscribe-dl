@@ -19,8 +19,9 @@ import (
 var ErrRateLimited = errors.New("bilibili: rate limited by risk control")
 
 type Client struct {
-	http   *http.Client
-	cookie string
+	http       *http.Client
+	cookie     string
+	credential *Credential
 }
 
 func NewClient(cookie string) *Client {
@@ -28,6 +29,41 @@ func NewClient(cookie string) *Client {
 		http:   &http.Client{Timeout: 30 * time.Second},
 		cookie: cookie,
 	}
+}
+
+// NewClientWithCredential 使用 Credential 构造 Client
+func NewClientWithCredential(cred *Credential) *Client {
+	if cred == nil || cred.IsEmpty() {
+		return NewClient("")
+	}
+	return &Client{
+		http:       &http.Client{Timeout: 30 * time.Second},
+		credential: cred,
+		cookie:     cred.ToCookieString(),
+	}
+}
+
+// GetCredential 返回当前 Client 使用的 Credential（可能为 nil）
+func (c *Client) GetCredential() *Credential {
+	return c.credential
+}
+
+// UpdateCredential 更新 Client 的凭证（线程安全由调用方保证）
+func (c *Client) UpdateCredential(cred *Credential) {
+	if cred != nil && !cred.IsEmpty() {
+		c.credential = cred
+		c.cookie = cred.ToCookieString()
+	}
+}
+
+// GetCookieString 返回当前使用的 cookie 字符串
+func (c *Client) GetCookieString() string {
+	return c.cookie
+}
+
+// GetHTTPClient 返回内部 http.Client（供 credential 刷新等使用）
+func (c *Client) GetHTTPClient() *http.Client {
+	return c.http
 }
 
 // === 数据结构 ===

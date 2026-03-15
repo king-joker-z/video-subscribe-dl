@@ -152,10 +152,13 @@ func (s *Server) handleCookieUpload(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Cookie uploaded: %s (%d bytes)", destPath, written)
 
-	// 通知 scheduler 更新 cookie
+	// 通知 scheduler 更新 cookie (legacy)
 	if s.onCookieUpdate != nil {
 		s.onCookieUpdate(destPath)
 	}
+
+	// 同时解析为 Credential 存 DB（新鉴权模式）
+	s.convertCookieToCredential(destPath)
 
 	// 自动验证上传的 Cookie
 	cookie := bilibili.ReadCookieFile(destPath)

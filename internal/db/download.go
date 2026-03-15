@@ -163,11 +163,11 @@ func (d *DB) UpdateThumbPath(id int64, thumbPath string) error {
 
 func (d *DB) IsVideoDownloaded(sourceID int64, videoID string) (bool, error) {
 	var exists int
-	// 全局去重：只要任何订阅源下载过就不重复（同一视频可能出现在多个源：UP主空间+收藏夹）
+	// 按 source 去重：同一订阅源内已有记录（pending/downloading/completed/failed）则不重复创建
 	// 排除 permanent_failed 让用户可以通过清理后重新触发
 	err := d.QueryRow(`
-		SELECT COUNT(*) FROM downloads WHERE video_id = ? AND status NOT IN ('permanent_failed', 'pending')
-	`, videoID).Scan(&exists)
+		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status != 'permanent_failed'
+	`, sourceID, videoID).Scan(&exists)
 	return exists > 0, err
 }
 

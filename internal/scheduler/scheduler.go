@@ -37,6 +37,9 @@ type Scheduler struct {
 
 	// Cookie 定期检测
 	lastCookieCheck      time.Time // 上次 Cookie 主动检测时间
+
+	// Credential 管理
+	db2          *db.DB   // alias, same as db (for clarity in credential methods)
 }
 
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
@@ -76,6 +79,12 @@ func (s *Scheduler) applyNewClient(client *bilibili.Client) {
 	s.biliMu.Unlock()
 	s.dl.UpdateClient(client)
 	s.resetCaches()
+}
+
+// UpdateCredential 使用新的 Credential 更新 client
+func (s *Scheduler) UpdateCredential(cred *bilibili.Credential) {
+	client := bilibili.NewClientWithCredential(cred)
+	s.applyNewClient(client)
 }
 
 func (s *Scheduler) Start() {
@@ -213,6 +222,8 @@ func (s *Scheduler) UpdateCookie(cookiePath string) {
 }
 
 func (s *Scheduler) checkAll() {
+	// 先检查 Credential 是否需要刷新
+	s.checkAndRefreshCredential()
 	s.verifyCookie("scheduled sync")
 
 	// Retry failed downloads
@@ -405,4 +416,44 @@ func (s *Scheduler) tryCookieRefresh(trigger string) {
 		log.Printf("[WARN] Cookie 刷新失败: %s (trigger: %s). 请手动更新 Cookie。", refreshResult.Message, trigger)
 		s.notifier.Send(notify.EventCookieExpired, "Cookie 需要手动更新", refreshResult.Message)
 	}
+}
+
+// checkAndRefreshCredential 检查 DB 中的 Credential 是否需要刷新，需要则自动刷新
+func (s *Scheduler) checkAndRefreshCredential() {
+	credJSON, err := s.db.GetSetting("credential_json")
+	if err != nil || credJSON == "" {
+		return // 没有 credential，跳过
+	}
+	cred := bilibili.CredentialFromJSON(credJSON)
+	if cred == nil || cred.IsEmpty() {
+		return
+	}
+
+	httpClient := s.getBili().GetHTTPClient()
+	needRefresh, err := cred.NeedRefresh(httpClient)
+	if err != nil {
+		log.Printf("[credential] NeedRefresh check failed: %v", err)
+		return
+	}
+	if !needRefresh {
+		return
+	}
+
+	log.Printf("[credential] Cookie needs refresh, attempting auto-refresh...")
+	newCred, err := cred.Refresh(httpClient)
+	if err != nil {
+		log.Printf("[WARN] Credential auto-refresh failed: %v", err)
+		s.notifier.Send(notify.EventCookieExpired, "凭证自动刷新失败", err.Error())
+		return
+	}
+
+	// 保存到 DB
+	if err := s.db.SetSetting("credential_json", newCred.ToJSON()); err != nil {
+		log.Printf("[WARN] Save refreshed credential failed: %v", err)
+		return
+	}
+
+	// 更新 scheduler 的 client
+	s.UpdateCredential(newCred)
+	log.Printf("[credential] Auto-refresh successful")
 }

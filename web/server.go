@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/notify"
@@ -61,7 +62,8 @@ type Server struct {
 	templates      *template.Template
 	notifier       *notify.Notifier
 	onCheckNow     func()
-	onCookieUpdate  func(string)
+	onCookieUpdate      func(string)
+	onCredentialUpdate  func(*bilibili.Credential)
 	onRetryDownload func(int64)
 	onSyncSource      func(int64)
 	onProcessPending  func()
@@ -121,6 +123,11 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 	s.mux.HandleFunc("/api/scan/fix", s.handleScanFix)
 	s.mux.HandleFunc("/api/settings", s.handleSettings)
 	s.mux.HandleFunc("/api/settings/", s.handleSettingByKey)
+	s.mux.HandleFunc("/api/login/qrcode/generate", s.handleQRCodeGenerate)
+	s.mux.HandleFunc("/api/login/qrcode/poll", s.handleQRCodePoll)
+	s.mux.HandleFunc("/api/credential/status", s.handleCredentialStatus)
+	s.mux.HandleFunc("/api/credential/refresh", s.handleCredentialRefresh)
+	s.mux.HandleFunc("/api/credential/clear", s.handleCredentialClear)
 	s.mux.HandleFunc("/api/cookie/upload", s.handleCookieUpload)
 	s.mux.HandleFunc("/api/cookie/verify", s.handleCookieVerify)
 	s.mux.HandleFunc("/api/clean/source/", s.handleCleanSource)
@@ -149,6 +156,10 @@ func (s *Server) SetCheckNowFunc(fn func()) {
 
 func (s *Server) SetCookieUpdateFunc(fn func(string)) {
 	s.onCookieUpdate = fn
+}
+
+func (s *Server) SetCredentialUpdateFunc(fn func(*bilibili.Credential)) {
+	s.onCredentialUpdate = fn
 }
 
 func (s *Server) SetRetryDownloadFunc(fn func(int64)) {
