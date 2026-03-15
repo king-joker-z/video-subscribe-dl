@@ -175,6 +175,11 @@ export function SettingsPage() {
       h(SettingRow, { label: '请求限速 (次/分钟)', keyName: 'rate_limit_per_minute', placeholder: '200', help: 'API 速率限制（热更新生效）' }),
       h(SettingRow, { label: '请求间隔 (秒)', keyName: 'request_interval', placeholder: '30', help: '两次请求之间的最小间隔' }),
       h(SettingRow, { label: '风控冷却 (分钟)', keyName: 'cooldown_minutes', placeholder: '30', help: '触发风控后冷却时间（热更新生效）' }),
+      h(SettingRow, { label: 'Cron 调度表达式', keyName: 'schedule_cron', placeholder: '例: 0 */30 * * * *', help: '留空使用固定间隔。格式: 秒 分 时 日 月 周。需重启生效' }),
+      h(SettingRow, { label: 'NFO 日期类型', keyName: 'nfo_time_type', placeholder: 'pubdate 或 favtime', help: '收藏夹场景可用 favtime（收藏时间）。暂未完整实现' }),
+      h(SettingRow, { label: '充电视频尝试下载', keyName: 'try_upower', placeholder: 'true/false', help: '设为 true 时不跳过充电专属视频' }),
+      h(SettingRow, { label: '视频并发数', keyName: 'concurrent_video', placeholder: '默认 3', help: '同时处理的视频数（需重启生效）' }),
+      h(SettingRow, { label: '分P并发数', keyName: 'concurrent_page', placeholder: '默认 2', help: '每个视频的分P并行数（需重启生效）' }),
     ),
 
     // 通知设置
