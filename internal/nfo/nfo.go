@@ -37,8 +37,12 @@ type TVShowMeta struct {
 }
 
 type PersonMeta struct {
-	Name  string
-	Thumb string
+	Name     string
+	Thumb    string
+	MID      int64
+	Sign     string
+	Level    int
+	Sex      string
 }
 
 // === XML 结构（极空间极影视兼容） ===
@@ -70,9 +74,12 @@ type tvshowNFO struct {
 }
 
 type personNFO struct {
-	XMLName xml.Name `xml:"person"`
-	Name    string   `xml:"name"`
-	Thumb   string   `xml:"thumb,omitempty"`
+	XMLName   xml.Name `xml:"person"`
+	Name      string   `xml:"name"`
+	Thumb     string   `xml:"thumb,omitempty"`
+	Biography string   `xml:"biography,omitempty"`
+	UniqueID  string   `xml:"uniqueid,omitempty"`
+	Website   string   `xml:"website,omitempty"`
 }
 
 type actor struct {
@@ -177,7 +184,23 @@ func GenerateTVShowNFO(meta *TVShowMeta, dir string) error {
 // GeneratePersonNFO 生成 person.nfo
 func GeneratePersonNFO(meta *PersonMeta, dir string) error {
 	os.MkdirAll(dir, 0755)
-	nfo := personNFO{Name: meta.Name, Thumb: meta.Thumb}
+	biography := ""
+	if meta.Sign != "" {
+		biography = meta.Sign
+	}
+	if meta.Level > 0 {
+		biography += fmt.Sprintf("\nLv.%d", meta.Level)
+	}
+	if meta.MID > 0 {
+		biography += fmt.Sprintf(" | UID: %d", meta.MID)
+	}
+	nfo := personNFO{
+		Name:      meta.Name,
+		Thumb:     meta.Thumb,
+		Biography: strings.TrimSpace(biography),
+		UniqueID:  fmt.Sprintf("%d", meta.MID),
+		Website:   fmt.Sprintf("https://space.bilibili.com/%d", meta.MID),
+	}
 	return writeXML(filepath.Join(dir, "person.nfo"), nfo)
 }
 

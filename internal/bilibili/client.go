@@ -33,10 +33,12 @@ func NewClient(cookie string) *Client {
 // === 数据结构 ===
 
 type UPInfo struct {
-	MID  int64  `json:"mid"`
-	Name string `json:"name"`
-	Face string `json:"face"`
-	Sign string `json:"sign"`
+	MID   int64  `json:"mid"`
+	Name  string `json:"name"`
+	Face  string `json:"face"`
+	Sign  string `json:"sign"`
+	Level int    `json:"level"`
+	Sex   string `json:"sex"`
 }
 
 type VideoItem struct {

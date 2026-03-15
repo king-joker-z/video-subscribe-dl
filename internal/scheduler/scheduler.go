@@ -286,10 +286,15 @@ func (s *Scheduler) ensurePeopleDir(upInfo *bilibili.UPInfo) {
 	}
 	dir := filepath.Join(s.downloadDir, "metadata", "people", bilibili.SanitizePath(upInfo.Name))
 	os.MkdirAll(dir, 0755)
-	nfoPath := filepath.Join(dir, "person.nfo")
-	if _, err := os.Stat(nfoPath); os.IsNotExist(err) {
-		nfo.GeneratePersonNFO(&nfo.PersonMeta{Name: upInfo.Name, Thumb: upInfo.Face}, dir)
-	}
+	// 每轮更新 person.nfo（追踪签名/等级变化）
+	nfo.GeneratePersonNFO(&nfo.PersonMeta{
+		Name:  upInfo.Name,
+		Thumb: upInfo.Face,
+		MID:   upInfo.MID,
+		Sign:  upInfo.Sign,
+		Level: upInfo.Level,
+		Sex:   upInfo.Sex,
+	}, dir)
 	if upInfo.Face != "" {
 		avatarPath := filepath.Join(dir, "folder.jpg")
 		if _, err := os.Stat(avatarPath); os.IsNotExist(err) {
