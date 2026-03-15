@@ -291,11 +291,58 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string  `json:"action"` // retry | cancel | delete | redownload | delete_files | restore
-		IDs    []int64 `json:"ids"`
+		Action   string  `json:"action"` // retry | cancel | delete | redownload | delete_files | restore | download_by_uploader | download_all_pending
+		IDs      []int64 `json:"ids"`
+		Uploader string  `json:"uploader"`
 	}
 	if err := parseJSON(r, &req); err != nil {
 		apiError(w, CodeInvalidParam, "请求参数错误")
+		return
+	}
+
+	// 按 UP 主批量下载 pending
+	if req.Action == "download_by_uploader" {
+		if req.Uploader == "" {
+			apiError(w, CodeInvalidParam, "uploader 不能为空")
+			return
+		}
+		downloads, err := h.db.GetPendingByUploader(req.Uploader)
+		if err != nil {
+			apiError(w, CodeInternal, "查询失败: "+err.Error())
+			return
+		}
+		if len(downloads) == 0 {
+			apiOK(w, map[string]interface{}{
+				"action": req.Action, "affected": 0,
+				"message": fmt.Sprintf("UP主 %s 没有待处理的下载", req.Uploader),
+			})
+			return
+		}
+		if h.onRedownload != nil {
+			for _, dl := range downloads {
+				go h.onRedownload(dl.ID)
+			}
+		} else if h.onProcessPending != nil {
+			go h.onProcessPending()
+		}
+		log.Printf("[video] Batch download_by_uploader: %s, %d items", req.Uploader, len(downloads))
+		apiOK(w, map[string]interface{}{
+			"action": req.Action, "affected": len(downloads),
+			"message": fmt.Sprintf("已提交 %s 的 %d 个待处理下载", req.Uploader, len(downloads)),
+		})
+		return
+	}
+
+	// 全部 pending 批量下载
+	if req.Action == "download_all_pending" {
+		if h.onProcessPending != nil {
+			go h.onProcessPending()
+		}
+		log.Printf("[video] Batch download_all_pending triggered")
+		apiOK(w, map[string]interface{}{
+			"action": req.Action, "affected": 0,
+			"message": "已触发全部待处理下载",
+		})
 		return
 	}
 

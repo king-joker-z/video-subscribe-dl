@@ -68,6 +68,12 @@ func (s *Scheduler) checkUP(src db.Source) {
 			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
 	}
 
+	// 动态 API 模式
+	if src.UseDynamicAPI {
+		s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
+		return
+	}
+
 	pageSize := 30
 	page := 1
 	processedSeasons := map[int64]bool{}
@@ -162,4 +168,67 @@ func (s *Scheduler) checkUP(src db.Source) {
 		log.Printf("[增量] %s: 获取 %d 个新视频 (共检查 %d, 翻页 %d)",
 			uploaderName, totalNew, totalFetched, page)
 	}
+}
+
+
+// checkUPDynamic 使用动态 API 检查 UP 主新视频
+func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid int64,
+	upInfo *bilibili.UPInfo, uploaderName, uploaderDir string, latestVideoAt int64, isFirstScan bool, firstScanPages int) {
+
+	if isFirstScan {
+		log.Printf("[动态API·首次全量] %s (mid=%d): 开始全量扫描", uploaderName, mid)
+	} else {
+		log.Printf("[动态API·增量] %s (mid=%d): 基准时间 %s",
+			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
+	}
+
+	videos, err := client.FetchDynamicVideosIncremental(mid, latestVideoAt)
+	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.triggerCooldown()
+			s.dl.Pause()
+			return
+		}
+		log.Printf("[动态API] 拉取动态失败 (mid=%d): %v", mid, err)
+		return
+	}
+
+	processedBVIDs := map[string]bool{}
+	totalNew := 0
+	var maxCreated int64
+
+	// 首次扫描数量限制（每页约 12 条，用 firstScanPages * 12 近似）
+	maxVideos := 0
+	if isFirstScan && firstScanPages > 0 {
+		maxVideos = firstScanPages * 12
+	}
+
+	for _, v := range videos {
+		if processedBVIDs[v.BvID] {
+			continue
+		}
+		processedBVIDs[v.BvID] = true
+
+		if v.PubTS > maxCreated {
+			maxCreated = v.PubTS
+		}
+
+		totalNew++
+
+		if maxVideos > 0 && totalNew > maxVideos {
+			log.Printf("[动态API·首次全量] 达到数量限制 %d，停止", maxVideos)
+			break
+		}
+
+		s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
+	}
+
+	// 更新 latest_video_at
+	if maxCreated > latestVideoAt {
+		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxCreated); err != nil {
+			log.Printf("[WARN] 更新 latest_video_at 失败: %v", err)
+		}
+	}
+
+	log.Printf("[动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
 }

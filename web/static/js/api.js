@@ -83,6 +83,16 @@ export const api = {
   // 处理所有 pending 下载
   processPending: () => request('/api/task/trigger', { method: 'POST' }),
 
+  // 批量下载 pending
+  downloadAllPending: () => request('/api/videos/batch', {
+    method: 'POST', body: JSON.stringify({ action: 'download_all_pending' })
+  }),
+  downloadPendingByUploader: (uploader) => request('/api/videos/batch', {
+    method: 'POST', body: JSON.stringify({ action: 'download_by_uploader', uploader })
+  }),
+  // UP 主下载 pending（专用 endpoint）
+  uploaderDownloadPending: (name) => request(`/api/uploaders/${encodeURIComponent(name)}/download-pending`, { method: 'POST' }),
+
   // Old APIs (deprecated)
   processAllPending: () => fetch('/api/downloads/batch/process-pending', { method: 'POST' }).then(r => r.json()),
   retryAllFailed: () => fetch('/api/downloads/batch/retry-failed', { method: 'POST' }).then(r => r.json()),

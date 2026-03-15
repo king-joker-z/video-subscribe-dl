@@ -16,10 +16,18 @@ import (
 
 // retryOneDownload 执行单个失败下载的重试
 func (s *Scheduler) retryOneDownload(dl db.Download) {
-	// 暂停时跳过重试
+	// 暂停时检查冷却是否已过期
 	if s.dl.IsPaused() {
-		log.Printf("[retry-scheduler] Downloader paused, skipping retry for %s", dl.VideoID)
-		return
+		if !s.isInCooldown() {
+			s.dl.Resume()
+			log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
+		} else {
+			s.rateLimitMu.Lock()
+			until := s.rateLimitUntil
+			s.rateLimitMu.Unlock()
+			log.Printf("[retry-scheduler] Downloader paused (cooldown until %s), skipping retry for %s", until.Format("15:04:05"), dl.VideoID)
+			return
+		}
 	}
 
 	src, err := s.db.GetSource(dl.SourceID)
@@ -153,10 +161,15 @@ func (s *Scheduler) retryFailedDownloads() {
 	log.Printf("[retry-scheduler] Found %d retryable failed downloads", len(retryable))
 
 	for _, dl := range retryable {
-		// 暂停时终止重试周期
+		// 暂停时检查冷却是否已过期
 		if s.dl.IsPaused() {
-			log.Printf("[retry-scheduler] Downloader paused, stopping retry cycle")
-			return
+			if !s.isInCooldown() {
+				s.dl.Resume()
+				log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
+			} else {
+				log.Printf("[retry-scheduler] Downloader paused (cooldown), stopping retry cycle")
+				return
+			}
 		}
 		s.retryOneDownload(dl)
 		time.Sleep(2 * time.Second)
@@ -186,6 +199,19 @@ func (s *Scheduler) RedownloadByID(dlID int64) {
 	if dl.Status != "pending" {
 		log.Printf("[redownload] Download %d status is %s, expected pending", dlID, dl.Status)
 		return
+	}
+	// 暂停时检查冷却是否已过期
+	if s.dl.IsPaused() {
+		if !s.isInCooldown() {
+			s.dl.Resume()
+			log.Printf("[redownload] 风控冷却结束，恢复下载器")
+		} else {
+			s.rateLimitMu.Lock()
+			until := s.rateLimitUntil
+			s.rateLimitMu.Unlock()
+			log.Printf("[redownload] Downloader paused (cooldown until %s), skipping", until.Format("15:04:05"))
+			return
+		}
 	}
 	s.wg.Add(1)
 	go func() {

@@ -20,7 +20,7 @@ func (d *DB) GetSources() ([]Source, error) {
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
 		FROM sources ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -31,17 +31,18 @@ func (d *DB) GetSources() ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster int
+		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster); err != nil {
+			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
+		s.UseDynamicAPI = useDynamic == 1
 		sources = append(sources, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -56,7 +57,7 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
 		FROM sources WHERE enabled = 1
 	`)
 	if err != nil {
@@ -67,17 +68,18 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster int
+		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster); err != nil {
+			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
+		s.UseDynamicAPI = useDynamic == 1
 		sources = append(sources, s)
 	}
 	if err := rows.Err(); err != nil {
@@ -88,18 +90,18 @@ func (d *DB) GetEnabledSources() ([]Source, error) {
 
 func (d *DB) GetSource(id int64) (*Source, error) {
 	var s Source
-	var enabled, danmaku, skipNFO, skipPoster int
+	var enabled, danmaku, skipNFO, skipPoster, useDynamic int
 	err := d.QueryRow(`
 		SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
 		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 		       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0)
+		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
 		FROM sources WHERE id = ?
 	`, id).Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 		&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster)
+		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +109,7 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 	s.DownloadDanmaku = danmaku == 1
 	s.SkipNFO = skipNFO == 1
 	s.SkipPoster = skipPoster == 1
+	s.UseDynamicAPI = useDynamic == 1
 	return &s, nil
 }
 
@@ -127,15 +130,19 @@ func (d *DB) UpdateSource(s *Source) error {
 	if s.SkipPoster {
 		skipPoster = 1
 	}
+	useDynamic := 0
+	if s.UseDynamicAPI {
+		useDynamic = 1
+	}
 	_, err := d.Exec(`
 		UPDATE sources SET type=?, url=?, name=?, cookies_file=?, check_interval=?, 
 		download_quality=?, download_codec=?, download_danmaku=?, enabled=?,
 		download_filter=?, download_quality_min=?, skip_nfo=?, skip_poster=?,
-		updated_at=CURRENT_TIMESTAMP
+		use_dynamic_api=?, updated_at=CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval,
 		s.DownloadQuality, s.DownloadCodec, danmaku, enabled,
-		s.DownloadFilter, s.DownloadQualityMin, skipNFO, skipPoster, s.ID)
+		s.DownloadFilter, s.DownloadQualityMin, skipNFO, skipPoster, useDynamic, s.ID)
 	return err
 }
 

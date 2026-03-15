@@ -87,6 +87,7 @@ type Source struct {
 	DownloadQualityMin string  `json:"download_quality_min"`
 	SkipNFO         bool       `json:"skip_nfo"`
 	SkipPoster      bool       `json:"skip_poster"`
+	UseDynamicAPI   bool       `json:"use_dynamic_api"`
 	LatestVideoAt   int64      `json:"latest_video_at"`
 	Enabled         bool       `json:"enabled"`
 	LastCheck       *time.Time `json:"last_check"`
@@ -158,6 +159,7 @@ func Init(dataDir string) (*DB, error) {
 		"ALTER TABLE sources ADD COLUMN skip_nfo INTEGER DEFAULT 0",
 		"ALTER TABLE sources ADD COLUMN skip_poster INTEGER DEFAULT 0",
 		"ALTER TABLE sources ADD COLUMN latest_video_at INTEGER DEFAULT 0",
+		"ALTER TABLE sources ADD COLUMN use_dynamic_api INTEGER DEFAULT 0",
 	}
 	for _, m := range migrations {
 		db.Exec(m)
@@ -177,7 +179,7 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 			       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 			       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 			       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0)
+			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
 			FROM sources 
 			WHERE enabled = 1 
 			  AND (last_check IS NULL OR datetime(last_check, '+%d seconds') <= datetime('now'))
@@ -188,7 +190,7 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 			       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
 			       COALESCE(download_danmaku,0), enabled, last_check, created_at, updated_at,
 			       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0)
+			       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0)
 			FROM sources 
 			WHERE enabled = 1 
 			  AND (last_check IS NULL OR datetime(last_check, '+' || check_interval || ' seconds') <= datetime('now'))
@@ -204,17 +206,18 @@ func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 	var sources []Source
 	for rows.Next() {
 		var s Source
-		var enabled, danmaku, skipNFO, skipPoster int
+		var enabled, danmaku, skipNFO, skipPoster, useDynamic int
 		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster); err != nil {
+			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
 		s.DownloadDanmaku = danmaku == 1
 		s.SkipNFO = skipNFO == 1
 		s.SkipPoster = skipPoster == 1
+		s.UseDynamicAPI = useDynamic == 1
 		sources = append(sources, s)
 	}
 	if err := rows.Err(); err != nil {

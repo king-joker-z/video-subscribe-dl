@@ -123,6 +123,11 @@ func (s *Scheduler) Start() {
 					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
 					continue
 				}
+				// 冷却已过期，自动恢复 downloader
+				if s.dl.IsPaused() {
+					s.dl.Resume()
+					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
+				}
 				// Cookie 定期主动检测（每 6 小时）
 				s.periodicCookieCheck()
 				s.checkAll()
@@ -146,7 +151,8 @@ func (s *Scheduler) triggerCooldown() {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
 	s.rateLimitUntil = time.Now().Add(config.CooldownDuration)
-	log.Printf("[WARN] 触发B站风控，暂停 %v（恢复时间: %s）",
+	s.dl.Pause()
+	log.Printf("[WARN] 触发B站风控，暂停下载器 %v（恢复时间: %s）",
 		config.CooldownDuration, s.rateLimitUntil.Format("15:04:05"))
 
 	// 防重复通知：30分钟内只发一次
@@ -230,6 +236,11 @@ func (s *Scheduler) UpdateCookie(cookiePath string) {
 }
 
 func (s *Scheduler) checkAll() {
+	// 如果冷却已过期但 downloader 还在 paused，自动恢复
+	if s.dl.IsPaused() && !s.isInCooldown() {
+		s.dl.Resume()
+		log.Printf("[scheduler] checkAll: 风控冷却已过期，恢复下载器")
+	}
 	// 先检查 Credential 是否需要刷新
 	s.checkAndRefreshCredential()
 	s.verifyCookie("scheduled sync")

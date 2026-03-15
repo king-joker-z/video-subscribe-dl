@@ -195,6 +195,50 @@ type SeriesArchive struct {
 	PubDate  int64  `json:"pubdate"`
 }
 
+
+// === 动态 API 数据结构 ===
+
+// DynamicItem 动态 API 单条动态
+type DynamicItem struct {
+	Type    string `json:"type"`
+	Modules struct {
+		ModuleAuthor struct {
+			PubTS int64 `json:"pub_ts"`
+		} `json:"module_author"`
+		ModuleDynamic struct {
+			Major *struct {
+				Archive *DynamicArchive `json:"archive"`
+			} `json:"major"`
+		} `json:"module_dynamic"`
+	} `json:"modules"`
+}
+
+// DynamicArchive 动态中的视频信息
+type DynamicArchive struct {
+	BvID         string `json:"bvid"`
+	Title        string `json:"title"`
+	Cover        string `json:"cover"`
+	DurationText string `json:"duration_text"`
+	Desc         string `json:"desc"`
+}
+
+// DynamicResponse 动态 API 响应
+type DynamicResponse struct {
+	Items   []DynamicItem `json:"items"`
+	HasMore bool          `json:"has_more"`
+	Offset  string        `json:"offset"`
+}
+
+// VideoBasic 通用的基础视频信息（用于增量拉取返回）
+type VideoBasic struct {
+	BvID        string
+	Title       string
+	Cover       string
+	Desc        string
+	PubTS       int64  // 发布时间戳
+	DurationStr string // "MM:SS" 格式
+}
+
 // === API 方法 ===
 
 // GetUPInfo 获取 UP 主信息（含头像），需要 WBI 签名
@@ -301,6 +345,100 @@ func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 		tags = append(tags, t.TagName)
 	}
 	return tags, nil
+}
+
+
+// GetDynamicVideos 获取 UP 主动态中的视频（单页）
+func (c *Client) GetDynamicVideos(mid int64, offset string) (*DynamicResponse, error) {
+	params := url.Values{}
+	params.Set("host_mid", fmt.Sprintf("%d", mid))
+	params.Set("offset", offset)
+	params.Set("type", "video")
+
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			Items   []DynamicItem `json:"items"`
+			HasMore bool          `json:"has_more"`
+			Offset  string        `json:"offset"`
+		} `json:"data"`
+	}
+
+	if err := c.getWbi("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", params, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("bilibili dynamic: %d %s", resp.Code, resp.Msg)
+	}
+	return &DynamicResponse{
+		Items:   resp.Data.Items,
+		HasMore: resp.Data.HasMore,
+		Offset:  resp.Data.Offset,
+	}, nil
+}
+
+// FetchDynamicVideosIncremental 通过动态 API 增量拉取 UP 主视频
+// latestVideoAt > 0 时，遇到 pub_ts <= latestVideoAt 停止（第一条除外，可能是置顶）
+// 返回新视频列表（按时间倒序，最新在前）
+func (c *Client) FetchDynamicVideosIncremental(mid int64, latestVideoAt int64) ([]VideoBasic, error) {
+	var result []VideoBasic
+	offset := ""
+	pageIdx := 0
+
+	for {
+		dynResp, err := c.GetDynamicVideos(mid, offset)
+		if err != nil {
+			return result, err
+		}
+
+		shouldStop := false
+		for itemIdx, item := range dynResp.Items {
+			if item.Type != "DYNAMIC_TYPE_AV" {
+				continue
+			}
+			if item.Modules.ModuleDynamic.Major == nil || item.Modules.ModuleDynamic.Major.Archive == nil {
+				continue
+			}
+
+			archive := item.Modules.ModuleDynamic.Major.Archive
+			pubTS := item.Modules.ModuleAuthor.PubTS
+
+			// 增量截止判断：
+			// idx==0 && pageIdx==0 时跳过判断（可能是置顶动态，时间很旧但不应该因此停止）
+			isFirstItem := (pageIdx == 0 && itemIdx == 0)
+			if latestVideoAt > 0 && pubTS <= latestVideoAt && !isFirstItem {
+				shouldStop = true
+				break
+			}
+
+			result = append(result, VideoBasic{
+				BvID:        archive.BvID,
+				Title:       archive.Title,
+				Cover:       archive.Cover,
+				Desc:        archive.Desc,
+				PubTS:       pubTS,
+				DurationStr: archive.DurationText,
+			})
+		}
+
+		if shouldStop || !dynResp.HasMore || dynResp.Offset == "" {
+			break
+		}
+
+		offset = dynResp.Offset
+		pageIdx++
+
+		// 安全限制：最多翻 50 页
+		if pageIdx >= 50 {
+			log.Printf("[dynamic] 达到最大翻页限制 50 页，mid=%d", mid)
+			break
+		}
+
+		time.Sleep(time.Duration(300+rand.Intn(300)) * time.Millisecond)
+	}
+
+	return result, nil
 }
 
 // === 工具方法 ===

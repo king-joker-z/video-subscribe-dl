@@ -98,11 +98,28 @@ export function VideosPage({ params = {} } = {}) {
     } catch (e) { toast.error(e.message); }
   };
 
+  const handleDownloadAllPending = async () => {
+    try {
+      if (uploader) {
+        const res = await api.downloadPendingByUploader(uploader);
+        toast.success(res.data.message || '已提交');
+      } else {
+        const res = await api.downloadAllPending();
+        toast.success(res.data.message || '已触发全部待处理下载');
+      }
+      setTimeout(load, 1000);
+    } catch (e) { toast.error(e.message); }
+  };
+
   return h('div', { className: 'page-enter space-y-4' },
     // 顶栏
     h('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
       h('h2', { className: 'text-lg font-semibold' }, '视频列表'),
       h('div', { className: 'flex items-center gap-2' },
+        h(Button, {
+          onClick: handleDownloadAllPending, variant: 'secondary', size: 'sm',
+          title: uploader ? `下载 ${uploader} 的全部待处理视频` : '下载全部待处理视频'
+        }, uploader ? '下载该UP主Pending' : '下载全部Pending'),
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
         h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
         h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),

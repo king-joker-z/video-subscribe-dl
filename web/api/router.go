@@ -51,6 +51,8 @@ func (rt *Router) SetCallbacks(
 	rt.videos.SetRedownloadFunc(onRedownload)
 	rt.sources.SetSyncSourceFunc(onSyncSource)
 	rt.settings.SetRefreshRateFunc(onRefreshRate)
+	rt.uploaders.SetRedownloadFunc(onRedownload)
+	rt.uploaders.SetProcessPendingFunc(onProcessPending)
 }
 
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -11,11 +13,21 @@ import (
 
 // UploadersHandler UP 主 API
 type UploadersHandler struct {
-	db *db.DB
+	db               *db.DB
+	onRedownload     func(int64)
+	onProcessPending func()
 }
 
 func NewUploadersHandler(database *db.DB) *UploadersHandler {
 	return &UploadersHandler{db: database}
+}
+
+func (h *UploadersHandler) SetRedownloadFunc(fn func(int64)) {
+	h.onRedownload = fn
+}
+
+func (h *UploadersHandler) SetProcessPendingFunc(fn func()) {
+	h.onProcessPending = fn
 }
 
 // GET /api/uploaders — UP 主列表（含统计）
@@ -120,6 +132,17 @@ func (h *UploadersHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// POST /api/uploaders/:name/download-pending
+	if strings.HasSuffix(path, "/download-pending") && r.Method == "POST" {
+		name := strings.TrimSuffix(path, "/download-pending")
+		uploaderName, err := url.PathUnescape(name)
+		if err != nil {
+			uploaderName = name
+		}
+		h.HandleDownloadPending(w, r, uploaderName)
+		return
+	}
+
 	// /api/uploaders/:name — 获取单个 UP 主统计
 	name, err := url.PathUnescape(path)
 	if err != nil {
@@ -146,6 +169,34 @@ func (h *UploadersHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	apiOK(w, map[string]interface{}{
 		"stats": stats,
 		"mid":   mid,
+	})
+}
+
+// POST /api/uploaders/:name/download-pending — 批量下载该 UP 主的所有 pending 视频
+func (h *UploadersHandler) HandleDownloadPending(w http.ResponseWriter, r *http.Request, uploader string) {
+	downloads, err := h.db.GetPendingByUploader(uploader)
+	if err != nil {
+		apiError(w, CodeInternal, "查询失败: "+err.Error())
+		return
+	}
+	if len(downloads) == 0 {
+		apiOK(w, map[string]interface{}{
+			"affected": 0,
+			"message":  "没有待处理的下载",
+		})
+		return
+	}
+	if h.onRedownload != nil {
+		for _, dl := range downloads {
+			go h.onRedownload(dl.ID)
+		}
+	} else if h.onProcessPending != nil {
+		go h.onProcessPending()
+	}
+	log.Printf("[uploader] Download pending for %s: %d items", uploader, len(downloads))
+	apiOK(w, map[string]interface{}{
+		"affected": len(downloads),
+		"message":  fmt.Sprintf("已提交 %d 个待处理下载", len(downloads)),
 	})
 }
 

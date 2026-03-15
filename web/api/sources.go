@@ -304,6 +304,14 @@ func (h *SourcesHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id
 			existing.SkipPoster = val != 0
 		}
 	}
+	if v, ok := body["use_dynamic_api"]; ok {
+		switch val := v.(type) {
+		case bool:
+			existing.UseDynamicAPI = val
+		case float64:
+			existing.UseDynamicAPI = val != 0
+		}
+	}
 	if v, ok := body["check_interval"]; ok {
 		if f, ok := v.(float64); ok {
 			existing.CheckInterval = int(f)

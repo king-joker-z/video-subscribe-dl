@@ -32,6 +32,7 @@ function EditModal({ source, onSave, onClose }) {
     download_danmaku: source.download_danmaku || false,
     skip_nfo: source.skip_nfo || false,
     skip_poster: source.skip_poster || false,
+    use_dynamic_api: source.use_dynamic_api || false,
     check_interval: source.check_interval || 1800,
   });
   const [saving, setSaving] = useState(false);
@@ -132,6 +133,20 @@ function EditModal({ source, onSave, onClose }) {
         h('div', { className: 'flex items-center gap-2' },
           h('input', { type: 'checkbox', checked: form.skip_poster, onChange: (e) => update('skip_poster', e.target.checked), className: 'rounded bg-slate-700 border-slate-600' }),
           h('label', { className: 'text-sm text-slate-400' }, '跳过封面')
+        )
+      ),
+
+      // 动态 API 开关（仅 UP 主类型显示）
+      source.type === 'up' && h('div', { className: 'flex items-center justify-between bg-slate-900/50 rounded-lg px-3 py-2' },
+        h('div', null,
+          h('label', { className: 'text-sm text-slate-300' }, '使用动态 API'),
+          h('div', { className: 'text-xs text-slate-500 mt-0.5' }, '使用动态接口拉取视频，风控概率更低，但可能不包含部分旧视频')
+        ),
+        h('button', {
+          onClick: () => update('use_dynamic_api', !form.use_dynamic_api),
+          className: cn('w-10 h-6 rounded-full transition-colors flex-shrink-0 ml-3', form.use_dynamic_api ? 'bg-blue-500' : 'bg-slate-600')
+        },
+          h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', form.use_dynamic_api ? 'translate-x-4' : 'translate-x-0') })
         )
       ),
 

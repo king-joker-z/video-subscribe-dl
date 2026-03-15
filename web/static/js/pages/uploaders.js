@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Badge, Pagination, EmptyState } from '../components/utils.js';
+import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 export function UploadersPage({ onNavigate }) {
@@ -23,6 +23,14 @@ export function UploadersPage({ onNavigate }) {
   }, [page, search]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleDownloadPending = async (uploaderName, e) => {
+    e.stopPropagation();
+    try {
+      const res = await api.uploaderDownloadPending(uploaderName);
+      toast.success(res.data.message || '已提交');
+    } catch (e2) { toast.error(e2.message); }
+  };
 
   const handleSearch = (value) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -70,6 +78,13 @@ export function UploadersPage({ onNavigate }) {
                     h('div', { className: 'text-lg font-bold text-red-400' }, u.failed || 0),
                     h('div', { className: 'text-xs text-slate-500' }, '失败')
                   ),
+                ),
+                (u.pending > 0) && h('div', { className: 'mt-3 pt-2 border-t border-slate-700/50' },
+                  h(Button, {
+                    onClick: (e) => handleDownloadPending(u.uploader, e),
+                    variant: 'secondary', size: 'sm',
+                    className: 'w-full text-xs'
+                  }, `下载待处理 (${u.pending})`)
                 )
               )
             )
