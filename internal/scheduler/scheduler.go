@@ -168,7 +168,7 @@ func (s *Scheduler) Start() {
 		// 检查是否配置了 cron 表达式
 		cronExpr, _ := s.db.GetSetting("schedule_cron")
 		if cronExpr != "" {
-			s.cronScheduler = cron.New()
+			s.cronScheduler = cron.New(cron.WithSeconds())
 			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
 				// Cookie 检查不受风控冷却影响
 				s.periodicCookieCheck()
