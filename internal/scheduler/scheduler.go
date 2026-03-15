@@ -68,6 +68,7 @@ type Scheduler struct {
 
 type upInfoCacheEntry struct {
 	info      *bilibili.UPInfo
+	err       error // 非 nil 时表示负缓存（API 请求失败）
 	fetchedAt time.Time
 }
 

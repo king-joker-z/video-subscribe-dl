@@ -64,10 +64,13 @@ func (s *Scheduler) checkUP(src db.Source) {
 	}
 
 	if isFirstScan {
-		log.Printf("[首次全量] %s (mid=%d): 开始全量扫描", uploaderName, mid)
-		if firstScanPages > 0 {
-			log.Printf("[首次全量] 页数限制: %d 页", firstScanPages)
+		// 首次扫描：限制为仅第一页，避免大量翻页触发 -352 风控
+		// 第一页拿到 maxCreated 设置增量基准，后续走增量路径
+		// 如需全量补漏历史视频，使用 fullscan API
+		if firstScanPages <= 0 {
+			firstScanPages = 1
 		}
+		log.Printf("[首次全量] %s (mid=%d): 开始首次扫描（限制 %d 页，防风控）", uploaderName, mid, firstScanPages)
 	} else {
 		log.Printf("[增量] %s (mid=%d): 基准时间 %s",
 			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
@@ -453,24 +456,35 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 }
 
 const upInfoCacheTTL = 6 * time.Hour
+const upInfoErrorCacheTTL = 30 * time.Minute // 请求失败时的负缓存时间
 
 // getUPInfoCached 带缓存的 UP 主信息获取，减少 API 请求量
+// API 失败时也缓存 30 分钟（负缓存），避免新 UP 反复请求触发风控
 func (s *Scheduler) getUPInfoCached(client *bilibili.Client, mid int64) (*bilibili.UPInfo, error) {
 	s.upInfoCacheMu.RLock()
-	if entry, ok := s.upInfoCache[mid]; ok && time.Since(entry.fetchedAt) < upInfoCacheTTL {
-		s.upInfoCacheMu.RUnlock()
-		return entry.info, nil
-	}
+	entry, ok := s.upInfoCache[mid]
 	s.upInfoCacheMu.RUnlock()
 
-	info, err := client.GetUPInfo(mid)
-	if err != nil {
-		return nil, err
+	if ok {
+		age := time.Since(entry.fetchedAt)
+		if entry.info != nil && age < upInfoCacheTTL {
+			return entry.info, nil
+		}
+		if entry.info == nil && entry.err != nil && age < upInfoErrorCacheTTL {
+			// 负缓存：之前请求失败，30 分钟内不重试
+			return nil, entry.err
+		}
 	}
 
+	info, err := client.GetUPInfo(mid)
+
 	s.upInfoCacheMu.Lock()
-	s.upInfoCache[mid] = &upInfoCacheEntry{info: info, fetchedAt: time.Now()}
+	if err != nil {
+		s.upInfoCache[mid] = &upInfoCacheEntry{info: nil, err: err, fetchedAt: time.Now()}
+	} else {
+		s.upInfoCache[mid] = &upInfoCacheEntry{info: info, fetchedAt: time.Now()}
+	}
 	s.upInfoCacheMu.Unlock()
 
-	return info, nil
+	return info, err
 }
