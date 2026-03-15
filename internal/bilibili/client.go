@@ -22,12 +22,14 @@ type Client struct {
 	http       *http.Client
 	cookie     string
 	credential *Credential
+	limiter    *RateLimiter // API 请求令牌桶限流（下载流不走限流）
 }
 
 func NewClient(cookie string) *Client {
 	return &Client{
-		http:   &http.Client{Timeout: 30 * time.Second},
-		cookie: cookie,
+		http:    &http.Client{Timeout: 30 * time.Second},
+		cookie:  cookie,
+		limiter: DefaultRateLimiter(),
 	}
 }
 
@@ -40,6 +42,7 @@ func NewClientWithCredential(cred *Credential) *Client {
 		http:       &http.Client{Timeout: 30 * time.Second},
 		credential: cred,
 		cookie:     cred.ToCookieString(),
+		limiter:    DefaultRateLimiter(),
 	}
 }
 
@@ -290,6 +293,10 @@ func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 // === 工具方法 ===
 
 func (c *Client) get(rawURL string, result interface{}) error {
+	// API 请求限流
+	if c.limiter != nil {
+		c.limiter.Acquire()
+	}
 	req, _ := http.NewRequest("GET", rawURL, nil)
 	req.Header.Set("User-Agent", randUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
