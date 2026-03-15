@@ -95,9 +95,6 @@ export function DashboardPage() {
       h('div', { className: 'space-y-2' },
         data.recent_downloads.slice(0, 8).map(dl =>
           h('div', { key: dl.id, className: 'flex items-center gap-3 py-2 border-b border-slate-700/30 last:border-0' },
-            h('div', { className: 'w-16 h-10 rounded bg-slate-700 flex-shrink-0 flex items-center justify-center' },
-              h(Icon, { name: 'video', size: 16, className: 'text-slate-600' })
-            ),
             h('div', { className: 'flex-1 min-w-0' },
               h('div', { className: 'text-sm truncate' }, dl.title || dl.video_id),
               h('div', { className: 'text-xs text-slate-500' }, dl.uploader || '--')
