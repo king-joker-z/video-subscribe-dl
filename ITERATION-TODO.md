@@ -306,3 +306,15 @@
 - [x] 快速下载提示更新：Tips 区域新增粘贴/拖拽使用说明
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.17.0
+
+## 迭代 #30 (v2.18.0) — UP主头像展示
+- [x] 新增 `/api/avatar/:name` API：根据 UP主名称返回本地头像（metadata/people/{name}/folder.jpg）
+- [x] 本地头像不存在时自动 302 重定向到 B站远程头像 URL（降级方案）
+- [x] 头像响应设置 Cache-Control: public, max-age=86400 缓存策略
+- [x] UploadersHandler 新增 downloadDir 字段支持本地文件路径解析
+- [x] UP主列表 API 返回 `has_avatar` 字段，前端按需加载头像
+- [x] 前端新增 UploaderAvatar 组件：有头像显示圆形图片，无头像显示名字首字彩色圆形
+- [x] UP主卡片布局重构：头像 + 名称/UID 横向排列，视觉效果显著提升
+- [x] 8 色方案生成 fallback 头像颜色，基于名字 hash 一致性映射
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.18.0

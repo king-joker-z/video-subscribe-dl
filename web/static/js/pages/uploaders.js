@@ -3,6 +3,31 @@ import { api } from '../api.js';
 import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
+
+// UP主头像组件
+function UploaderAvatar({ name, hasAvatar }) {
+  const [imgError, setImgError] = React.useState(false);
+  const avatarUrl = '/api/avatar/' + encodeURIComponent(name);
+
+  if (!hasAvatar || imgError) {
+    // 显示名字首字的彩色圆形
+    const colors = ['bg-blue-600', 'bg-emerald-600', 'bg-purple-600', 'bg-amber-600', 'bg-rose-600', 'bg-cyan-600', 'bg-indigo-600', 'bg-teal-600'];
+    const colorIdx = (name || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % colors.length;
+    const initial = (name || '?').charAt(0).toUpperCase();
+    return h('div', {
+      className: cn('w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white text-sm font-bold', colors[colorIdx])
+    }, initial);
+  }
+
+  return h('img', {
+    src: avatarUrl,
+    className: 'w-10 h-10 rounded-full flex-shrink-0 object-cover bg-slate-800',
+    referrerPolicy: 'no-referrer',
+    loading: 'lazy',
+    onError: () => setImgError(true)
+  });
+}
+
 export function UploadersPage({ onNavigate }) {
   const [uploaders, setUploaders] = useState([]);
   const [total, setTotal] = useState(0);
@@ -61,9 +86,12 @@ export function UploadersPage({ onNavigate }) {
                 hover: true,
                 onClick: () => onNavigate('videos', { uploader: u.uploader }),
               },
-                h('div', { className: 'mb-3' },
-                  h('div', { className: 'font-medium text-sm truncate text-slate-200' }, u.uploader),
-                  u.mid && h('div', { className: 'text-xs text-slate-500 mt-0.5' }, 'UID: ' + u.mid)
+                h('div', { className: 'flex items-center gap-3 mb-3' },
+                  h(UploaderAvatar, { name: u.uploader, hasAvatar: u.has_avatar }),
+                  h('div', { className: 'min-w-0 flex-1' },
+                    h('div', { className: 'font-medium text-sm truncate text-slate-200' }, u.uploader),
+                    u.mid && h('div', { className: 'text-xs text-slate-500 mt-0.5' }, 'UID: ' + u.mid)
+                  )
                 ),
                 h('div', { className: 'grid grid-cols-3 gap-2 text-center' },
                   h('div', null,

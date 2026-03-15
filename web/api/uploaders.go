@@ -5,21 +5,25 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 )
 
 // UploadersHandler UP 主 API
 type UploadersHandler struct {
 	db               *db.DB
+	downloadDir      string
 	onRedownload     func(int64)
 	onProcessPending func()
 }
 
-func NewUploadersHandler(database *db.DB) *UploadersHandler {
-	return &UploadersHandler{db: database}
+func NewUploadersHandler(database *db.DB, downloadDir string) *UploadersHandler {
+	return &UploadersHandler{db: database, downloadDir: downloadDir}
 }
 
 func (h *UploadersHandler) SetRedownloadFunc(fn func(int64)) {
@@ -51,8 +55,8 @@ func (h *UploadersHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	// 获取 people 表的头像信息
 	type UploaderWithAvatar struct {
 		db.UploaderStats
-		Avatar string `json:"avatar"`
-		MID    string `json:"mid"`
+		MID       string `json:"mid"`
+		HasAvatar bool   `json:"has_avatar"`
 	}
 
 	people, _ := h.db.GetPeople()
@@ -66,9 +70,15 @@ func (h *UploadersHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	var result []UploaderWithAvatar
 	for _, u := range uploaders {
 		item := UploaderWithAvatar{UploaderStats: u}
-		// 不返回 avatar URL，减少前端图片请求
 		if mid, ok := midMap[u.Uploader]; ok {
 			item.MID = mid
+		}
+		// 检查本地是否有头像文件
+		if h.downloadDir != "" {
+			avatarPath := filepath.Join(h.downloadDir, "metadata", "people", bilibili.SanitizePath(u.Uploader), "folder.jpg")
+			if _, err := os.Stat(avatarPath); err == nil {
+				item.HasAvatar = true
+			}
 		}
 		result = append(result, item)
 	}
@@ -225,4 +235,41 @@ func (h *UploadersHandler) HandleSuggestions(w http.ResponseWriter, r *http.Requ
 		names = []string{}
 	}
 	apiOK(w, names)
+}
+
+// HandleAvatar GET /api/avatar/:name — UP主头像
+func (h *UploadersHandler) HandleAvatar(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("GET", w, r) {
+		return
+	}
+
+	nameEncoded := strings.TrimPrefix(r.URL.Path, "/api/avatar/")
+	name, err := url.PathUnescape(nameEncoded)
+	if err != nil {
+		name = nameEncoded
+	}
+	if name == "" {
+		apiError(w, CodeInvalidParam, "名称不能为空")
+		return
+	}
+
+	if h.downloadDir == "" {
+		apiError(w, CodeNotFound, "下载目录未配置")
+		return
+	}
+
+	avatarPath := filepath.Join(h.downloadDir, "metadata", "people", bilibili.SanitizePath(name), "folder.jpg")
+	if _, err := os.Stat(avatarPath); os.IsNotExist(err) {
+		// 尝试从 people 表获取远程头像 URL 做 302 重定向
+		if p, err := h.db.GetPeopleByName(name); err == nil && p != nil && p.Avatar != "" {
+			http.Redirect(w, r, p.Avatar, http.StatusFound)
+			return
+		}
+		apiError(w, CodeNotFound, "头像不存在")
+		return
+	}
+
+	// 设置缓存头，头像不常变
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, avatarPath)
 }

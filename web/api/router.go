@@ -33,7 +33,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		dashboard:  NewDashboardHandler(database, dl, downloadDir),
 		sources:    NewSourcesHandler(database),
 		videos:     NewVideosHandler(database, downloadDir),
-		uploaders:  NewUploadersHandler(database),
+		uploaders:  NewUploadersHandler(database, downloadDir),
 		task:       NewTaskHandler(database, dl),
 		settings:   NewSettingsHandler(database),
 		credential: NewCredentialHandler(database),
@@ -147,6 +147,9 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/uploaders/suggestions", rt.uploaders.HandleSuggestions)
 	mux.HandleFunc("/api/uploaders", rt.uploaders.HandleList)
 	mux.HandleFunc("/api/uploaders/", rt.uploaders.HandleByID)
+
+	// Avatar
+	mux.HandleFunc("/api/avatar/", rt.uploaders.HandleAvatar)
 
 	// Task
 	mux.HandleFunc("/api/task/status", rt.task.HandleStatus)
