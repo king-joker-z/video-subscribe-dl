@@ -170,6 +170,9 @@ func (s *Scheduler) Start() {
 		if cronExpr != "" {
 			s.cronScheduler = cron.New()
 			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
+				// Cookie 检查不受风控冷却影响
+				s.periodicCookieCheck()
+
 				if s.isInCooldown() {
 					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
 					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
@@ -179,7 +182,6 @@ func (s *Scheduler) Start() {
 					s.dl.Resume()
 					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
 				}
-				s.periodicCookieCheck()
 				s.checkAll()
 			})
 			if err != nil {
@@ -206,7 +208,10 @@ func (s *Scheduler) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				// 风控冷却期内跳过
+				// Cookie 检查不受风控冷却影响
+				s.periodicCookieCheck()
+
+				// 风控冷却期内跳过检查
 				if s.isInCooldown() {
 					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
 					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
@@ -217,8 +222,6 @@ func (s *Scheduler) Start() {
 					s.dl.Resume()
 					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
 				}
-				// Cookie 定期主动检测（每 6 小时）
-				s.periodicCookieCheck()
 				s.checkAll()
 			case <-s.stopCh:
 				return
