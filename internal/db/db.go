@@ -83,6 +83,10 @@ type Source struct {
 	DownloadQuality string     `json:"download_quality"`
 	DownloadCodec   string     `json:"download_codec"`
 	DownloadDanmaku bool       `json:"download_danmaku"`
+	DownloadFilter  string     `json:"download_filter"`
+	DownloadQualityMin string  `json:"download_quality_min"`
+	SkipNFO         bool       `json:"skip_nfo"`
+	SkipPoster      bool       `json:"skip_poster"`
 	Enabled         bool       `json:"enabled"`
 	LastCheck       *time.Time `json:"last_check"`
 	CreatedAt       time.Time  `json:"created_at"`
@@ -148,6 +152,10 @@ func Init(dataDir string) (*DB, error) {
 		"ALTER TABLE downloads ADD COLUMN thumb_path TEXT",
 		"ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0",
 		"ALTER TABLE downloads ADD COLUMN last_error TEXT",
+		"ALTER TABLE sources ADD COLUMN download_filter TEXT DEFAULT ''",
+		"ALTER TABLE sources ADD COLUMN download_quality_min TEXT DEFAULT ''",
+		"ALTER TABLE sources ADD COLUMN skip_nfo INTEGER DEFAULT 0",
+		"ALTER TABLE sources ADD COLUMN skip_poster INTEGER DEFAULT 0",
 	}
 	for _, m := range migrations {
 		db.Exec(m)

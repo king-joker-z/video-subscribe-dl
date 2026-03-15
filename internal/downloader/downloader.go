@@ -70,9 +70,13 @@ type Job struct {
 	Title       string
 	OutputDir   string
 	Quality     string // "best", "1080p", "720p"
+	QualityMin  string // 最低画质: "480p", "720p", "1080p"
 	Codec       string // "avc", "hevc", "av1", ""
 	Danmaku     bool
 	Flat        bool   // Flat 模式: 直接用 OutputDir 输出，不创建子目录
+	Subtitle    bool   // 是否下载字幕
+	SkipNFO     bool   // 跳过 NFO 生成
+	SkipPoster  bool   // 跳过封面下载
 	CookiesFile string
 	ResultCh    chan *Result
 	OnStart     func() // 开始下载时回调（用于更新 DB 状态）
@@ -384,6 +388,25 @@ func (d *Downloader) download(job *Job) *Result {
 		d.setProgress(job.BvID, prog)
 		return &Result{Error: fmt.Errorf("no suitable video stream")}
 	}
+
+	// 最低画质检查: 低于要求则跳过不下载
+	if job.QualityMin != "" {
+		minHeight := 0
+		switch job.QualityMin {
+		case "1080p":
+			minHeight = 1080
+		case "720p":
+			minHeight = 720
+		case "480p":
+			minHeight = 480
+		}
+		if minHeight > 0 && bestVideo.Height < minHeight {
+			prog.Status = "skipped"
+			d.setProgress(job.BvID, prog)
+			return &Result{Error: fmt.Errorf("quality too low: %dp < %s minimum", bestVideo.Height, job.QualityMin)}
+		}
+	}
+
 	log.Printf("  Video: %s", bilibili.FormatVideoInfo(bestVideo))
 
 	// 3. 选择最优音频流

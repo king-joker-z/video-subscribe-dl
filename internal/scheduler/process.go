@@ -136,9 +136,11 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 
 	resultCh := make(chan *downloader.Result, 1)
 	s.wg.Add(1)
+	skipNFO2 := src.SkipNFO
+	skipPoster2 := src.SkipPoster
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh)
+		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO2, skipPoster2)
 	}()
 
 	capturedDlID := dlID
@@ -150,6 +152,9 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 		Quality:     src.DownloadQuality,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		QualityMin:  src.DownloadQualityMin,
+		SkipNFO:     src.SkipNFO,
+		SkipPoster:  src.SkipPoster,
 		Flat:        true,
 		CookiesFile: cookiesFile,
 		ResultCh:    resultCh,
@@ -162,6 +167,9 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 }
 
 func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, title, pic, uploaderName, outputDir, cookiesFile string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo) {
+	skipNFO := src.SkipNFO
+	skipPoster := src.SkipPoster
+
 	// 检查是否已有 pending 记录（容器重启后保留的）
 	existingID, _ := s.db.GetPendingDownloadID(src.ID, videoID)
 	var dlID int64
@@ -185,7 +193,7 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh)
+		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO, skipPoster)
 	}()
 
 	capturedDlID := dlID
@@ -197,6 +205,9 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 		Quality:     src.DownloadQuality,
 		Codec:       src.DownloadCodec,
 		Danmaku:     src.DownloadDanmaku,
+		QualityMin:  src.DownloadQualityMin,
+		SkipNFO:     src.SkipNFO,
+		SkipPoster:  src.SkipPoster,
 		CookiesFile: cookiesFile,
 		ResultCh:    resultCh,
 		OnStart:     func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
@@ -209,6 +220,11 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 }
 
 func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid, title, pic, uploaderName, uploaderDir, collectionName string, upInfo *bilibili.UPInfo) {
+	// 标题过滤: 在 API 调用前预过滤，降低风控风险
+	if src.DownloadFilter != "" && !matchesFilter(title, src.DownloadFilter) {
+		return
+	}
+
 	if !s.checkDiskSpace() {
 		return
 	}
@@ -262,7 +278,7 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 	}
 }
 
-func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo, ch chan *downloader.Result) {
+func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo, ch chan *downloader.Result, skipNFO, skipPoster bool) {
 	// panic 保护：避免 goroutine panic 导致 WaitGroup 永远阻塞
 	defer func() {
 		if r := recover(); r != nil {
@@ -334,7 +350,10 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 	// 获取标签
 	tags, _ := s.getBili().GetVideoTags(actualBvID)
 
-	// 生成 NFO
+	// 生成 NFO (受 SkipOption 控制)
+	if skipNFO {
+		log.Printf("  NFO skipped (skip_nfo=true)")
+	} else {
 	meta := &nfo.VideoMeta{
 		BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
 		UploaderName: uploaderName, UploaderFace: detail.Owner.Face,
@@ -346,9 +365,10 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 	if err := nfo.GenerateVideoNFO(meta, result.FilePath); err != nil {
 		log.Printf("NFO failed: %v", err)
 	}
+	} // end skipNFO
 
-	// 下载封面图并记录路径
-	if detail.Pic != "" && result.FilePath != "" {
+	// 下载封面图并记录路径 (受 SkipOption 控制)
+	if !skipPoster && detail.Pic != "" && result.FilePath != "" {
 		ext := filepath.Ext(result.FilePath)
 		thumbPath := strings.TrimSuffix(result.FilePath, ext) + "-thumb.jpg"
 		if _, err := os.Stat(thumbPath); os.IsNotExist(err) {

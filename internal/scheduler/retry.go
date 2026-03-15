@@ -99,7 +99,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh)
+		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh, false, false)
 	}()
 
 	capturedDlID := dl.ID

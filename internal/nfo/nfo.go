@@ -65,6 +65,7 @@ type tvshowNFO struct {
 	Plot      string   `xml:"plot,omitempty"`
 	Premiered string   `xml:"premiered,omitempty"`
 	Studio    string   `xml:"studio,omitempty"`
+	Thumb     string   `xml:"thumb,omitempty"`
 	Actors    []actor  `xml:"actor"`
 }
 
@@ -163,6 +164,7 @@ func GenerateTVShowNFO(meta *TVShowMeta, dir string) error {
 		})
 	}
 	nfo := tvshowNFO{
+		Thumb: meta.Poster,
 		Title:     meta.Title,
 		Plot:      meta.Plot,
 		Premiered: meta.Premiered,
