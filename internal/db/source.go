@@ -1,5 +1,36 @@
 package db
 
+import (
+	"fmt"
+)
+
+// sourceColumns 统一的 source SELECT 列（修改字段时只改这一处）
+const sourceColumns = `id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
+       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
+       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
+       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
+       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')`
+
+// scanSource 统一的 source 行扫描（修改字段时只改这一处）
+func scanSource(scanner interface{ Scan(dest ...interface{}) error }) (Source, error) {
+	var s Source
+	var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
+	err := scanner.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
+		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
+		&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
+		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules)
+	if err != nil {
+		return s, err
+	}
+	s.Enabled = enabled == 1
+	s.DownloadDanmaku = danmaku == 1
+	s.DownloadSubtitle = subtitle == 1
+	s.SkipNFO = skipNFO == 1
+	s.SkipPoster = skipPoster == 1
+	s.UseDynamicAPI = useDynamic == 1
+	return s, nil
+}
+
 func (d *DB) CreateSource(s *Source) (int64, error) {
 	if s.Type == "" {
 		s.Type = "channel"
@@ -15,132 +46,61 @@ func (d *DB) CreateSource(s *Source) (int64, error) {
 }
 
 func (d *DB) GetSources() ([]Source, error) {
-	rows, err := d.Query(`
-		SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
-		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
-		       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
-		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
-		FROM sources ORDER BY created_at DESC
-	`)
+	rows, err := d.Query("SELECT " + sourceColumns + " FROM sources ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var sources []Source
 	for rows.Next() {
-		var s Source
-		var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
-		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
-			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
+		s, err := scanSource(rows)
+		if err != nil {
 			return nil, err
 		}
-		s.Enabled = enabled == 1
-		s.DownloadDanmaku = danmaku == 1
-		s.DownloadSubtitle = subtitle == 1
-		s.SkipNFO = skipNFO == 1
-		s.SkipPoster = skipPoster == 1
-		s.UseDynamicAPI = useDynamic == 1
 		sources = append(sources, s)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return sources, nil
+	return sources, rows.Err()
 }
 
 func (d *DB) GetEnabledSources() ([]Source, error) {
-	rows, err := d.Query(`
-		SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
-		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
-		       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
-		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
-		FROM sources WHERE enabled = 1
-	`)
+	rows, err := d.Query("SELECT " + sourceColumns + " FROM sources WHERE enabled = 1")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var sources []Source
 	for rows.Next() {
-		var s Source
-		var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
-		if err := rows.Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-			&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
-			&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-			&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules); err != nil {
+		s, err := scanSource(rows)
+		if err != nil {
 			return nil, err
 		}
-		s.Enabled = enabled == 1
-		s.DownloadDanmaku = danmaku == 1
-		s.DownloadSubtitle = subtitle == 1
-		s.SkipNFO = skipNFO == 1
-		s.SkipPoster = skipPoster == 1
-		s.UseDynamicAPI = useDynamic == 1
 		sources = append(sources, s)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return sources, nil
+	return sources, rows.Err()
 }
 
 func (d *DB) GetSource(id int64) (*Source, error) {
-	var s Source
-	var enabled, danmaku, subtitle, skipNFO, skipPoster, useDynamic int
-	err := d.QueryRow(`
-		SELECT id, COALESCE(type,'channel'), url, COALESCE(name,''), COALESCE(cookies_file,''), 
-		       check_interval, COALESCE(download_quality,'best'), COALESCE(download_codec,'all'), 
-		       COALESCE(download_danmaku,0), COALESCE(download_subtitle,0), enabled, last_check, created_at, updated_at,
-		       COALESCE(download_filter,''), COALESCE(download_quality_min,''),
-		       COALESCE(skip_nfo,0), COALESCE(skip_poster,0), COALESCE(use_dynamic_api,0), COALESCE(filter_rules,'')
-		FROM sources WHERE id = ?
-	`, id).Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
-		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &subtitle, &enabled,
-		&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules)
+	row := d.QueryRow("SELECT "+sourceColumns+" FROM sources WHERE id = ?", id)
+	s, err := scanSource(row)
 	if err != nil {
 		return nil, err
 	}
-	s.Enabled = enabled == 1
-	s.DownloadDanmaku = danmaku == 1
-	s.DownloadSubtitle = subtitle == 1
-	s.SkipNFO = skipNFO == 1
-	s.SkipPoster = skipPoster == 1
-	s.UseDynamicAPI = useDynamic == 1
 	return &s, nil
 }
 
 func (d *DB) UpdateSource(s *Source) error {
 	enabled := 0
-	if s.Enabled {
-		enabled = 1
-	}
+	if s.Enabled { enabled = 1 }
 	danmaku := 0
-	if s.DownloadDanmaku {
-		danmaku = 1
-	}
-	skipNFO := 0
-	if s.SkipNFO {
-		skipNFO = 1
-	}
-	skipPoster := 0
-	if s.SkipPoster {
-		skipPoster = 1
-	}
+	if s.DownloadDanmaku { danmaku = 1 }
 	subtitle := 0
-	if s.DownloadSubtitle {
-		subtitle = 1
-	}
+	if s.DownloadSubtitle { subtitle = 1 }
+	skipNFO := 0
+	if s.SkipNFO { skipNFO = 1 }
+	skipPoster := 0
+	if s.SkipPoster { skipPoster = 1 }
 	useDynamic := 0
-	if s.UseDynamicAPI {
-		useDynamic = 1
-	}
+	if s.UseDynamicAPI { useDynamic = 1 }
 	_, err := d.Exec(`
 		UPDATE sources SET type=?, url=?, name=?, cookies_file=?, check_interval=?, 
 		download_quality=?, download_codec=?, download_danmaku=?, download_subtitle=?, enabled=?,
@@ -154,7 +114,6 @@ func (d *DB) UpdateSource(s *Source) error {
 }
 
 func (d *DB) DeleteSource(id int64) error {
-	// 级联删除下载记录
 	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
 	_, err := d.Exec("DELETE FROM sources WHERE id = ?", id)
 	return err
@@ -165,42 +124,51 @@ func (d *DB) UpdateSourceLastCheck(id int64) error {
 	return err
 }
 
-// 清理源的所有下载记录和文件
 func (d *DB) CleanSource(id int64) (int, error) {
-	// 获取该源的所有下载
 	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ? AND status = 'completed'", id)
-	if err != nil {
-		return 0, err
-	}
-
+	if err != nil { return 0, err }
 	var count int
 	for rows.Next() {
 		var path string
 		rows.Scan(&path)
-		if path != "" {
-			count++
-		}
+		if path != "" { count++ }
 	}
 	rows.Close()
-
-	// 删除下载记录
 	_, err = d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
-	if err != nil {
-		return 0, err
-	}
-
-	return count, nil
+	return count, err
 }
 
-// UpdateSourceLatestVideoAt 更新源的最新视频时间戳
 func (d *DB) UpdateSourceLatestVideoAt(id int64, ts int64) error {
 	_, err := d.Exec("UPDATE sources SET latest_video_at = ? WHERE id = ?", ts, id)
 	return err
 }
 
-// GetSourceLatestVideoAt 获取源的最新视频时间戳
 func (d *DB) GetSourceLatestVideoAt(id int64) (int64, error) {
 	var ts int64
 	err := d.QueryRow("SELECT COALESCE(latest_video_at, 0) FROM sources WHERE id = ?", id).Scan(&ts)
 	return ts, err
+}
+
+// GetSourcesDueForCheck 返回到期需要检查的 enabled sources
+func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
+	var query string
+	if globalInterval > 0 {
+		query = fmt.Sprintf("SELECT "+sourceColumns+` FROM sources 
+			WHERE enabled = 1 
+			  AND (last_check IS NULL OR datetime(last_check, '+%d seconds') <= datetime('now'))`, globalInterval)
+	} else {
+		query = "SELECT " + sourceColumns + ` FROM sources 
+			WHERE enabled = 1 
+			  AND (last_check IS NULL OR datetime(last_check, '+' || check_interval || ' seconds') <= datetime('now'))`
+	}
+	rows, err := d.Query(query)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	var sources []Source
+	for rows.Next() {
+		s, err := scanSource(rows)
+		if err != nil { return nil, err }
+		sources = append(sources, s)
+	}
+	return sources, rows.Err()
 }
