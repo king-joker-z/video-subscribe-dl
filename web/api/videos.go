@@ -176,14 +176,26 @@ func (h *VideosHandler) HandleCancel(w http.ResponseWriter, r *http.Request, id 
 }
 
 // POST /api/videos/:id/redownload — 重新下载（删除旧文件，重置为 pending）
+// 也支持 pending 状态的视频：直接触发下载，不删文件不重置
 func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, err := h.db.GetDownload(id)
 	if err != nil {
 		apiError(w, CodeVideoNotFound, "视频不存在")
 		return
 	}
+
+	// pending 状态：直接触发下载，无需删文件或重置
+	if dl.Status == "pending" {
+		if h.onRedownload != nil {
+			go h.onRedownload(id)
+		}
+		log.Printf("[video] Trigger pending download %d (%s)", id, dl.Title)
+		apiOK(w, map[string]interface{}{"id": id, "message": "已触发下载"})
+		return
+	}
+
 	if dl.Status != "completed" && dl.Status != "relocated" {
-		apiError(w, CodeInvalidParam, "只能重新下载已完成的视频")
+		apiError(w, CodeInvalidParam, "只能重新下载已完成或待处理的视频")
 		return
 	}
 

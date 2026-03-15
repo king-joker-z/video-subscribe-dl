@@ -109,6 +109,8 @@ func (s *Scheduler) Start() {
 			log.Printf("[startup] Reset %d stale pending/downloading records (will be requeued)", reset)
 		}
 		s.verifyCookie("startup")
+		// 启动时处理容器重启前遗留的 pending 下载
+		s.ProcessAllPending()
 		s.checkAll()
 		ticker := time.NewTicker(config.DefaultSchedulerTick)
 		defer ticker.Stop()
@@ -258,6 +260,9 @@ func (s *Scheduler) checkAll() {
 			return
 		}
 	}
+
+	// 所有 source 检查完后，处理遗留的 pending 下载
+	s.ProcessAllPending()
 
 	// Auto-cleanup: retention-based and disk-pressure
 }

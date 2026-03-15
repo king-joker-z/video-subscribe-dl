@@ -195,6 +195,10 @@ export function VideosPage({ params = {} } = {}) {
                       h('td', { className: 'py-3 pr-3 text-xs text-slate-500 hidden lg:table-cell' }, formatTime(v.created_at)),
                       h('td', { className: 'py-3' },
                         h('div', { className: 'flex items-center gap-1' },
+                          v.status === 'pending' && h('button', {
+                            onClick: async () => { try { await api.redownloadVideo(v.id); toast.success('已触发下载'); load(); } catch (e) { toast.error(e.message); } },
+                            className: 'p-1.5 rounded hover:bg-green-900/50 text-slate-400 hover:text-green-400', title: '开始下载'
+                          }, h(Icon, { name: 'download', size: 14 })),
                           ((v.status === 'failed' || v.status === 'permanent_failed') && v.status !== 'charge_blocked') && h('button', {
                             onClick: async () => { try { await api.retryVideo(v.id); toast.success('已重试'); load(); } catch (e) { toast.error(e.message); } },
                             className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '重试'

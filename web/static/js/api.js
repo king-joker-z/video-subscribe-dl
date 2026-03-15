@@ -80,6 +80,9 @@ export const api = {
   // Version
   getVersion: () => request('/api/version'),
 
+  // 处理所有 pending 下载
+  processPending: () => request('/api/task/trigger', { method: 'POST' }),
+
   // Old APIs (deprecated)
   processAllPending: () => fetch('/api/downloads/batch/process-pending', { method: 'POST' }).then(r => r.json()),
   retryAllFailed: () => fetch('/api/downloads/batch/retry-failed', { method: 'POST' }).then(r => r.json()),
