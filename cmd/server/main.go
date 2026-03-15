@@ -23,7 +23,7 @@ import (
 	"video-subscribe-dl/web"
 )
 
-var version = "v2.15.0"
+var version = "v2.16.0"
 var buildTime = "unknown"
 var startTime = time.Now()
 

@@ -32,6 +32,7 @@ type Config struct {
 
 // ProgressInfo 描述一个下载任务的实时进度
 type ProgressInfo struct {
+	DownloadID int64   `json:"download_id"` // DB download ID
 	BvID       string  `json:"bvid"`
 	Title      string  `json:"title"`
 	Status     string  `json:"status"`     // "downloading_video", "downloading_audio", "merging", "done", "error"
@@ -77,6 +78,7 @@ type Downloader struct {
 }
 
 type Job struct {
+	DownloadID       int64  // DB download ID (for progress tracking)
 	BvID             string // 直接用 BV 号
 	CID              int64  // 视频 CID
 	Title            string
@@ -413,10 +415,11 @@ func (d *Downloader) download(job *Job) *Result {
 
 	// 初始化进度
 	prog := &ProgressInfo{
-		BvID:   job.BvID,
-		Title:  job.Title,
-		Status: "downloading_video",
-		Phase:  "video",
+		DownloadID: job.DownloadID,
+		BvID:       job.BvID,
+		Title:      job.Title,
+		Status:     "downloading_video",
+		Phase:      "video",
 	}
 	d.setProgress(job.BvID, prog)
 	defer d.removeProgress(job.BvID)

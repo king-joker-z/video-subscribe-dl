@@ -276,3 +276,18 @@
 - [x] api.js 新增 testNotification / getNotifyStatus 方法
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.15.0
+
+## 迭代 #28 (v2.16.0) — 下载速度/ETA 实时展示 + 进度匹配修复
+- [x] 新增 formatSpeed 工具函数：将 bytes/sec 格式化为人类可读速度（如 "1.5 MB/s"）
+- [x] 新增 formatETA 工具函数：根据已下载/总量/速度计算剩余时间（如 "3分12秒"）
+- [x] 修复前端进度匹配 bug：原 getProgress 使用不存在的 p.id 字段，导致视频列表进度条从不显示
+- [x] 后端 ProgressInfo 新增 DownloadID 字段（JSON: download_id）：关联数据库下载记录 ID
+- [x] 后端 Job 新增 DownloadID 字段：在所有 5 处 Job 创建点传入数据库 ID
+- [x] 前端 getProgress 改为 download_id + bvid 双重匹配：确保进度条可靠匹配
+- [x] 视频列表表格视图：进度条下方显示速度 + ETA + 已下载/总量
+- [x] 视频列表卡片视图：封面底部叠加速度/百分比/ETA 信息条
+- [x] 仪表盘新增"下载中"实时进度卡片：展示所有活跃下载项，含标题、进度条、速度、ETA、阶段标签
+- [x] 仪表盘显示总下载速度汇总
+- [x] 合并阶段特殊显示"合并中..."（amber 色）
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.16.0

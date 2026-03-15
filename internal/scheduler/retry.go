@@ -141,6 +141,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 
 	capturedDlID := dl.ID
 	s.dl.Submit(&downloader.Job{
+		DownloadID:       capturedDlID,
 		BvID:             actualBvID,
 		CID:              cid,
 		Title:            dl.Title,

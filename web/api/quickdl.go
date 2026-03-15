@@ -183,6 +183,7 @@ func (h *QuickDownloadHandler) HandleQuickDownload(w http.ResponseWriter, r *htt
 		go h.handleResult(capturedDlID, bvid, detail, uploaderName, resultCh, skipNFO, skipPoster, nil)
 
 		if err := h.downloader.Submit(&downloader.Job{
+			DownloadID:       capturedDlID,
 			BvID:             bvid,
 			CID:              pages[0].CID,
 			Title:            detail.Title,
@@ -271,6 +272,7 @@ func (h *QuickDownloadHandler) HandleQuickDownload(w http.ResponseWriter, r *htt
 			go h.handleResult(capturedDlID, partVideoID, detail, uploaderName, resultCh, skipNFO, skipPoster, epMeta)
 
 			if err := h.downloader.Submit(&downloader.Job{
+				DownloadID:       capturedDlID,
 				BvID:             bvid,
 				CID:              page.CID,
 				Title:            partTitle,

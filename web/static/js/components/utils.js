@@ -1,6 +1,32 @@
 import React from 'react';
 const { createElement: h } = React;
 
+
+// 格式化下载速度 (bytes/sec -> "1.5 MB/s")
+export function formatSpeed(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '';
+  const k = 1024;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+  const idx = Math.min(i, sizes.length - 1);
+  return parseFloat((bytesPerSec / Math.pow(k, idx)).toFixed(1)) + ' ' + sizes[idx];
+}
+
+// 计算并格式化 ETA ("3分12秒", "< 1秒")
+export function formatETA(downloaded, total, speed) {
+  if (!speed || speed <= 0 || !total || total <= 0) return '';
+  const remaining = total - downloaded;
+  if (remaining <= 0) return '即将完成';
+  const sec = Math.ceil(remaining / speed);
+  if (sec < 1) return '< 1秒';
+  if (sec < 60) return sec + '秒';
+  const min = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (min < 60) return s > 0 ? min + '分' + s + '秒' : min + '分';
+  const hr = Math.floor(min / 60);
+  const m = min % 60;
+  return hr + '时' + (m > 0 ? m + '分' : '');
+}
 export function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;

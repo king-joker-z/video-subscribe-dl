@@ -223,6 +223,7 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
+		DownloadID:       capturedDlID,
 		BvID:             strings.SplitN(videoID, "_P", 2)[0],
 		CID:              cid,
 		Title:            title,
@@ -279,6 +280,7 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
+		DownloadID:       capturedDlID,
 		BvID:             strings.SplitN(videoID, "_P", 2)[0],
 		CID:              cid,
 		Title:            title,

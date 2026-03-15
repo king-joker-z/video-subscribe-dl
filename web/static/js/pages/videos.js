@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, formatBytes, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState } from '../components/utils.js';
+import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState } from '../components/utils.js';
 import { VideoDetailModal } from '../components/video-detail.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
@@ -109,7 +109,7 @@ export function VideosPage({ params = {} } = {}) {
     { value: 'deleted', label: '已删除' },
   ];
 
-  const getProgress = (videoId) => progress.find(p => String(p.id) === String(videoId) || String(p.download_id) === String(videoId));
+  const getProgress = (videoId, videoVid) => progress.find(p => (p.download_id && String(p.download_id) === String(videoId)) || (videoVid && p.bvid && p.bvid === videoVid));
 
   const handleDetectCharge = async () => {
     try {
@@ -233,7 +233,7 @@ export function VideosPage({ params = {} } = {}) {
                 ),
                 h('tbody', null,
                   videos.map(v => {
-                    const prog = getProgress(v.id);
+                    const prog = getProgress(v.id, v.video_id);
                     return h('tr', {
                       key: v.id,
                       className: 'border-b border-slate-700/30 hover:bg-slate-800/50 cursor-pointer',
@@ -245,8 +245,18 @@ export function VideosPage({ params = {} } = {}) {
                       h('td', { className: 'py-3 pr-3' },
                         h('div', { className: 'min-w-0' },
                           h('div', { className: 'text-sm truncate max-w-md' }, v.title || v.video_id),
-                          prog && h('div', { className: 'w-32 bg-slate-700 rounded-full h-1 mt-1' },
-                            h('div', { className: 'bg-blue-500 h-1 rounded-full progress-bar', style: { width: (prog.percent || 0) + '%' } })
+                          prog && h('div', { className: 'mt-1 space-y-0.5' },
+                            h('div', { className: 'flex items-center gap-2' },
+                              h('div', { className: 'w-24 bg-slate-700 rounded-full h-1' },
+                                h('div', { className: 'bg-blue-500 h-1 rounded-full progress-bar', style: { width: (prog.percent || 0) + '%' } })
+                              ),
+                              h('span', { className: 'text-[10px] text-slate-500 tabular-nums' }, (prog.percent || 0).toFixed(1) + '%')
+                            ),
+                            (prog.speed > 0 || prog.total > 0) && h('div', { className: 'flex items-center gap-2 text-[10px] text-slate-500' },
+                              prog.speed > 0 && h('span', { className: 'text-blue-400 font-medium' }, formatSpeed(prog.speed)),
+                              formatETA(prog.downloaded, prog.total, prog.speed) && h('span', null, 'ETA ' + formatETA(prog.downloaded, prog.total, prog.speed)),
+                              prog.total > 0 && h('span', null, formatBytes(prog.downloaded) + '/' + formatBytes(prog.total))
+                            )
                           )
                         )
                       ),
@@ -290,7 +300,7 @@ export function VideosPage({ params = {} } = {}) {
           : h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
               videos.map(v => h(VideoCard, {
                 key: v.id, video: v,
-                progress: getProgress(v.id),
+                progress: getProgress(v.id, v.video_id),
                 onClick: () => setDetailVideo(v)
               }))
             ),
@@ -321,9 +331,16 @@ function VideoCard({ video: v, progress: prog, onClick }) {
       v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/75 text-white text-xs px-1.5 py-0.5 rounded' },
         formatDurationShort(v.duration)
       ),
-      // 进度条
-      prog && h('div', { className: 'absolute bottom-0 left-0 right-0 h-1 bg-black/30' },
-        h('div', { className: 'bg-blue-500 h-1 progress-bar', style: { width: (prog.percent || 0) + '%' } })
+      // 进度条 + 速度信息
+      prog && h('div', { className: 'absolute bottom-0 left-0 right-0' },
+        prog.speed > 0 && h('div', { className: 'flex items-center justify-between px-2 py-0.5 bg-black/60 text-[10px]' },
+          h('span', { className: 'text-blue-300 font-medium' }, formatSpeed(prog.speed)),
+          h('span', { className: 'text-slate-300' }, (prog.percent || 0).toFixed(1) + '%'),
+          formatETA(prog.downloaded, prog.total, prog.speed) && h('span', { className: 'text-slate-400' }, formatETA(prog.downloaded, prog.total, prog.speed))
+        ),
+        h('div', { className: 'h-1 bg-black/30' },
+          h('div', { className: 'bg-blue-500 h-1 progress-bar', style: { width: (prog.percent || 0) + '%' } })
+        )
       )
     ),
     // 信息

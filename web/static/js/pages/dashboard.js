@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { formatBytes, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton } from '../components/utils.js';
+import { formatBytes, formatSpeed, formatETA, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef, Fragment } = React;
 
 export function DashboardPage({ onNavigate }) {
@@ -11,6 +11,7 @@ export function DashboardPage({ onNavigate }) {
   const [cooldownSec, setCooldownSec] = useState(0);
   const cooldownRef = useRef(null);
   const [refreshingCred, setRefreshingCred] = useState(false);
+  const [activeProgress, setActiveProgress] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +36,18 @@ export function DashboardPage({ onNavigate }) {
     window.addEventListener('vsd:download-event', handler);
     return () => window.removeEventListener('vsd:download-event', handler);
   }, [load]);
+
+  // SSE 下载进度
+  useEffect(() => {
+    let es;
+    try {
+      es = new EventSource('/api/events');
+      es.addEventListener('progress', (e) => {
+        try { setActiveProgress(JSON.parse(e.data) || []); } catch {}
+      });
+    } catch {}
+    return () => { if (es) es.close(); };
+  }, []);
 
   // 风控冷却倒计时
   useEffect(() => {
@@ -238,6 +251,45 @@ export function DashboardPage({ onNavigate }) {
           h('div', { className: 'text-xs text-slate-500' }, `已用 ${formatBytes(data.disk.used)} (${((data.disk.used / data.disk.total) * 100).toFixed(1)}%)`),
           h('div', { className: 'text-xs text-slate-500 mt-1' }, `已下载文件: ${formatBytes(data.total_size || 0)}`)
         ) : h('div', { className: 'text-slate-500' }, '加载中...')
+      )
+    ),
+
+    // 活跃下载列表（带速度和 ETA）
+    activeProgress.length > 0 && h(Card, null,
+      h('div', { className: 'flex items-center justify-between mb-4' },
+        h('h3', { className: 'font-medium text-slate-200' }, '下载中'),
+        h('div', { className: 'flex items-center gap-2' },
+          h('span', { className: 'text-xs text-slate-500' }, activeProgress.length + ' 个任务'),
+          (() => {
+            const totalSpeed = activeProgress.reduce((sum, p) => sum + (p.speed || 0), 0);
+            return totalSpeed > 0 && h('span', { className: 'text-xs text-blue-400 font-medium' }, '总速度 ' + formatSpeed(totalSpeed));
+          })()
+        )
+      ),
+      h('div', { className: 'space-y-3' },
+        activeProgress.map(p =>
+          h('div', { key: p.bvid, className: 'space-y-1.5' },
+            h('div', { className: 'flex items-center justify-between' },
+              h('div', { className: 'text-sm truncate flex-1 min-w-0 mr-3' }, p.title || p.bvid),
+              h('span', { className: 'text-xs text-slate-500 flex-shrink-0 tabular-nums' }, (p.percent || 0).toFixed(1) + '%')
+            ),
+            h('div', { className: 'w-full bg-slate-700 rounded-full h-1.5' },
+              h('div', { className: cn('h-1.5 rounded-full progress-bar', p.phase === 'merge' ? 'bg-amber-500' : 'bg-blue-500'), style: { width: Math.min(100, p.percent || 0) + '%' } })
+            ),
+            h('div', { className: 'flex items-center gap-3 text-xs text-slate-500' },
+              p.phase === 'merge'
+                ? h('span', { className: 'text-amber-400' }, '合并中...')
+                : h(Fragment, null,
+                    p.speed > 0 && h('span', { className: 'text-blue-400 font-medium' }, formatSpeed(p.speed)),
+                    formatETA(p.downloaded, p.total, p.speed) && h('span', null, 'ETA ' + formatETA(p.downloaded, p.total, p.speed)),
+                    p.total > 0 && h('span', null, formatBytes(p.downloaded) + ' / ' + formatBytes(p.total))
+                  ),
+              h('span', { className: 'text-slate-600' },
+                p.phase === 'video' ? '视频' : p.phase === 'audio' ? '音频' : p.phase === 'merge' ? '合并' : p.phase
+              )
+            )
+          )
+        )
       )
     ),
 
