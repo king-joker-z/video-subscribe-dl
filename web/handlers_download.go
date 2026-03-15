@@ -2,6 +2,7 @@ package web
 
 import (
 	"log"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -216,4 +217,122 @@ func (s *Server) handleBatchDeleteCompleted(w http.ResponseWriter, r *http.Reque
 	total := affected + affected2
 	log.Printf("[batch] Deleted completed/relocated downloads: %d records", total)
 	jsonResponse(w, map[string]interface{}{"ok": true, "affected": total})
+}
+
+
+// parseJSON 通用 JSON 请求体解析
+func parseJSON(r *http.Request, v interface{}) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
+// handleDownloadUploaders GET /api/downloads/uploaders — UP主列表分页
+func (s *Server) handleDownloadUploaders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+
+	status := r.URL.Query().Get("status")
+	search := r.URL.Query().Get("search")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if page < 1 { page = 1 }
+	if pageSize < 1 || pageSize > 100 { pageSize = 20 }
+
+	uploaders, total, err := s.db.GetDownloadUploaders(status, search, page, pageSize)
+	if err != nil {
+		jsonError(w, "query error: "+err.Error(), 500)
+		return
+	}
+	jsonResponse(w, map[string]interface{}{
+		"uploaders":  uploaders,
+		"total":      total,
+		"page":       page,
+		"page_size":  pageSize,
+	})
+}
+
+// handleDownloadsByUploader GET /api/downloads/by-uploader — 单UP主视频列表分页
+func (s *Server) handleDownloadsByUploader(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+
+	uploader := r.URL.Query().Get("uploader")
+	if uploader == "" {
+		jsonError(w, "uploader required", 400)
+		return
+	}
+	status := r.URL.Query().Get("status")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if page < 1 { page = 1 }
+	if pageSize < 1 || pageSize > 100 { pageSize = 50 }
+
+	downloads, total, err := s.db.GetDownloadsByUploaderPaged(uploader, status, page, pageSize)
+	if err != nil {
+		jsonError(w, "query error: "+err.Error(), 500)
+		return
+	}
+
+	stats, _ := s.db.GetDownloadStatsByUploader(uploader)
+
+	jsonResponse(w, map[string]interface{}{
+		"downloads":  downloads,
+		"stats":      stats,
+		"total":      total,
+		"page":       page,
+		"page_size":  pageSize,
+	})
+}
+
+// handleDownloadActions POST /api/downloads/actions — 统一批量操作
+func (s *Server) handleDownloadActions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		jsonError(w, "method not allowed", 405)
+		return
+	}
+
+	var req struct {
+		Action   string `json:"action"`   // retry_failed, process_pending, delete_completed
+		Scope    string `json:"scope"`    // all, uploader
+		Uploader string `json:"uploader"` // scope=uploader 时需要
+	}
+	if err := parseJSON(r, &req); err != nil {
+		jsonError(w, "invalid json", 400)
+		return
+	}
+
+	var affected int64
+	var err error
+
+	switch req.Action {
+	case "retry_failed":
+		if req.Scope == "uploader" && req.Uploader != "" {
+			affected, err = s.db.RetryFailedByUploader(req.Uploader)
+		} else {
+			affected, err = s.db.RetryAllFailed()
+		}
+	case "delete_completed":
+		if req.Scope == "uploader" && req.Uploader != "" {
+			affected, err = s.db.DeleteCompletedByUploader(req.Uploader)
+		} else {
+			affected, err = s.db.DeleteAllCompleted()
+		}
+	default:
+		jsonError(w, "unknown action: "+req.Action, 400)
+		return
+	}
+
+	if err != nil {
+		jsonError(w, "action failed: "+err.Error(), 500)
+		return
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"ok":       true,
+		"action":   req.Action,
+		"affected": affected,
+	})
 }

@@ -1,6 +1,9 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 func (d *DB) CreateDownload(dl *Download) (int64, error) {
 	result, err := d.Exec(`
@@ -364,4 +367,205 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 		return nil, err
 	}
 	return downloads, nil
+}
+
+
+// UploaderStats UP主下载统计
+type UploaderStats struct {
+	Uploader       string `json:"uploader"`
+	Total          int    `json:"total"`
+	Completed      int    `json:"completed"`
+	Downloading    int    `json:"downloading"`
+	Pending        int    `json:"pending"`
+	Failed         int    `json:"failed"`
+	Skipped        int    `json:"skipped"`
+	LastDownloadAt string `json:"last_download_at"`
+}
+
+// GetDownloadUploaders 获取 UP 主列表（分页 + 筛选）
+func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]UploaderStats, int, error) {
+	where := "WHERE 1=1"
+	args := []interface{}{}
+
+	if search != "" {
+		where += " AND d.uploader LIKE ?"
+		args = append(args, "%"+search+"%")
+	}
+
+	// 先统计总数
+	countQuery := fmt.Sprintf("SELECT COUNT(DISTINCT d.uploader) FROM downloads d %s AND d.uploader != ''", where)
+	var total int
+	if err := d.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// 分页查询
+	query := fmt.Sprintf(`
+		SELECT d.uploader,
+			COUNT(*) as total,
+			SUM(CASE WHEN d.status IN ('completed','relocated') THEN 1 ELSE 0 END) as completed,
+			SUM(CASE WHEN d.status = 'downloading' THEN 1 ELSE 0 END) as downloading,
+			SUM(CASE WHEN d.status = 'pending' THEN 1 ELSE 0 END) as pending,
+			SUM(CASE WHEN d.status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN d.status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+			MAX(d.created_at) as last_download_at
+		FROM downloads d
+		%s AND d.uploader != ''
+		GROUP BY d.uploader
+		ORDER BY last_download_at DESC
+		LIMIT ? OFFSET ?
+	`, where)
+
+	offset := (page - 1) * pageSize
+	args = append(args, pageSize, offset)
+
+	rows, err := d.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var uploaders []UploaderStats
+	for rows.Next() {
+		var u UploaderStats
+		if err := rows.Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.LastDownloadAt); err != nil {
+			return nil, 0, err
+		}
+		uploaders = append(uploaders, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return uploaders, total, nil
+}
+
+// GetDownloadsByUploader 获取单个 UP 主的视频列表（分页）
+func (d *DB) GetDownloadsByUploaderPaged(uploader, status string, page, pageSize int) ([]Download, int, error) {
+	where := "WHERE d.uploader = ?"
+	args := []interface{}{uploader}
+
+	if status != "" && status != "all" {
+		where += " AND d.status = ?"
+		args = append(args, status)
+	}
+
+	// 总数
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM downloads d %s", where)
+	var total int
+	if err := d.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// 分页（按状态优先级排序）
+	query := fmt.Sprintf(`
+		SELECT id, source_id, video_id, title, status, file_path,
+			COALESCE(uploader,''), COALESCE(thumbnail,''), COALESCE(description,''),
+			COALESCE(duration,0), COALESCE(thumb_path,''),
+			COALESCE(retry_count,0), COALESCE(last_error,''), created_at
+		FROM downloads d %s
+		ORDER BY
+			CASE status
+				WHEN 'downloading' THEN 1
+				WHEN 'pending' THEN 2
+				WHEN 'failed' THEN 3
+				WHEN 'completed' THEN 4
+				WHEN 'relocated' THEN 5
+				ELSE 6
+			END,
+			created_at DESC
+		LIMIT ? OFFSET ?
+	`, where)
+
+	offset := (page - 1) * pageSize
+	args = append(args, pageSize, offset)
+
+	rows, err := d.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var downloads []Download
+	for rows.Next() {
+		var dl Download
+		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title,
+			&dl.Status, &dl.FilePath, &dl.Uploader, &dl.Thumbnail, &dl.Description,
+			&dl.Duration, &dl.ThumbPath, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return downloads, total, nil
+}
+
+// GetDownloadStatsByUploader 获取单个 UP 主的全量统计（不受筛选影响）
+func (d *DB) GetDownloadStatsByUploader(uploader string) (*UploaderStats, error) {
+	query := `
+		SELECT uploader,
+			COUNT(*) as total,
+			SUM(CASE WHEN status IN ('completed','relocated') THEN 1 ELSE 0 END) as completed,
+			SUM(CASE WHEN status = 'downloading' THEN 1 ELSE 0 END) as downloading,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+			SUM(CASE WHEN status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped,
+			MAX(created_at) as last_download_at
+		FROM downloads WHERE uploader = ?
+	`
+	var u UploaderStats
+	err := d.QueryRow(query, uploader).Scan(&u.Uploader, &u.Total, &u.Completed, &u.Downloading, &u.Pending, &u.Failed, &u.Skipped, &u.LastDownloadAt)
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// RetryFailedByUploader 重试指定 UP 主的所有失败下载
+func (d *DB) RetryFailedByUploader(uploader string) (int64, error) {
+	result, err := d.Exec("UPDATE downloads SET status = 'pending', retry_count = 0, last_error = '' WHERE uploader = ? AND status IN ('failed','permanent_failed')", uploader)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// DeleteCompletedByUploader 删除指定 UP 主的已完成记录
+func (d *DB) DeleteCompletedByUploader(uploader string) (int64, error) {
+	result, err := d.Exec("DELETE FROM downloads WHERE uploader = ? AND status IN ('completed','relocated')", uploader)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// GetPendingByUploader 获取指定 UP 主的 pending 下载
+func (d *DB) GetPendingByUploader(uploader string) ([]Download, error) {
+	rows, err := d.Query("SELECT id, source_id, video_id, title, status, file_path, COALESCE(uploader,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at FROM downloads WHERE uploader = ? AND status = 'pending'", uploader)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var downloads []Download
+	for rows.Next() {
+		var dl Download
+		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Status, &dl.FilePath, &dl.Uploader, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
+			return nil, err
+		}
+		downloads = append(downloads, dl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return downloads, nil
+}
+
+// DeleteAllCompleted 删除所有已完成记录
+func (d *DB) DeleteAllCompleted() (int64, error) {
+	result, err := d.Exec("DELETE FROM downloads WHERE status IN ('completed','relocated')")
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
