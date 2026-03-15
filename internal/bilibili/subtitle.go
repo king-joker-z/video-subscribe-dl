@@ -14,11 +14,11 @@ import (
 
 // Subtitle 描述一条字幕轨道信息
 type Subtitle struct {
-	ID        int64  `json:"id"`
-	Lan       string `json:"lan"`        // 语言代码: zh-CN, en, ja 等
-	LanDoc    string `json:"lan_doc"`    // 语言描述: 中文（自动生成）, English 等
+	ID          int64  `json:"id"`
+	Lan         string `json:"lan"`          // 语言代码: zh-CN, en, ja 等
+	LanDoc      string `json:"lan_doc"`      // 语言描述: 中文（自动生成）, English 等
 	SubtitleURL string `json:"subtitle_url"` // 字幕 JSON URL
-	IsAI      bool   `json:"ai_type"`    // 是否为 AI 自动生成（ai_type > 0）
+	IsAI        bool   `json:"ai_type"`      // 是否为 AI 自动生成（ai_type > 0）
 }
 
 // subtitleJSON B 站字幕 JSON 格式

@@ -34,6 +34,13 @@ func (c *Credential) IsEmpty() bool {
 }
 
 // ToCookieString 转换为 Cookie 字符串（用于 HTTP 请求头）
+func (c *Credential) getUA() string {
+	if c.UA != "" {
+		return c.UA
+	}
+	return randUA()
+}
+
 func (c *Credential) ToCookieString() string {
 	if c.IsEmpty() {
 		return ""
@@ -105,7 +112,7 @@ func CredentialFromCookieString(cookieStr string) *Credential {
 // CredentialStatus 凭证状态
 type CredentialStatus struct {
 	HasCredential bool   `json:"has_credential"`
-	Source        string `json:"source"`       // "qrcode", "cookie_file", "none"
+	Source        string `json:"source"` // "qrcode", "cookie_file", "none"
 	NeedRefresh   bool   `json:"need_refresh"`
 	Username      string `json:"username,omitempty"`
 	VIPLabel      string `json:"vip_label,omitempty"`
@@ -125,7 +132,7 @@ func (c *Credential) NeedRefresh(httpClient *http.Client) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.getUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	req.Header.Set("Cookie", c.ToCookieString())
 
@@ -215,7 +222,7 @@ func (c *Credential) doGetRefreshCSRF(httpClient *http.Client, correspondPath st
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.getUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	req.Header.Set("Cookie", c.ToCookieString())
 
@@ -283,7 +290,7 @@ func (c *Credential) Refresh(httpClient *http.Client) (*Credential, error) {
 		return nil, fmt.Errorf("create refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.getUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	req.Header.Set("Cookie", c.ToCookieString())
 
@@ -355,7 +362,7 @@ func (c *Credential) confirmRefresh(httpClient *http.Client, oldRefreshToken str
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.getUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	req.Header.Set("Cookie", c.ToCookieString())
 
@@ -385,7 +392,7 @@ func GetBuvid3(httpClient *http.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", randUA())
+	req.Header.Set("User-Agent", c.getUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 
 	resp, err := httpClient.Do(req)
