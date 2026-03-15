@@ -54,9 +54,7 @@ func (h *UploadersHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	var result []UploaderWithAvatar
 	for _, u := range uploaders {
 		item := UploaderWithAvatar{UploaderStats: u}
-		if avatar, ok := avatarMap[u.Uploader]; ok {
-			item.Avatar = avatar
-		}
+		// 不返回 avatar URL，减少前端图片请求
 		if mid, ok := midMap[u.Uploader]; ok {
 			item.MID = mid
 		}
@@ -139,18 +137,15 @@ func (h *UploadersHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取头像
-	avatar := ""
+	// 不返回头像 URL，减少图片请求
 	mid := ""
 	if p, _ := h.db.GetPeopleByName(name); p != nil {
-		avatar = p.Avatar
 		mid = p.MID
 	}
 
 	apiOK(w, map[string]interface{}{
-		"stats":  stats,
-		"avatar": avatar,
-		"mid":    mid,
+		"stats": stats,
+		"mid":   mid,
 	})
 }
 

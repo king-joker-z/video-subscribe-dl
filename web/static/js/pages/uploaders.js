@@ -54,11 +54,9 @@ export function UploadersPage({ onNavigate }) {
                 onClick: () => onNavigate('videos', { uploader: u.uploader }),
               },
                 h('div', { className: 'flex items-center gap-3 mb-3' },
-                  u.avatar
-                    ? h('img', { src: u.avatar, className: 'w-10 h-10 rounded-full bg-slate-700 flex-shrink-0', loading: 'lazy' })
-                    : h('div', { className: 'w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0' },
-                        h('span', { className: 'text-sm text-slate-500' }, (u.uploader || '?')[0])
-                      ),
+                  h('div', { className: 'w-10 h-10 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center flex-shrink-0' },
+                    h('span', { className: 'text-sm font-medium text-slate-300' }, (u.uploader || '?')[0])
+                  ),
                   h('div', { className: 'min-w-0' },
                     h('div', { className: 'font-medium text-sm truncate text-slate-200' }, u.uploader),
                     u.mid && h('div', { className: 'text-xs text-slate-500' }, 'UID: ' + u.mid)

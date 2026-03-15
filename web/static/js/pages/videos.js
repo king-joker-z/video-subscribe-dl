@@ -152,9 +152,7 @@ export function VideosPage() {
                       ),
                       h('td', { className: 'py-3 pr-3' },
                         h('div', { className: 'flex items-center gap-3' },
-                          v.thumbnail
-                            ? h('img', { src: '/api/thumb/' + v.id, className: 'w-20 h-12 rounded object-cover bg-slate-700 flex-shrink-0', loading: 'lazy' })
-                            : h('div', { className: 'w-20 h-12 rounded bg-slate-700 flex-shrink-0 flex items-center justify-center' }, h(Icon, { name: 'video', size: 16, className: 'text-slate-600' })),
+                          h('div', { className: 'w-20 h-12 rounded bg-slate-700 flex-shrink-0 flex items-center justify-center' }, h(Icon, { name: 'video', size: 16, className: 'text-slate-600' })),
                           h('div', { className: 'min-w-0' },
                             h('div', { className: 'text-sm truncate max-w-xs' }, v.title || v.video_id),
                             prog && h('div', { className: 'w-32 bg-slate-700 rounded-full h-1 mt-1' },
@@ -187,9 +185,7 @@ export function VideosPage() {
           : h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
               videos.map(v => h(Card, { key: v.id, hover: true, className: 'group' },
                 h('div', { className: 'flex gap-3' },
-                  v.thumbnail
-                    ? h('img', { src: '/api/thumb/' + v.id, className: 'w-24 h-16 rounded object-cover bg-slate-700 flex-shrink-0', loading: 'lazy' })
-                    : h('div', { className: 'w-24 h-16 rounded bg-slate-700 flex-shrink-0' }),
+                  h('div', { className: 'w-24 h-16 rounded bg-slate-700 flex-shrink-0 flex items-center justify-center' }, h(Icon, { name: 'video', size: 16, className: 'text-slate-600' })),
                   h('div', { className: 'flex-1 min-w-0' },
                     h('div', { className: 'text-sm font-medium truncate' }, v.title || v.video_id),
                     h('div', { className: 'text-xs text-slate-500 mt-0.5' }, v.uploader || '--'),
