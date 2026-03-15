@@ -7,6 +7,7 @@ import (
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
+	"video-subscribe-dl/internal/notify"
 )
 
 // Router 新版 API 路由器
@@ -23,6 +24,7 @@ type Router struct {
 	quickdl    *QuickDownloadHandler
 	stream     *StreamHandler
 	search     *SearchHandler
+	notify     *NotifyHandler
 	onSyncAll  func()
 }
 
@@ -95,6 +97,11 @@ func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) { rt.dashboard.SetC
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
 func (rt *Router) SetBuildTime(t string)        { rt.task.SetBuildTime(t) }
 func (rt *Router) SetStartTime(t time.Time)     { rt.task.SetStartTime(t) }
+
+// SetNotifier 设置通知处理器
+func (rt *Router) SetNotifier(n *notify.Notifier) {
+	rt.notify = NewNotifyHandler(n)
+}
 
 // Register 注册新版 API 路由到 mux
 func (rt *Router) Register(mux *http.ServeMux) {
@@ -201,4 +208,10 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Global Search
 	mux.HandleFunc("/api/search", rt.search.HandleSearch)
+
+	// Notify
+	if rt.notify != nil {
+		mux.HandleFunc("/api/notify/test", rt.notify.HandleTest)
+		mux.HandleFunc("/api/notify/status", rt.notify.HandleStatus)
+	}
 }

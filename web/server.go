@@ -162,6 +162,9 @@ func (s *Server) setupRoutes() {
 		}
 		s.apiRouter.SetBiliClientFunc(s.getBiliClient)
 		s.apiRouter.SetConfigReloadFunc(s.onConfigReload)
+		if s.notifier != nil {
+			s.apiRouter.SetNotifier(s.notifier)
+		}
 	}
 }
 

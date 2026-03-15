@@ -262,3 +262,17 @@
 - [x] 从未检查的订阅源显示"从未检查"黄色提示
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.14.0
+
+## 迭代 #27 (v2.15.0) — 通知测试功能
+- [x] 新增 POST /api/notify/test 端点：发送测试通知到已配置的通道（Telegram/Bark/Webhook）
+- [x] 新增 GET /api/notify/status 端点：返回通知配置状态（是否已配置、通道类型）
+- [x] 新增 web/api/notify.go：NotifyHandler 封装通知测试和状态查询逻辑
+- [x] Router 新增 notify 字段和 SetNotifier 方法：通过 notify.Notifier 实例初始化 handler
+- [x] server.go setupRoutes 中自动注入 notifier 到 API router
+- [x] 发送前检查配置：未配置通道时返回友好错误提示
+- [x] 发送失败时返回具体错误信息（网络/配置/服务端错误）
+- [x] 前端设置页通知区域新增"发送测试通知"按钮
+- [x] 有未保存更改时禁用测试按钮（避免测试旧配置造成困惑）
+- [x] api.js 新增 testNotification / getNotifyStatus 方法
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.15.0

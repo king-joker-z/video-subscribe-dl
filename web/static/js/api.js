@@ -121,6 +121,10 @@ export const api = {
   previewTemplate: (template) => request("/api/settings/preview-template", { method: "POST", body: JSON.stringify({ template }) }),
 
   // Global Search
+  // Notify test
+  testNotification: () => request("/api/notify/test", { method: "POST" }),
+  getNotifyStatus: () => request("/api/notify/status"),
+
   globalSearch: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),
 
   };

@@ -60,6 +60,7 @@ export function SettingsPage() {
   const [showQR, setShowQR] = useState(false);
   const [qrData, setQrData] = useState(null);
   const [dirty, setDirty] = useState({});
+  const [testingNotify, setTestingNotify] = useState(false);
   const [templatePreview, setTemplatePreview] = useState('');
   const previewTimer = React.useRef(null);
 
@@ -128,6 +129,14 @@ export function SettingsPage() {
     } catch (e) { toast.error(e.message); }
   };
 
+  const handleTestNotify = async () => {
+    setTestingNotify(true);
+    try {
+      const res = await api.testNotification();
+      toast.success(res.data?.message || '测试通知已发送');
+    } catch (e) { toast.error(e.message); }
+    finally { setTestingNotify(false); }
+  };
   const handleRefreshCred = async () => {
     try {
       await api.refreshCredential();
@@ -386,6 +395,14 @@ export function SettingsPage() {
         h(ToggleRow, { label: '下载失败', keyName: 'notify_on_error' }),
         h(ToggleRow, { label: 'Cookie 过期', keyName: 'notify_on_cookie_expire' }),
         h(ToggleRow, { label: '同步完成', keyName: 'notify_on_sync' })
+        ,h('div', { className: 'mt-3 pt-3 border-t border-slate-700/30 flex items-center justify-between' },
+          h('span', { className: 'text-xs text-slate-500' }, '验证通知配置是否正常工作'),
+          h(Button, {
+            onClick: handleTestNotify,
+            disabled: testingNotify || hasDirty,
+            variant: 'secondary', size: 'sm'
+          }, h(Icon, { name: 'bell', size: 14 }), testingNotify ? '发送中...' : '发送测试通知')
+        )
       )
     ),
 
