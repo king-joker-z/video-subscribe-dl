@@ -87,10 +87,12 @@ type Job struct {
 }
 
 type Result struct {
-	Success  bool
-	FilePath string
-	FileSize int64
-	Error    error
+	Success      bool
+	FilePath     string
+	FileSize     int64
+	Error        error
+	DanmakuDone  bool // 弹幕是否下载成功
+	SubtitleDone bool // 字幕是否下载成功
 }
 
 func New(config Config, biliClient *bilibili.Client) *Downloader {
@@ -494,6 +496,9 @@ func (d *Downloader) download(job *Job) *Result {
 		fileSize = fi.Size()
 	}
 
+	danmakuDone := false
+	subtitleDone := false
+
 	// 7. 弹幕下载（如果启用）
 	if job.Danmaku && job.CID > 0 {
 		log.Printf("  Downloading danmaku for cid=%d...", job.CID)
@@ -513,6 +518,7 @@ func (d *Downloader) download(job *Job) *Result {
 				log.Printf("  Danmaku ASS saved: %s", assPath)
 				// 删除中间 XML 文件，只保留 ASS
 				os.Remove(xmlPath)
+				danmakuDone = true
 			}
 		}
 	}
@@ -527,6 +533,7 @@ func (d *Downloader) download(job *Job) *Result {
 			ext := filepath.Ext(outputPath)
 			baseName := strings.TrimSuffix(filepath.Base(outputPath), ext)
 			bilibili.DownloadSubtitleAsSRT(subs, videoDir, baseName)
+			subtitleDone = true
 		} else {
 			log.Printf("  No subtitles available")
 		}
@@ -544,9 +551,11 @@ func (d *Downloader) download(job *Job) *Result {
 
 	log.Printf("  Done: %s (%.1f MB)", outputPath, float64(fileSize)/1024/1024)
 	return &Result{
-		Success:  true,
-		FilePath: outputPath,
-		FileSize: fileSize,
+		Success:      true,
+		FilePath:     outputPath,
+		FileSize:     fileSize,
+		DanmakuDone:  danmakuDone,
+		SubtitleDone: subtitleDone,
 	}
 }
 

@@ -144,6 +144,19 @@ func (s *Scheduler) Start() {
 		}
 		s.verifyCookie("startup")
 		// 启动时处理容器重启前遗留的 pending 下载
+		// 动态并发控制（从设置读取）
+		if v, err := s.db.GetSetting("concurrent_video"); err == nil && v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				s.videoSema = bilibili.NewSemaphore(n)
+				log.Printf("[scheduler] video 并发数: %d", n)
+			}
+		}
+		if v, err := s.db.GetSetting("concurrent_page"); err == nil && v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				s.pageSema = bilibili.NewSemaphore(n)
+				log.Printf("[scheduler] page 并发数: %d", n)
+			}
+		}
 		s.ProcessAllPending()
 		s.checkAll()
 

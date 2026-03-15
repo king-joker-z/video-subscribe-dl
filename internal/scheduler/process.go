@@ -546,13 +546,19 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		}
 	}
 
-	// 更新 detail_status 位图（video 已完成 = bit 2）
+	// 更新 detail_status 位图
 	statusBits := db.StatusBitVideo
 	if !skipNFO && detail != nil {
 		statusBits |= db.StatusBitNFO
 	}
 	if !skipPoster && detailPic != "" {
 		statusBits |= db.StatusBitThumb
+	}
+	if result.DanmakuDone {
+		statusBits |= db.StatusBitDanmaku
+	}
+	if result.SubtitleDone {
+		statusBits |= db.StatusBitSubtitle
 	}
 	s.db.UpdateDetailStatus(dlID, statusBits)
 
