@@ -254,6 +254,27 @@ func (s *Server) handleCookieVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 优先使用 Credential 验证
+	if credJSON, _ := s.db.GetSetting("credential_json"); credJSON != "" {
+		cred := bilibili.CredentialFromJSON(credJSON)
+		if cred != nil && !cred.IsEmpty() {
+			client := bilibili.NewClientWithCredential(cred)
+			result, err := client.VerifyCookie()
+			if err != nil {
+				jsonResponse(w, map[string]interface{}{"ok": false, "error": err.Error()})
+				return
+			}
+			jsonResponse(w, map[string]interface{}{
+				"ok": true, "logged_in": result.LoggedIn,
+				"username": result.Username, "vip_type": result.VIPType,
+				"vip_status": result.VIPStatus, "vip_active": result.VIPActive,
+				"vip_due_date": result.VIPDueDate, "vip_label": result.VIPLabel,
+				"max_quality": result.MaxQuality, "max_audio": result.MaxAudio,
+			})
+			return
+		}
+	}
+
 	cookiePath, err := s.db.GetSetting("cookie_path")
 	if err != nil {
 		log.Printf("[WARN] Failed to get cookie_path from DB: %v", err)

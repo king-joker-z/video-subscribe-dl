@@ -122,6 +122,10 @@ func main() {
 	}
 
 	sched := scheduler.New(database, dl, *downloadDir, cookiePath)
+	// 如果有 Credential，立即同步给 scheduler（覆盖 New() 中的 cookie-based client）
+	if cred != nil && !cred.IsEmpty() {
+		sched.UpdateCredential(cred)
+	}
 	sched.Start()
 
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)

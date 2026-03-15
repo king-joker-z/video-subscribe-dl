@@ -47,17 +47,21 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 构建 client 用于 API 调用
-		cookie := bilibili.ReadCookieFile(source.CookiesFile)
-		if cookie == "" {
-			cp, err := s.db.GetSetting("cookie_path")
-			if err != nil {
-				log.Printf("[WARN] Failed to get cookie_path from DB: %v", err)
-			} else if cp != "" {
-				cookie = bilibili.ReadCookieFile(cp)
+		// 构建 client 用于 API 调用：优先使用 Credential
+		var client *bilibili.Client
+		if source.CookiesFile != "" {
+			cookie := bilibili.ReadCookieFile(source.CookiesFile)
+			client = bilibili.NewClient(cookie)
+		} else if credJSON, _ := s.db.GetSetting("credential_json"); credJSON != "" {
+			if cred := bilibili.CredentialFromJSON(credJSON); cred != nil && !cred.IsEmpty() {
+				client = bilibili.NewClientWithCredential(cred)
 			}
 		}
-		client := bilibili.NewClient(cookie)
+		if client == nil {
+			cp, _ := s.db.GetSetting("cookie_path")
+			cookie := bilibili.ReadCookieFile(cp)
+			client = bilibili.NewClient(cookie)
+		}
 
 		// 根据类型自动获取名称
 		switch source.Type {
