@@ -8,10 +8,10 @@ import { VideosPage } from './pages/videos.js';
 import { UploadersPage } from './pages/uploaders.js';
 import { SettingsPage } from './pages/settings.js';
 import { LogsPage } from './pages/logs.js';
-import { QuickDownloadDialog, QuickDownloadFAB } from './components/quick-download.js';
+import { QuickDownloadDialog, QuickDownloadFAB, DropZoneOverlay, extractBiliUrl } from './components/quick-download.js';
 import { CommandPalette } from './components/command-palette.js';
 
-const { createElement: h, useState, useEffect, useCallback } = React;
+const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 // ==================== Toast 容器 ====================
 function ToastContainer() {
@@ -141,7 +141,10 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [quickDlOpen, setQuickDlOpen] = useState(false);
+  const [quickDlUrl, setQuickDlUrl] = useState('');
+  const [dropZoneActive, setDropZoneActive] = useState(false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
+  const dragCounter = useRef(0);
 
   // 全局 SSE 下载事件监听：下载完成/失败时弹 toast 通知
   useEffect(() => {
@@ -172,11 +175,69 @@ function App() {
     const handler = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
         e.preventDefault();
+        setQuickDlUrl('');
         setQuickDlOpen(o => !o);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // 全局粘贴监听：检测到 bilibili 链接自动打开快速下载
+  useEffect(() => {
+    const handler = (e) => {
+      // 忽略输入框内的粘贴
+      const tag = e.target.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+      const text = e.clipboardData?.getData('text/plain') || '';
+      const biliUrl = extractBiliUrl(text);
+      if (biliUrl) {
+        e.preventDefault();
+        setQuickDlUrl(biliUrl);
+        setQuickDlOpen(true);
+      }
+    };
+    window.addEventListener('paste', handler);
+    return () => window.removeEventListener('paste', handler);
+  }, []);
+
+  // 全局拖拽监听：拖入 bilibili 链接自动打开快速下载
+  useEffect(() => {
+    const handleDragEnter = (e) => {
+      e.preventDefault();
+      dragCounter.current++;
+      if (dragCounter.current === 1) setDropZoneActive(true);
+    };
+    const handleDragOver = (e) => { e.preventDefault(); };
+    const handleDragLeave = (e) => {
+      e.preventDefault();
+      dragCounter.current--;
+      if (dragCounter.current <= 0) {
+        dragCounter.current = 0;
+        setDropZoneActive(false);
+      }
+    };
+    const handleDrop = (e) => {
+      e.preventDefault();
+      dragCounter.current = 0;
+      setDropZoneActive(false);
+      const text = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('text/uri-list') || '';
+      const biliUrl = extractBiliUrl(text);
+      if (biliUrl) {
+        setQuickDlUrl(biliUrl);
+        setQuickDlOpen(true);
+      }
+    };
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+    };
   }, []);
 
   // 全局快捷键 Ctrl+K 打开命令面板
@@ -236,14 +297,15 @@ function App() {
 
   return h('div', { className: 'min-h-screen bg-slate-950 text-slate-100' },
     h(ToastContainer),
-    h(QuickDownloadDialog, { open: quickDlOpen, onClose: () => setQuickDlOpen(false) }),
-    h(QuickDownloadFAB, { onClick: () => setQuickDlOpen(true) }),
+    h(QuickDownloadDialog, { open: quickDlOpen, onClose: () => { setQuickDlOpen(false); setQuickDlUrl(''); }, initialUrl: quickDlUrl }),
+    h(QuickDownloadFAB, { onClick: () => { setQuickDlUrl(''); setQuickDlOpen(true); } }),
+    h(DropZoneOverlay, { active: dropZoneActive }),
     h(CommandPalette, {
       open: cmdPaletteOpen,
       onClose: () => setCmdPaletteOpen(false),
       onNavigate: navigate,
       onAction: (action) => {
-        if (action === 'quick-download') setQuickDlOpen(true);
+        if (action === 'quick-download') { setQuickDlUrl(''); setQuickDlOpen(true); }
         else if (action === 'trigger-sync') { api.triggerTask().then(() => toast.success('同步已触发')).catch(e => toast.error(e.message)); }
       }
     }),

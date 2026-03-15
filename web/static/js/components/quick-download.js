@@ -18,21 +18,65 @@ function formatCount(n) {
   return n.toLocaleString();
 }
 
-export function QuickDownloadDialog({ open, onClose }) {
+// 检测文本中是否包含 bilibili 链接或 BV/AV 号
+export function extractBiliUrl(text) {
+  if (!text || typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  // bilibili.com 视频链接
+  if (/bilibili\.com\/video\/(BV[\w]+|av\d+)/i.test(trimmed)) return trimmed;
+  // b23.tv 短链接
+  if (/b23\.tv\/[\w]+/i.test(trimmed)) return trimmed;
+  // 纯 BV 号
+  if (/^BV[\w]{10}$/i.test(trimmed)) return trimmed;
+  // 纯 AV 号
+  if (/^av\d+$/i.test(trimmed)) return trimmed;
+  // 从混合文本中提取 bilibili 链接
+  const urlMatch = trimmed.match(/https?:\/\/(?:www\.)?bilibili\.com\/video\/(BV[\w]+|av\d+)[^\s]*/i);
+  if (urlMatch) return urlMatch[0];
+  const shortMatch = trimmed.match(/https?:\/\/b23\.tv\/[\w]+/i);
+  if (shortMatch) return shortMatch[0];
+  // 从混合文本中提取 BV 号
+  const bvMatch = trimmed.match(/(BV[\w]{10})/i);
+  if (bvMatch) return bvMatch[1];
+  return '';
+}
+
+export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const inputRef = useRef(null);
+  const autoPreviewDone = useRef(false);
 
-  // 打开时聚焦输入框
+  // 打开时聚焦输入框，如果有 initialUrl 则自动填入
   useEffect(() => {
     if (open) {
-      setUrl('');
+      const startUrl = initialUrl || '';
+      setUrl(startUrl);
       setPreview(null);
+      autoPreviewDone.current = false;
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [open]);
+  }, [open, initialUrl]);
+
+  // 自动预览：当有 initialUrl 时自动触发解析
+  useEffect(() => {
+    if (open && initialUrl && !autoPreviewDone.current && !loading && !preview) {
+      autoPreviewDone.current = true;
+      (async () => {
+        setLoading(true);
+        try {
+          const res = await api.previewDownload(initialUrl.trim());
+          setPreview(res.data);
+        } catch (e) {
+          toast.error('解析失败: ' + e.message);
+        } finally {
+          setLoading(false);
+        }
+      })();
+    }
+  }, [open, initialUrl, loading, preview]);
 
   // ESC 关闭
   useEffect(() => {
@@ -187,9 +231,26 @@ export function QuickDownloadDialog({ open, onClose }) {
 
       // Footer hint
       h('div', { className: 'px-5 py-3 border-t border-slate-700/30 text-xs text-slate-600 flex items-center justify-between' },
-        h('span', null, 'Enter 快速操作 · Esc 关闭'),
+        h('span', null, 'Enter 快速操作 · Esc 关闭 · Ctrl+D 开关'),
         preview && h('span', { className: 'text-slate-500' }, preview.bvid)
       )
+    )
+  );
+}
+
+// 全局拖拽区域指示器
+export function DropZoneOverlay({ active }) {
+  if (!active) return null;
+  return h('div', {
+    className: 'fixed inset-0 z-[60] bg-blue-500/10 backdrop-blur-sm flex items-center justify-center pointer-events-none',
+    style: { animation: 'fadeIn 0.15s ease' }
+  },
+    h('div', {
+      className: 'bg-slate-800/95 border-2 border-dashed border-blue-400 rounded-2xl p-12 text-center shadow-2xl'
+    },
+      h(Icon, { name: 'download', size: 48, className: 'text-blue-400 mx-auto mb-4' }),
+      h('div', { className: 'text-lg font-medium text-slate-200 mb-1' }, '松开以下载视频'),
+      h('div', { className: 'text-sm text-slate-400' }, '支持 B 站视频链接、BV 号或 AV 号')
     )
   );
 }
@@ -198,7 +259,7 @@ export function QuickDownloadDialog({ open, onClose }) {
 export function QuickDownloadFAB({ onClick }) {
   return h('button', {
     onClick,
-    title: '快速下载视频',
+    title: '快速下载视频 (Ctrl+D)',
     className: 'fixed bottom-6 right-6 w-14 h-14 rounded-full bg-blue-500 hover:bg-blue-400 text-white shadow-lg shadow-blue-500/25 flex items-center justify-center transition-all hover:scale-105 active:scale-95 z-40'
   },
     h(Icon, { name: 'download', size: 24 })

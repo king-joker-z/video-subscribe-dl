@@ -291,3 +291,18 @@
 - [x] 合并阶段特殊显示"合并中..."（amber 色）
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.16.0
+
+## 迭代 #29 (v2.17.0) — 全局粘贴/拖拽 URL 快速下载
+- [x] 新增 extractBiliUrl 工具函数：从任意文本中智能提取 bilibili 链接/BV号/AV号
+- [x] 支持格式：完整 URL、b23.tv 短链接、纯 BV 号、纯 AV 号、混合文本中的链接
+- [x] 全局粘贴监听：在非输入框区域粘贴文本时，自动检测 bilibili URL 并打开快速下载弹窗
+- [x] 全局拖拽监听：将 bilibili 链接从浏览器地址栏或其他页面拖入，自动打开快速下载
+- [x] 拖拽视觉反馈：DropZoneOverlay 组件，拖入时全屏蓝色虚线框 + "松开以下载视频" 提示
+- [x] QuickDownloadDialog 新增 initialUrl prop：预填链接并自动触发视频预览解析
+- [x] 自动预览：粘贴/拖拽打开弹窗后自动解析视频信息，无需手动点击"解析"按钮
+- [x] 智能跳过：在 input/textarea/contentEditable 元素中的粘贴不触发（不干扰正常编辑）
+- [x] dragCounter 引用计数：正确处理嵌套 DOM 元素的 dragenter/dragleave 事件
+- [x] 手动操作时清空 initialUrl：Ctrl+D / FAB / 命令面板打开时不带预设 URL
+- [x] 快速下载提示更新：Tips 区域新增粘贴/拖拽使用说明
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.17.0
