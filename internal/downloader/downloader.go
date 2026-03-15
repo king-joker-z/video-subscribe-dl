@@ -501,6 +501,21 @@ func (d *Downloader) download(job *Job) *Result {
 		}
 	}
 
+	// 8. 字幕下载（如果启用）
+	if job.Subtitle && job.CID > 0 {
+		log.Printf("  Fetching subtitles for %s (cid=%d)...", job.BvID, job.CID)
+		subs, err := client.GetSubtitles(job.BvID, job.CID)
+		if err != nil {
+			log.Printf("  Subtitle list fetch failed: %v", err)
+		} else if len(subs) > 0 {
+			ext := filepath.Ext(outputPath)
+			baseName := strings.TrimSuffix(filepath.Base(outputPath), ext)
+			bilibili.DownloadSubtitleAsSRT(subs, videoDir, baseName)
+		} else {
+			log.Printf("  No subtitles available")
+		}
+	}
+
 	prog.Status = "done"
 	prog.Percent = 100
 	d.setProgress(job.BvID, prog)
