@@ -150,15 +150,37 @@ downloads/
 
 ## ⚙️ 配置说明
 
+### 命令行参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|-----|
+| `--data-dir` | `./data` | 数据库和配置目录 |
+| `--download-dir` | `./data/downloads` | 视频下载目录 |
+| `--port` | `8080` | Web UI 端口 |
+
+### 环境变量
+
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|-----|
-| `TZ` | `UTC` | 时区 |
-| `MAX_CONCURRENT` | `2` | 最大并发下载数 |
-| `REQUEST_INTERVAL` | `30` | 下载间隔（秒） |
+| `TZ` | `UTC` | 时区（推荐 `Asia/Shanghai`） |
+| `AUTH_TOKEN` | *(自动生成)* | Web UI 认证 Token（首次启动自动生成，也可手动指定） |
+| `NO_AUTH` | `0` | 设为 `1` 禁用 Web UI 认证 |
+| `CORS_ORIGIN` | *(空)* | 允许的跨域来源（如 `http://localhost:3000`） |
+
+### Web UI 运行时配置
+
+以下配置可在 Web UI「设置」页面动态修改，无需重启：
+
+- **下载并发数** — 同时下载的视频数量
+- **请求频率限制** — API 限速（次/分钟）
+- **下载冷却时间** — 两次下载之间的间隔
+- **分块并行线程数** — 大文件分块下载的并行数
+- **最大下载速度** — 带宽限速
+- **通知设置** — Webhook / Telegram Bot / Bark (iOS)
 
 ## 🛠️ 技术栈
 
-- **后端**: Go 1.22 + SQLite (CGo)
+- **后端**: Go 1.22 + Pure Go SQLite（无 CGo 依赖，交叉编译友好）
 - **前端**: 原生 HTML/CSS/JS（深色主题）
 - **下载**: Bilibili DASH API + ffmpeg 合并
 - **弹幕**: Bilibili 弹幕 API + XML→ASS 转换
@@ -180,6 +202,13 @@ docker build -t video-subscribe-dl .
 ```
 
 ## 📝 版本历史
+
+### v2.1.1 (2026-03-15)
+- 修复数据库 schema 遗漏新增列导致测试失败
+- 修复 GetSource Scan 缺少 filter_rules 导致的 nil pointer panic
+- 删除 7 个旧版 API handler 文件（~1640 行冗余代码）
+- 清理临时参考文件（BILI-SYNC-REF/、RECOVERY-REFERENCE.md、BUGS.md）
+- 全面代码审查：API 路径一致性、goroutine 泄漏检查、nil pointer 风险排查
 
 ### v2.1.0 (2026-03-12)
 - 分块并行下载：大文件自动拆分多线程下载（默认4线程，可配置）
