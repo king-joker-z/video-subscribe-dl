@@ -21,6 +21,7 @@ type Router struct {
 	events     *EventsHandler
 	me         *MeHandler
 	quickdl    *QuickDownloadHandler
+	stream     *StreamHandler
 	onSyncAll  func()
 }
 
@@ -36,6 +37,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		events:     NewEventsHandler(dl),
 		me:         NewMeHandler(database),
 		quickdl:    NewQuickDownloadHandler(database, dl, downloadDir),
+		stream:     NewStreamHandler(database, downloadDir),
 	}
 }
 
@@ -117,6 +119,9 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
+
+	// Video Stream (playback)
+	mux.HandleFunc("/api/stream/", rt.stream.HandleStream)
 
 	// Uploaders
 	mux.HandleFunc("/api/uploaders/suggestions", rt.uploaders.HandleSuggestions)

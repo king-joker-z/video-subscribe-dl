@@ -12,7 +12,8 @@ import (
 func JSONMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 跳过 SSE 端点
-		if strings.HasSuffix(r.URL.Path, "/events") || strings.HasSuffix(r.URL.Path, "/stream") {
+		if strings.HasSuffix(r.URL.Path, "/events") || strings.HasSuffix(r.URL.Path, "/stream") ||
+			strings.HasPrefix(r.URL.Path, "/api/stream/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -65,7 +66,8 @@ func LogMiddleware(next http.Handler) http.Handler {
 		// 跳过静态资源和 SSE 的日志
 		if strings.HasPrefix(r.URL.Path, "/static/") ||
 			strings.HasSuffix(r.URL.Path, "/events") ||
-			strings.HasSuffix(r.URL.Path, "/stream") {
+			strings.HasSuffix(r.URL.Path, "/stream") ||
+			strings.HasPrefix(r.URL.Path, "/api/stream/") {
 			return
 		}
 

@@ -24,10 +24,13 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const videoRef = React.useRef(null);
 
   useEffect(() => {
     if (!video) return;
     setImgError(false);
+    setShowPlayer(false);
     setLoading(true);
     api.getVideo(video.id)
       .then(res => setDetail(res.data || video))
@@ -47,6 +50,9 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const v = detail || video;
   const bvid = extractBVID(v.video_id);
   const biliURL = bvid ? `https://www.bilibili.com/video/${bvid}` : null;
+  const streamURL = `/api/stream/${v.id}`;
+  const canPlay = v.file_path && (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0;
+  const isNativePlayable = canPlay && /\.(mp4|m4v|webm|mov)$/i.test(v.file_path);
   const thumbSrc = `/api/thumb/${v.id}`;
 
   const handleRetry = async () => {
@@ -99,10 +105,27 @@ export function VideoDetailModal({ video, onClose, onAction }) {
 
       // Scrollable body
       h('div', { className: 'overflow-y-auto flex-1 p-5 space-y-4' },
-        // Cover + Title block
+        // Cover + Title block (with inline player support)
+        showPlayer && canPlay && h('div', { className: 'relative rounded-xl overflow-hidden bg-black mb-2', style: { aspectRatio: '16/9' } },
+          h('video', {
+            ref: videoRef,
+            src: streamURL,
+            controls: true,
+            autoPlay: true,
+            className: 'w-full h-full',
+            style: { maxHeight: '50vh' },
+            onError: () => { toast.error('播放失败，格式可能不支持'); setShowPlayer(false); }
+          }),
+          h('button', {
+            onClick: () => { setShowPlayer(false); if (videoRef.current) videoRef.current.pause(); },
+            className: 'absolute top-2 right-2 p-1 rounded-full bg-black/60 hover:bg-black/80 text-white z-10'
+          }, h(Icon, { name: 'x', size: 16 }))
+        ),
         h('div', { className: 'flex gap-4' },
-          // Thumbnail
-          !imgError && h('div', { className: 'flex-shrink-0 w-40 sm:w-48 rounded-lg overflow-hidden bg-slate-900' },
+          // Thumbnail (hidden when player is shown)
+          !showPlayer && !imgError && h('div', { className: 'flex-shrink-0 w-40 sm:w-48 rounded-lg overflow-hidden bg-slate-900 relative group cursor-pointer',
+            onClick: canPlay ? () => setShowPlayer(true) : undefined
+          },
             h('img', {
               src: thumbSrc,
               className: 'w-full h-auto object-cover rounded-lg',
@@ -110,7 +133,13 @@ export function VideoDetailModal({ video, onClose, onAction }) {
               loading: 'lazy',
               onError: () => setImgError(true),
               style: { aspectRatio: '16/10' }
-            })
+            }),
+            // Play overlay on thumbnail
+            canPlay && h('div', { className: 'absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors' },
+              h('div', { className: 'w-10 h-10 rounded-full bg-white/90 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg' },
+                h(Icon, { name: 'play', size: 18, className: 'text-slate-900 ml-0.5' })
+              )
+            )
           ),
           // Title & meta
           h('div', { className: 'flex-1 min-w-0 space-y-2' },
@@ -157,6 +186,12 @@ export function VideoDetailModal({ video, onClose, onAction }) {
 
       // Footer actions
       h('div', { className: 'px-5 py-4 border-t border-slate-700/30 flex items-center gap-2 flex-wrap flex-shrink-0' },
+        canPlay && h(Button, {
+          onClick: () => setShowPlayer(true),
+          size: 'sm',
+          disabled: showPlayer
+        }, h(Icon, { name: 'play', size: 14 }), showPlayer ? '播放中' : '播放'),
+        !isNativePlayable && canPlay && !showPlayer && h('span', { className: 'text-xs text-slate-500' }, 'MKV 格式兼容性因浏览器而异'),
         v.status === 'pending' && h(Button, { onClick: handleStartDownload, size: 'sm' },
           h(Icon, { name: 'download', size: 14 }), '开始下载'
         ),

@@ -155,3 +155,16 @@
 - [x] 响应式设计：弹窗适配移动端（max-h-[80vh] 可滚动）
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.7.0
+
+## 迭代 #19 (v2.8.0) — 在线视频播放
+- [x] 新增 StreamHandler：GET /api/stream/:id 端点，流式播放视频文件
+- [x] 支持 HTTP Range 请求（通过 http.ServeContent），支持浏览器拖拽进度条
+- [x] 自动检测视频 MIME 类型（mp4/mkv/webm/flv/avi/mov/ts）
+- [x] VideoDetailModal 新增内联播放器：点击封面图或"播放"按钮即可在弹窗内播放
+- [x] 封面图 hover 效果：鼠标悬停显示半透明播放图标覆盖层
+- [x] 播放器支持：自动播放、原生控件、关闭按钮、播放出错自动回退
+- [x] 底部操作栏新增"播放"按钮（仅对已完成且有文件的视频显示）
+- [x] MKV 格式兼容性提示（非原生格式提醒用户浏览器兼容性）
+- [x] 中间件优化：/api/stream/ 路径跳过请求日志记录
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.8.0
