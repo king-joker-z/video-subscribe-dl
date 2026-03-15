@@ -89,7 +89,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	}
 
 	mid, _ := bilibili.ExtractMID(src.URL)
-	upInfo, _ := client.GetUPInfo(mid)
+	upInfo, _ := s.getUPInfoCached(client, mid)
 
 	// 从 upInfo 获取 UP主名（和正常下载流程一致），不用 dl.Uploader（可能被污染）
 	uploaderName := dl.Uploader
@@ -113,7 +113,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh, false, false)
+		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh, src.SkipNFO, src.SkipPoster)
 	}()
 
 	capturedDlID := dl.ID
