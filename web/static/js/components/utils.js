@@ -18,6 +18,39 @@ export function formatTime(t) {
 
 export function cn(...classes) { return classes.filter(Boolean).join(' '); }
 
+export function formatTimeAgo(t) {
+  if (!t) return '';
+  const d = new Date(t);
+  if (isNaN(d.getTime())) return '';
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 0) return '刚刚';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return '刚刚';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + '分钟前';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + '小时前';
+  const day = Math.floor(hr / 24);
+  if (day < 30) return day + '天前';
+  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+}
+
+export function formatNextCheck(lastCheck, interval) {
+  if (!lastCheck || !interval) return '';
+  const last = new Date(lastCheck);
+  if (isNaN(last.getTime())) return '';
+  const next = last.getTime() + interval * 1000;
+  const now = Date.now();
+  const diff = next - now;
+  if (diff <= 0) return '即将检查';
+  const min = Math.floor(diff / 60000);
+  if (min < 60) return min + '分钟后';
+  const hr = Math.floor(min / 60);
+  return hr + '小时' + (min % 60) + '分后';
+}
+
+
 // Toast 系统
 let toastId = 0;
 export const toastListeners = [];

@@ -337,6 +337,11 @@ func (h *SourcesHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id
 			existing.CookiesFile = s
 		}
 	}
+	if v, ok := body["filter_rules"]; ok {
+		if s, ok := v.(string); ok {
+			existing.FilterRules = s
+		}
+	}
 
 	if err := h.db.UpdateSource(existing); err != nil {
 		apiError(w, CodeInternal, "更新失败: "+err.Error())

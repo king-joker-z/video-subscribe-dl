@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Button, Badge, EmptyState } from '../components/utils.js';
+import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
 const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列' };
@@ -593,11 +593,24 @@ export function SourcesPage({ onNavigate }) {
                 h('div', null, h('div', { className: 'text-lg font-bold text-red-400' }, s.failed_count || 0), h('div', { className: 'text-xs text-slate-500' }, '失败')),
                 h('div', null, h('div', { className: 'text-lg font-bold text-amber-400' }, s.pending_count || 0), h('div', { className: 'text-xs text-slate-500' }, '待处理'))
               ),
-              h('div', { className: 'flex items-center justify-between mt-3' },
-                h('div', { className: 'text-xs text-slate-600 truncate flex-1 min-w-0' }, s.url),
+              // 同步状态信息
+              h('div', { className: 'flex items-center gap-3 mt-3 pt-2 border-t border-slate-700/30 text-xs text-slate-500' },
+                s.last_check && h('div', { className: 'flex items-center gap-1', title: '上次检查: ' + new Date(s.last_check).toLocaleString('zh-CN') },
+                  h(Icon, { name: 'clock', size: 12 }),
+                  formatTimeAgo(s.last_check)
+                ),
+                s.last_check && s.check_interval && h('div', { className: 'flex items-center gap-1', title: '下次检查' },
+                  h(Icon, { name: 'refresh', size: 12 }),
+                  formatNextCheck(s.last_check, s.check_interval)
+                ),
+                !s.last_check && h('div', { className: 'flex items-center gap-1 text-amber-500' },
+                  h(Icon, { name: 'clock', size: 12 }),
+                  '从未检查'
+                ),
+                h('div', { className: 'flex-1' }),
                 h('button', {
                   onClick: () => onNavigate('videos', { source_id: String(s.id), source_name: s.name || '' }),
-                  className: 'ml-2 flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0'
+                  className: 'flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0'
                 }, '查看视频', h(Icon, { name: 'chevron-right', size: 12 }))
               )
             ))

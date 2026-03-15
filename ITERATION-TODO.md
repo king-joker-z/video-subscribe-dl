@@ -252,3 +252,13 @@
 - [x] 仪表盘布局调整：任务状态 + 账号状态 + 存储空间三栏并列（lg:grid-cols-3）
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.13.0
+
+## 迭代 #26 (v2.14.0) — 订阅源同步状态展示 + filter_rules 保存修复
+- [x] 修复 filter_rules 字段保存 bug：HandleUpdate 缺少 filter_rules 字段解析，编辑高级过滤规则后无法保存
+- [x] 订阅源卡片新增同步状态信息栏：显示"上次检查"相对时间和"下次检查"倒计时
+- [x] 新增 formatTimeAgo 工具函数：智能展示相对时间（刚刚/X分钟前/X小时前/X天前）
+- [x] 新增 formatNextCheck 工具函数：根据 last_check + check_interval 计算下次检查倒计时
+- [x] hover title 提示完整日期时间
+- [x] 从未检查的订阅源显示"从未检查"黄色提示
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.14.0
