@@ -101,7 +101,7 @@ func (d *DB) GetSource(id int64) (*Source, error) {
 	`, id).Scan(&s.ID, &s.Type, &s.URL, &s.Name, &s.CookiesFile,
 		&s.CheckInterval, &s.DownloadQuality, &s.DownloadCodec, &danmaku, &enabled,
 		&s.LastCheck, &s.CreatedAt, &s.UpdatedAt,
-		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic)
+		&s.DownloadFilter, &s.DownloadQualityMin, &skipNFO, &skipPoster, &useDynamic, &s.FilterRules)
 	if err != nil {
 		return nil, err
 	}
