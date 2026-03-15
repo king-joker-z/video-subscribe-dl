@@ -103,8 +103,18 @@
 ## 下一阶段建议
 
 1. **多平台支持** — YouTube/抖音，利用 yt-dlp 作为 fallback
-2. **多 P 视频支持** — B站分P视频完整下载
+2. ~~**多 P 视频支持**~~ — ✅ 迭代 #15 完善（tvshow.nfo + episodedetails NFO + 封面）
 3. ~~**通知机制增强**~~ — ✅ 迭代 #13 完成（Telegram/Bark/Webhook 三通道）
 4. ~~**存储管理**~~ — ✅ 迭代 #14 完成（retention_days + 磁盘压力清理 + /health 增强）
 5. ~~**Docker 镜像发布**~~ — ✅ 迭代 #10 已完成（GitHub Actions + DockerHub）
 6. **Service Worker** — 离线缓存、后台同步
+
+## 迭代 #15 (v2.5.0) — 多P视频 NFO 元数据完善
+- [x] 多P视频父目录生成 tvshow.nfo（含标题、简介、UP主信息、标签、首播日期）
+- [x] 多P视频父目录下载 poster.jpg + fanart.jpg 封面
+- [x] 每个分P生成 episodedetails NFO（含 season/episode 编号、分P标题、发布日期）
+- [x] 新增 nfo.EpisodeMeta 结构和 episodedetailsNFO XML 格式
+- [x] 新增 nfo.GenerateEpisodeNFO / GenerateEpisodeNFOFromPath 函数
+- [x] 重试逻辑同步支持多P episodedetails NFO 生成（retry.go）
+- [x] handleDownloadResult 区分单P（movie NFO）和多P（episodedetails NFO）
+- [x] go build + go vet + go test 全量通过

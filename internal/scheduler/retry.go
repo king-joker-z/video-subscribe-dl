@@ -11,6 +11,7 @@ import (
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
+	"video-subscribe-dl/internal/nfo"
 )
 
 // retryOneDownload 执行单个失败下载的重试
@@ -109,11 +110,33 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		flat = true
 	}
 
+	// 多P重试时构造 episodeMeta
+	var episodeMeta *nfo.EpisodeMeta
+	if isMultiPart && targetPageNum > 0 {
+		partName := ""
+		for _, p := range bilibili.GetAllPages(detail) {
+			if p.Page == targetPageNum {
+				partName = p.PartName
+				break
+			}
+		}
+		episodeMeta = &nfo.EpisodeMeta{
+			Title:        partName,
+			Season:       1,
+			Episode:      targetPageNum,
+			BvID:         actualBvID,
+			UploaderName: uploaderName,
+		}
+		if detail.PubDate > 0 {
+			episodeMeta.UploadDate = time.Unix(detail.PubDate, 0)
+		}
+	}
+
 	resultCh := make(chan *downloader.Result, 1)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh, src.SkipNFO, src.SkipPoster)
+		s.handleDownloadResult(dl.ID, dl.VideoID, detail, upInfo, resultCh, src.SkipNFO, src.SkipPoster, episodeMeta)
 	}()
 
 	capturedDlID := dl.ID

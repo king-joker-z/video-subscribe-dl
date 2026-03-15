@@ -193,7 +193,7 @@ func (s *Scheduler) prepareVideoDir(uploaderDir, collectionName string) string {
 
 // submitDownload 创建下载记录并提交到队列
 // submitDownloadFlat 和 submitDownload 类似，但使用 Flat 模式（多P视频的 Season 目录）
-func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64, title, pic, uploaderName, outputDir, cookiesFile string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo) {
+func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64, title, pic, uploaderName, outputDir, cookiesFile string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo, episodeMeta *nfo.EpisodeMeta) {
 	if s.dl.IsPaused() {
 		log.Printf("[scheduler] Downloader paused, keeping %s as pending", videoID)
 		return
@@ -215,9 +215,10 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 	s.wg.Add(1)
 	skipNFO2 := src.SkipNFO
 	skipPoster2 := src.SkipPoster
+	capturedEpisodeMeta := episodeMeta
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO2, skipPoster2)
+		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO2, skipPoster2, capturedEpisodeMeta)
 	}()
 
 	capturedDlID := dlID
@@ -273,7 +274,7 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO, skipPoster)
+		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO, skipPoster, nil)
 	}()
 
 	capturedDlID := dlID
@@ -409,6 +410,49 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		multiPartBase := filepath.Join(outputDir, bilibili.SanitizeFilename(title)+" ["+bvid+"]")
 		seasonDir := filepath.Join(multiPartBase, "Season 1")
 		os.MkdirAll(seasonDir, 0755)
+
+		// 为多P视频生成 tvshow.nfo（在父目录）
+		if !src.SkipNFO {
+			uploaderFace := ""
+			if upInfo != nil {
+				uploaderFace = upInfo.Face
+			} else if detail != nil {
+				uploaderFace = detail.Owner.Face
+			}
+			premiered := ""
+			if detail != nil && detail.PubDate > 0 {
+				premiered = time.Unix(detail.PubDate, 0).Format("2006-01-02")
+			}
+			tags, _ := s.getBili().GetVideoTags(bvid)
+			nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
+				Title:        detail.Title,
+				Plot:         detail.Desc,
+				UploaderName: uploaderName,
+				UploaderFace: uploaderFace,
+				Premiered:    premiered,
+				Poster:       pic,
+				Tags:         tags,
+			}, multiPartBase)
+			log.Printf("  tvshow.nfo generated for multi-P video: %s", multiPartBase)
+		}
+
+		// 下载多P视频封面到父目录
+		if !src.SkipPoster && pic != "" {
+			posterPath := filepath.Join(multiPartBase, "poster.jpg")
+			if _, err := os.Stat(posterPath); os.IsNotExist(err) {
+				if err := bilibili.DownloadFile(pic, posterPath); err != nil {
+					log.Printf("  Multi-P poster download failed: %v", err)
+				} else {
+					log.Printf("  Multi-P poster saved: %s", posterPath)
+				}
+			}
+			// fanart 也使用同一封面
+			fanartPath := filepath.Join(multiPartBase, "fanart.jpg")
+			if _, err := os.Stat(fanartPath); os.IsNotExist(err) {
+				bilibili.DownloadFile(pic, fanartPath)
+			}
+		}
+
 		for _, page := range pages {
 			partVideoID := fmt.Sprintf("%s_P%d", bvid, page.Page)
 			exists, _ := s.db.IsVideoDownloaded(src.ID, partVideoID)
@@ -417,12 +461,25 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 			}
 			partTitle := fmt.Sprintf("S01E%02d - %s [%s]", page.Page, page.PartName, bvid)
 			log.Printf("  Part %d/%d: %s (cid=%d)", page.Page, len(pages), page.PartName, page.CID)
-			s.submitDownloadFlat(src, partVideoID, page.CID, partTitle, pic, uploaderName, seasonDir, cookiesFile, detail, upInfo)
+
+			// 构造 episodedetails NFO 元数据
+			epMeta := &nfo.EpisodeMeta{
+				Title:        page.PartName,
+				Season:       1,
+				Episode:      page.Page,
+				BvID:         bvid,
+				UploaderName: uploaderName,
+			}
+			if detail != nil && detail.PubDate > 0 {
+				epMeta.UploadDate = time.Unix(detail.PubDate, 0)
+			}
+
+			s.submitDownloadFlat(src, partVideoID, page.CID, partTitle, pic, uploaderName, seasonDir, cookiesFile, detail, upInfo, epMeta)
 		}
 	}
 }
 
-func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo, ch chan *downloader.Result, skipNFO, skipPoster bool) {
+func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bilibili.VideoDetail, upInfo *bilibili.UPInfo, ch chan *downloader.Result, skipNFO, skipPoster bool, episodeMeta *nfo.EpisodeMeta) {
 	// panic 保护：避免 goroutine panic 导致 WaitGroup 永远阻塞
 	defer func() {
 		if r := recover(); r != nil {
@@ -508,6 +565,11 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 			log.Printf("  NFO skipped (detail is nil)")
 		} else {
 			log.Printf("  NFO skipped (skip_nfo=true)")
+		}
+	} else if episodeMeta != nil {
+		// 多P视频: 生成 episodedetails NFO
+		if err := nfo.GenerateEpisodeNFOFromPath(episodeMeta, result.FilePath); err != nil {
+			log.Printf("Episode NFO failed: %v", err)
 		}
 	} else {
 		uploaderFace := ""

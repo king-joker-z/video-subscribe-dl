@@ -20,7 +20,7 @@ type VideoMeta struct {
 	UploaderFace  string
 	UploadDate    time.Time
 	FavDate       time.Time // 收藏时间（可选，nfo_time_type=favtime 时使用）
-	Duration      int // 秒
+	Duration      int       // 秒
 	Tags          []string
 	ViewCount     int64
 	LikeCount     int64
@@ -52,45 +52,56 @@ type SeasonMeta struct {
 	Year         int
 }
 
+type EpisodeMeta struct {
+	Title        string
+	Plot         string
+	Season       int
+	Episode      int
+	BvID         string
+	UploaderName string
+	UploadDate   time.Time
+	Duration     int // 秒
+}
+
 type PersonMeta struct {
-	Name     string
-	Thumb    string
-	MID      int64
-	Sign     string
-	Level    int
-	Sex      string
+	Name  string
+	Thumb string
+	MID   int64
+	Sign  string
+	Level int
+	Sex   string
 }
 
 // === XML 结构（极空间极影视 / Emby / Jellyfin 兼容） ===
 
 type movieNFO struct {
-	XMLName   xml.Name   `xml:"movie"`
-	Title     string     `xml:"title"`
-	Plot      string     `xml:"plot"`
-	Outline   string     `xml:"outline,omitempty"`
-	Year      int        `xml:"year,omitempty"`
-	Premiered string     `xml:"premiered,omitempty"`
-	Studio    string     `xml:"studio,omitempty"`
-	Runtime   int        `xml:"runtime,omitempty"`
-	UniqueID  uniqueID   `xml:"uniqueid"`
-	Ratings   *ratings   `xml:"ratings,omitempty"`
-	Genres    []string   `xml:"genre"`
-	Tags      []string   `xml:"tag"`
-	Actors    []actor    `xml:"actor"`
-	Website   string     `xml:"website,omitempty"`
+	XMLName   xml.Name `xml:"movie"`
+	Title     string   `xml:"title"`
+	Plot      string   `xml:"plot"`
+	Outline   string   `xml:"outline,omitempty"`
+	Year      int      `xml:"year,omitempty"`
+	Premiered string   `xml:"premiered,omitempty"`
+	Studio    string   `xml:"studio,omitempty"`
+	Runtime   int      `xml:"runtime,omitempty"`
+	UniqueID  uniqueID `xml:"uniqueid"`
+	Ratings   *ratings `xml:"ratings,omitempty"`
+	Genres    []string `xml:"genre"`
+	Tags      []string `xml:"tag"`
+	Actors    []actor  `xml:"actor"`
+	Website   string   `xml:"website,omitempty"`
 }
 
 type tvshowNFO struct {
-	XMLName   xml.Name  `xml:"tvshow"`
-	Title     string    `xml:"title"`
-	Plot      string    `xml:"plot,omitempty"`
-	Premiered string    `xml:"premiered,omitempty"`
-	Studio    string    `xml:"studio,omitempty"`
-	Ratings   *ratings  `xml:"ratings,omitempty"`
-	Genres    []string  `xml:"genre"`
-	Tags      []string  `xml:"tag"`
-	Thumb     string    `xml:"thumb,omitempty"`
-	Actors    []actor   `xml:"actor"`
+	XMLName   xml.Name `xml:"tvshow"`
+	Title     string   `xml:"title"`
+	Plot      string   `xml:"plot,omitempty"`
+	Premiered string   `xml:"premiered,omitempty"`
+	Studio    string   `xml:"studio,omitempty"`
+	Ratings   *ratings `xml:"ratings,omitempty"`
+	Genres    []string `xml:"genre"`
+	Tags      []string `xml:"tag"`
+	Thumb     string   `xml:"thumb,omitempty"`
+	Actors    []actor  `xml:"actor"`
 }
 
 type seasonNFO struct {
@@ -109,6 +120,18 @@ type personNFO struct {
 	Biography string   `xml:"biography,omitempty"`
 	UniqueID  string   `xml:"uniqueid,omitempty"`
 	Website   string   `xml:"website,omitempty"`
+}
+
+type episodedetailsNFO struct {
+	XMLName  xml.Name `xml:"episodedetails"`
+	Title    string   `xml:"title"`
+	Plot     string   `xml:"plot,omitempty"`
+	Season   int      `xml:"season"`
+	Episode  int      `xml:"episode"`
+	Aired    string   `xml:"aired,omitempty"`
+	Runtime  int      `xml:"runtime,omitempty"`
+	UniqueID uniqueID `xml:"uniqueid"`
+	Studio   string   `xml:"studio,omitempty"`
 }
 
 type actor struct {
@@ -139,75 +162,75 @@ type ratingEntry struct {
 
 var tidToGenre = map[string]string{
 	// 动画
-	"MAD·AMV":  "动画",
-	"MMD·3D":   "动画",
-	"短片·手书": "动画",
-	"综合":     "动画",
+	"MAD·AMV": "动画",
+	"MMD·3D":  "动画",
+	"短片·手书":   "动画",
+	"综合":      "动画",
 	// 番剧
-	"连载动画":  "番剧",
-	"完结动画":  "番剧",
-	"资讯":     "番剧",
-	"官方延伸":  "番剧",
+	"连载动画": "番剧",
+	"完结动画": "番剧",
+	"资讯":   "番剧",
+	"官方延伸": "番剧",
 	// 音乐
-	"原创音乐":  "音乐",
-	"翻唱":     "音乐",
-	"演奏":     "音乐",
-	"MV":       "音乐",
-	"音乐现场":  "音乐",
+	"原创音乐": "音乐",
+	"翻唱":   "音乐",
+	"演奏":   "音乐",
+	"MV":   "音乐",
+	"音乐现场": "音乐",
 	// 舞蹈
-	"宅舞":     "舞蹈",
-	"街舞":     "舞蹈",
+	"宅舞": "舞蹈",
+	"街舞": "舞蹈",
 	// 游戏
-	"单机游戏":  "游戏",
-	"网络游戏":  "游戏",
-	"手机游戏":  "游戏",
-	"电子竞技":  "游戏",
+	"单机游戏": "游戏",
+	"网络游戏": "游戏",
+	"手机游戏": "游戏",
+	"电子竞技": "游戏",
 	// 知识
-	"科学科普":  "知识",
+	"科学科普":     "知识",
 	"社科·法律·心理": "知识",
-	"人文历史":  "知识",
-	"财经商业":  "知识",
-	"校园学习":  "知识",
-	"职业职场":  "知识",
+	"人文历史":     "知识",
+	"财经商业":     "知识",
+	"校园学习":     "知识",
+	"职业职场":     "知识",
 	// 科技
-	"数码":     "科技",
-	"软件应用":  "科技",
-	"计算机技术": "科技",
+	"数码":       "科技",
+	"软件应用":     "科技",
+	"计算机技术":    "科技",
 	"工业·工程·机械": "科技",
 	// 生活
-	"搞笑":     "生活",
-	"家居房产":  "生活",
-	"手工":     "生活",
-	"绘画":     "生活",
-	"日常":     "生活",
-	"出行":     "生活",
+	"搞笑":   "生活",
+	"家居房产": "生活",
+	"手工":   "生活",
+	"绘画":   "生活",
+	"日常":   "生活",
+	"出行":   "生活",
 	// 美食
-	"美食制作":  "美食",
-	"美食侦探":  "美食",
-	"美食测评":  "美食",
+	"美食制作": "美食",
+	"美食侦探": "美食",
+	"美食测评": "美食",
 	// 汽车
-	"赛车":     "汽车",
-	"改装玩车":  "汽车",
-	"新能源车":  "汽车",
-	"购车攻略":  "汽车",
+	"赛车":   "汽车",
+	"改装玩车": "汽车",
+	"新能源车": "汽车",
+	"购车攻略": "汽车",
 	// 时尚
 	"美妆护肤":  "时尚",
-	"仿妆cos":  "时尚",
-	"穿搭":     "时尚",
+	"仿妆cos": "时尚",
+	"穿搭":    "时尚",
 	// 运动
-	"篮球":     "运动",
-	"足球":     "运动",
-	"健身":     "运动",
+	"篮球": "运动",
+	"足球": "运动",
+	"健身": "运动",
 	// 影视
 	"影视杂谈":  "影视",
 	"影视剪辑":  "影视",
 	"预告·资讯": "影视",
 	// 娱乐
-	"综艺":     "娱乐",
-	"明星八卦":  "娱乐",
+	"综艺":   "娱乐",
+	"明星八卦": "娱乐",
 	// 鬼畜
-	"鬼畜调教":  "鬼畜",
-	"音MAD":    "鬼畜",
+	"鬼畜调教":       "鬼畜",
+	"音MAD":       "鬼畜",
 	"人力VOCALOID": "鬼畜",
 }
 
@@ -422,6 +445,41 @@ func GeneratePersonNFO(meta *PersonMeta, dir string) error {
 		Website:   fmt.Sprintf("https://space.bilibili.com/%d", meta.MID),
 	}
 	return writeXML(filepath.Join(dir, "person.nfo"), nfo)
+}
+
+// GenerateEpisodeNFO 生成分P视频的 episodedetails NFO
+func GenerateEpisodeNFO(meta *EpisodeMeta, nfoPath string) error {
+	aired := ""
+	if !meta.UploadDate.IsZero() {
+		aired = meta.UploadDate.Format("2006-01-02")
+	}
+
+	runtime := 0
+	if meta.Duration > 0 {
+		runtime = meta.Duration / 60
+		if runtime == 0 {
+			runtime = 1
+		}
+	}
+
+	nfo := episodedetailsNFO{
+		Title:    meta.Title,
+		Plot:     meta.Plot,
+		Season:   meta.Season,
+		Episode:  meta.Episode,
+		Aired:    aired,
+		Runtime:  runtime,
+		UniqueID: uniqueID{Type: "bilibili", Default: "true", Value: meta.BvID},
+		Studio:   meta.UploaderName,
+	}
+	return writeXML(nfoPath, nfo)
+}
+
+// GenerateEpisodeNFOFromPath 从视频文件路径推导 NFO 路径并生成 episodedetails
+func GenerateEpisodeNFOFromPath(meta *EpisodeMeta, videoFilePath string) error {
+	ext := filepath.Ext(videoFilePath)
+	nfoPath := strings.TrimSuffix(videoFilePath, ext) + ".nfo"
+	return GenerateEpisodeNFO(meta, nfoPath)
 }
 
 // === 内部 ===
