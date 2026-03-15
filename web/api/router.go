@@ -82,6 +82,9 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Videos
 	mux.HandleFunc("/api/videos", rt.videos.HandleList)
+	mux.HandleFunc("/api/videos/detect-charge", func(w http.ResponseWriter, r *http.Request) {
+		rt.videos.HandleDetectCharge(w, r)
+	})
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 

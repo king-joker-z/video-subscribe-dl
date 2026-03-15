@@ -1,13 +1,16 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 	"strings"
 
+	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/util"
 )
@@ -288,6 +291,81 @@ func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		apiError(w, CodeMethodNotAllow, "method not allowed")
 	}
+}
+
+
+// POST /api/videos/detect-charge — 手动触发全量充电检测
+func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	// 查找所有 failed 和 permanent_failed 的视频
+	rows, err := h.db.Query(`SELECT id, video_id, title FROM downloads WHERE status IN ('failed', 'permanent_failed')`)
+	if err != nil {
+		apiError(w, CodeInternal, "查询失败: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type chargeCheckItem struct {
+		ID      int64
+		VideoID string
+		Title   string
+	}
+	var items []chargeCheckItem
+	for rows.Next() {
+		var v chargeCheckItem
+		rows.Scan(&v.ID, &v.VideoID, &v.Title)
+		items = append(items, v)
+	}
+
+	if len(items) == 0 {
+		apiOK(w, map[string]interface{}{"detected": 0, "message": "没有失败的视频"})
+		return
+	}
+
+	// 获取 bilibili client
+	var client *bilibili.Client
+	if credJSON, _ := h.db.GetSetting("credential_json"); credJSON != "" {
+		if cred := bilibili.CredentialFromJSON(credJSON); cred != nil && !cred.IsEmpty() {
+			client = bilibili.NewClientWithCredential(cred)
+		}
+	}
+	if client == nil {
+		var cookie string
+		if cp, _ := h.db.GetSetting("cookie_path"); cp != "" {
+			cookie = bilibili.ReadCookieFile(cp)
+		}
+		client = bilibili.NewClient(cookie)
+	}
+
+	// 异步检测，立即返回
+	go func() {
+		detected := 0
+		for _, v := range items {
+			bvid := v.VideoID
+			if parts := strings.SplitN(v.VideoID, "_P", 2); len(parts) == 2 {
+				bvid = parts[0]
+			}
+			detail, err := client.GetVideoDetail(bvid)
+			if err != nil {
+				continue
+			}
+			if detail.IsChargePlus() {
+				h.db.UpdateDownloadStatus(v.ID, "charge_blocked", "", 0, "充电专属/付费视频")
+				detected++
+				log.Printf("[detect-charge] %s (%s) → charge_blocked", v.Title, v.VideoID)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("[detect-charge] 检测完成: %d/%d 为充电专属", detected, len(items))
+	}()
+
+	apiOK(w, map[string]interface{}{
+		"total":   len(items),
+		"message": fmt.Sprintf("已启动充电检测，共 %d 个失败视频", len(items)),
+	})
 }
 
 // HandleThumb GET /api/thumb/:id — 封面图

@@ -38,6 +38,7 @@ export const api = {
   retryVideo: (id) => request(`/api/videos/${id}/retry`, { method: 'POST' }),
   cancelVideo: (id) => request(`/api/videos/${id}/cancel`, { method: 'POST' }),
   deleteVideo: (id) => request(`/api/videos/${id}`, { method: 'DELETE' }),
+  detectCharge: () => request('/api/videos/detect-charge', { method: 'POST' }),
   batchVideos: (action, ids) => request('/api/videos/batch', {
     method: 'POST', body: JSON.stringify({ action, ids })
   }),

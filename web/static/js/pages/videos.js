@@ -79,16 +79,25 @@ export function VideosPage({ params = {} } = {}) {
     { value: 'downloading', label: '下载中' },
     { value: 'completed', label: '已完成' },
     { value: 'failed', label: '失败' },
+    { value: 'charge_blocked', label: '充电专属' },
     { value: 'pending', label: '待处理' },
   ];
 
   const getProgress = (videoId) => progress.find(p => String(p.id) === String(videoId) || String(p.download_id) === String(videoId));
+
+  const handleDetectCharge = async () => {
+    try {
+      const res = await api.detectCharge();
+      toast.success(res.data.message || '已启动充电检测');
+    } catch (e) { toast.error(e.message); }
+  };
 
   return h('div', { className: 'page-enter space-y-4' },
     // 顶栏
     h('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
       h('h2', { className: 'text-lg font-semibold' }, '视频列表'),
       h('div', { className: 'flex items-center gap-2' },
+        h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
         h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
         h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
       )
