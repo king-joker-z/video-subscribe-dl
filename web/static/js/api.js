@@ -106,6 +106,9 @@ export const api = {
   quickDownload: (url) => request('/api/download', { method: 'POST', body: JSON.stringify({ url }) }),
   previewDownload: (url) => request('/api/download/preview', { method: 'POST', body: JSON.stringify({ url }) }),
 
+  // Template preview
+  previewTemplate: (template) => request("/api/settings/preview-template", { method: "POST", body: JSON.stringify({ template }) }),
+
   };
 
 // SSE 事件源
