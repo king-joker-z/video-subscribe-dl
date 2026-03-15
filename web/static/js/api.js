@@ -109,6 +109,9 @@ export const api = {
   // Template preview
   previewTemplate: (template) => request("/api/settings/preview-template", { method: "POST", body: JSON.stringify({ template }) }),
 
+  // Global Search
+  globalSearch: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),
+
   };
 
 // SSE 事件源

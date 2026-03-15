@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { cn, toast, toastListeners, Icon } from './components/utils.js';
+import { api } from './api.js';
 import { DashboardPage } from './pages/dashboard.js';
 import { SourcesPage } from './pages/sources.js';
 import { VideosPage } from './pages/videos.js';
@@ -8,6 +9,7 @@ import { UploadersPage } from './pages/uploaders.js';
 import { SettingsPage } from './pages/settings.js';
 import { LogsPage } from './pages/logs.js';
 import { QuickDownloadDialog, QuickDownloadFAB } from './components/quick-download.js';
+import { CommandPalette } from './components/command-palette.js';
 
 const { createElement: h, useState, useEffect, useCallback } = React;
 
@@ -34,7 +36,7 @@ function ToastContainer() {
 }
 
 // ==================== 侧边栏 ====================
-function Sidebar({ currentPage, onNavigate, collapsed, onToggle }) {
+function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }) {
   const nav = [
     { id: 'dashboard', icon: 'layout-dashboard', label: '仪表盘' },
     { id: 'sources', icon: 'rss', label: '订阅源' },
@@ -55,6 +57,22 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle }) {
       !collapsed && h('div', null,
         h('div', { className: 'font-semibold text-sm text-slate-200' }, 'Video DL'),
         h('div', { className: 'text-[10px] text-slate-500' }, '订阅下载管理')
+      )
+    ),
+    // Search button
+    h('div', { className: 'px-2 pt-2' },
+      h('button', {
+        onClick: onSearchClick,
+        className: cn(
+          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800/80 hover:text-slate-300 transition-colors border border-slate-700/50',
+          collapsed && 'justify-center'
+        )
+      },
+        h(Icon, { name: 'search', size: 16 }),
+        !collapsed && h('div', { className: 'flex-1 flex items-center justify-between' },
+          h('span', { className: 'text-slate-500' }, '搜索...'),
+          h('kbd', { className: 'text-[10px] text-slate-600 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700' }, '⌘K')
+        )
       )
     ),
     h('nav', { className: 'flex-1 p-2 space-y-0.5' },
@@ -123,6 +141,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [quickDlOpen, setQuickDlOpen] = useState(false);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
 
   // 全局 SSE 下载事件监听：下载完成/失败时弹 toast 通知
   useEffect(() => {
@@ -154,6 +173,18 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
         e.preventDefault();
         setQuickDlOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // 全局快捷键 Ctrl+K 打开命令面板
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setCmdPaletteOpen(o => !o);
       }
     };
     window.addEventListener('keydown', handler);
@@ -207,14 +238,23 @@ function App() {
     h(ToastContainer),
     h(QuickDownloadDialog, { open: quickDlOpen, onClose: () => setQuickDlOpen(false) }),
     h(QuickDownloadFAB, { onClick: () => setQuickDlOpen(true) }),
+    h(CommandPalette, {
+      open: cmdPaletteOpen,
+      onClose: () => setCmdPaletteOpen(false),
+      onNavigate: navigate,
+      onAction: (action) => {
+        if (action === 'quick-download') setQuickDlOpen(true);
+        else if (action === 'trigger-sync') { api.triggerTask().then(() => toast.success('同步已触发')).catch(e => toast.error(e.message)); }
+      }
+    }),
     // 侧边栏（PC）
     h('div', { className: 'hidden lg:block' },
-      h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: sidebarCollapsed, onToggle: () => setSidebarCollapsed(c => !c) })
+      h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: sidebarCollapsed, onToggle: () => setSidebarCollapsed(c => !c), onSearchClick: () => setCmdPaletteOpen(true) })
     ),
     // 侧边栏（移动端遮罩）
     mobileSidebar && h('div', { className: 'lg:hidden fixed inset-0 bg-black/50 z-30', onClick: () => setMobileSidebar(false) }),
     mobileSidebar && h('div', { className: 'lg:hidden' },
-      h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: false, onToggle: () => setMobileSidebar(false) })
+      h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: false, onToggle: () => setMobileSidebar(false), onSearchClick: () => setCmdPaletteOpen(true) })
     ),
     // 移动端头部
     h(MobileHeader, { currentPage: page, onToggleSidebar: () => setMobileSidebar(s => !s) }),

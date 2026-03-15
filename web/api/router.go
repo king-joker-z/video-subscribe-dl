@@ -22,6 +22,7 @@ type Router struct {
 	me         *MeHandler
 	quickdl    *QuickDownloadHandler
 	stream     *StreamHandler
+	search     *SearchHandler
 	onSyncAll  func()
 }
 
@@ -38,6 +39,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		me:         NewMeHandler(database),
 		quickdl:    NewQuickDownloadHandler(database, dl, downloadDir),
 		stream:     NewStreamHandler(database, downloadDir),
+		search:     NewSearchHandler(database),
 	}
 }
 
@@ -185,4 +187,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Version
 	mux.HandleFunc("/api/version", rt.task.HandleVersion)
+
+	// Global Search
+	mux.HandleFunc("/api/search", rt.search.HandleSearch)
 }
