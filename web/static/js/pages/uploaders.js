@@ -66,15 +66,15 @@ export function UploadersPage({ onNavigate }) {
                 ),
                 h('div', { className: 'grid grid-cols-3 gap-2 text-center' },
                   h('div', null,
-                    h('div', { className: 'text-lg font-bold text-slate-200' }, u.total_count || 0),
+                    h('div', { className: 'text-lg font-bold text-slate-200' }, u.total || 0),
                     h('div', { className: 'text-xs text-slate-500' }, '总数')
                   ),
                   h('div', null,
-                    h('div', { className: 'text-lg font-bold text-emerald-400' }, u.completed_count || 0),
+                    h('div', { className: 'text-lg font-bold text-emerald-400' }, u.completed || 0),
                     h('div', { className: 'text-xs text-slate-500' }, '完成')
                   ),
                   h('div', null,
-                    h('div', { className: 'text-lg font-bold text-red-400' }, u.failed_count || 0),
+                    h('div', { className: 'text-lg font-bold text-red-400' }, u.failed || 0),
                     h('div', { className: 'text-xs text-slate-500' }, '失败')
                   ),
                 )
