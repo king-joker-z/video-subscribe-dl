@@ -237,3 +237,18 @@
 - [x] api.js 新增 exportSources / importSources 方法
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.12.0
+
+## 迭代 #25 (v2.13.0) — 仪表盘凭证状态卡片
+- [x] Dashboard API 新增 credential 字段：返回 B 站登录状态、用户名、VIP 信息、最高画质
+- [x] 凭证状态 5 分钟 TTL 缓存：避免每次 dashboard 轮询都调 B 站 API，降低风控风险
+- [x] 登录/刷新凭证时自动清除缓存（InvalidateCredentialCache）
+- [x] Router.SetCallbacks 包装 onCredentialUpdate：更新凭证时联动清除仪表盘缓存
+- [x] 仪表盘新增 B 站账号状态卡片：显示用户名、会员等级、最高画质、凭证状态
+- [x] 四种状态展示：正常(绿色) / 已过期(黄色) / 验证失败(红色) / 未登录(灰色)
+- [x] 凭证异常时顶部横幅警告：提醒用户刷新或重新登录
+- [x] 一键刷新凭证按钮：直接从仪表盘刷新，无需跳转设置页
+- [x] 前往登录/设置跳转按钮：通过 onNavigate 路由到设置页
+- [x] DashboardPage 接收 onNavigate prop，app.js 传递 navigate 回调
+- [x] 仪表盘布局调整：任务状态 + 账号状态 + 存储空间三栏并列（lg:grid-cols-3）
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.13.0

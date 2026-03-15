@@ -54,7 +54,14 @@ func (rt *Router) SetCallbacks(
 	onRedownload func(int64),
 ) {
 	rt.task.SetCheckNowFunc(onCheckNow)
-	rt.credential.SetCredentialUpdateFunc(onCredentialUpdate)
+	// 包装 credential 回调：更新时同时清除 dashboard 缓存
+	wrappedCredUpdate := func(cred *bilibili.Credential) {
+		rt.dashboard.InvalidateCredentialCache()
+		if onCredentialUpdate != nil {
+			onCredentialUpdate(cred)
+		}
+	}
+	rt.credential.SetCredentialUpdateFunc(wrappedCredUpdate)
 	rt.videos.SetRetryDownloadFunc(onRetryDownload)
 	rt.videos.SetProcessPendingFunc(onProcessPending)
 	rt.videos.SetRedownloadFunc(onRedownload)

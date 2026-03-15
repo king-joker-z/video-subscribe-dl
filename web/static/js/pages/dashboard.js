@@ -3,13 +3,14 @@ import { api } from '../api.js';
 import { formatBytes, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef, Fragment } = React;
 
-export function DashboardPage() {
+export function DashboardPage({ onNavigate }) {
   const [data, setData] = useState(null);
   const [task, setTask] = useState(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [cooldownSec, setCooldownSec] = useState(0);
   const cooldownRef = useRef(null);
+  const [refreshingCred, setRefreshingCred] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +57,16 @@ export function DashboardPage() {
     finally { setTriggering(false); }
   };
 
+  const handleRefreshCred = async () => {
+    setRefreshingCred(true);
+    try {
+      await api.refreshCredential();
+      toast.success('凭证刷新成功');
+      setTimeout(load, 1000);
+    } catch (e) { toast.error('刷新失败: ' + e.message); }
+    finally { setRefreshingCred(false); }
+  };
+
   if (loading) return h('div', { className: 'page-enter space-y-4' },
     h('div', { className: 'grid grid-cols-2 lg:grid-cols-3 gap-4' },
       Array.from({ length: 6 }, (_, i) => h(Card, { key: i }, h(Skeleton, { className: 'h-16' })))
@@ -98,6 +109,18 @@ export function DashboardPage() {
     return m > 0 ? `${m}分${s}秒` : `${s}秒`;
   };
 
+  // 凭证状态辅助
+  const cred = data?.credential || {};
+  const getCredStatusStyle = () => {
+    switch (cred.status) {
+      case 'ok': return { icon: '✅', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
+      case 'expired': return { icon: '⚠️', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
+      case 'error': return { icon: '❌', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' };
+      default: return { icon: '🔑', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
+    }
+  };
+  const credStyle = getCredStatusStyle();
+
   return h('div', { className: 'page-enter space-y-6' },
     // 风控冷却横幅
     cooldownSec > 0 && h('div', { className: 'bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center gap-3' },
@@ -109,6 +132,21 @@ export function DashboardPage() {
       h('div', { className: 'text-2xl font-mono font-bold text-orange-300' }, formatCooldown(cooldownSec))
     ),
 
+    // 凭证过期/未登录警告横幅
+    (cred.status === 'expired' || cred.status === 'none') && h('div', { className: cn('rounded-xl p-4 flex items-center gap-3 border', credStyle.bg, credStyle.border) },
+      h('div', { className: cn('text-xl', credStyle.color) }, credStyle.icon),
+      h('div', { className: 'flex-1' },
+        h('div', { className: cn('font-medium', credStyle.color) }, cred.status === 'expired' ? 'B站凭证已过期' : '未登录 B 站'),
+        h('div', { className: cn('text-sm opacity-70', credStyle.color) }, cred.status === 'expired' ? '下载功能受限，请刷新凭证或重新登录' : '登录后可下载更高画质视频')
+      ),
+      cred.status === 'expired' && cred.has_credential && h(Button, {
+        onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm'
+      }, refreshingCred ? '刷新中...' : '刷新凭证'),
+      onNavigate && h(Button, {
+        onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary'
+      }, cred.status === 'expired' ? '重新登录' : '去登录')
+    ),
+
     // 统计卡片网格
     h('div', { className: 'grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4' },
       stats.map((s, i) => h(Card, { key: i },
@@ -117,7 +155,7 @@ export function DashboardPage() {
       ))
     ),
 
-    h('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-4' },
+    h('div', { className: 'grid grid-cols-1 lg:grid-cols-3 gap-4' },
       // 任务状态
       h(Card, null,
         h('div', { className: 'flex items-center justify-between mb-4' },
@@ -138,6 +176,48 @@ export function DashboardPage() {
           task?.status === 'paused'
             ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复')
             : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停')
+        )
+      ),
+
+      // B站账号状态
+      h(Card, null,
+        h('div', { className: 'flex items-center gap-2 mb-4' },
+          h('div', { className: 'text-lg' }, credStyle.icon),
+          h('h3', { className: 'font-medium text-slate-200' }, 'B站账号')
+        ),
+        cred.status === 'ok' ? h('div', { className: 'space-y-3 text-sm' },
+          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '用户名'), h('span', { className: 'text-slate-200 font-medium' }, cred.username || '--')),
+          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '会员'), h('span', { className: cn('font-medium', cred.vip_active ? 'text-pink-400' : 'text-slate-200') }, cred.vip_label || '普通用户')),
+          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '最高画质'), h('span', { className: 'text-slate-200' }, cred.max_quality || '--')),
+          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '状态'), h('span', { className: 'text-emerald-400' }, '正常')),
+          cred.updated_at && h('div', { className: 'flex justify-between text-slate-400' },
+            h('span', null, '更新时间'), h('span', { className: 'text-slate-500 text-xs' }, cred.updated_at)
+          ),
+          h('div', { className: 'flex gap-2 mt-3' },
+            h(Button, { onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm', variant: 'secondary' },
+              h(Icon, { name: 'sync', size: 14 }), refreshingCred ? '刷新中...' : '刷新凭证')
+          )
+        ) : cred.status === 'expired' ? h('div', { className: 'space-y-3' },
+          h('div', { className: 'text-amber-400 text-sm' }, '凭证已过期，请刷新或重新登录'),
+          cred.username && h('div', { className: 'text-sm text-slate-400' }, '上次登录: ' + cred.username),
+          h('div', { className: 'flex gap-2 mt-3' },
+            h(Button, { onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm' },
+              refreshingCred ? '刷新中...' : '刷新凭证'),
+            onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '重新登录')
+          )
+        ) : cred.status === 'error' ? h('div', { className: 'space-y-3' },
+          h('div', { className: 'text-red-400 text-sm' }, '凭证验证失败'),
+          h('div', { className: 'text-xs text-slate-500' }, '可能是网络问题，稍后会自动重试'),
+          h('div', { className: 'flex gap-2 mt-3' },
+            onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '前往设置')
+          )
+        ) : h('div', { className: 'space-y-3' },
+          h('div', { className: 'text-slate-400 text-sm' }, '未登录，仅能下载 480P 视频'),
+          h('div', { className: 'text-xs text-slate-500' }, '扫码登录后可下载高画质视频'),
+          h('div', { className: 'flex gap-2 mt-3' },
+            onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm' },
+              h(Icon, { name: 'log-in', size: 14 }), '前往登录')
+          )
         )
       ),
 

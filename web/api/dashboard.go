@@ -1,8 +1,11 @@
 package api
 
 import (
+	"log"
 	"net/http"
+	"time"
 
+	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/util"
@@ -10,18 +13,91 @@ import (
 
 // DashboardHandler 仪表盘 API
 type DashboardHandler struct {
-	db               *db.DB
-	downloader       *downloader.Downloader
-	downloadDir      string
-	getCooldownInfo  func() (bool, int) // 返回 (inCooldown, remainingSec)
+	db              *db.DB
+	downloader      *downloader.Downloader
+	downloadDir     string
+	getCooldownInfo func() (bool, int) // 返回 (inCooldown, remainingSec)
+
+	// credential 缓存，避免每次 dashboard 请求都调 B 站 API
+	credCache     map[string]interface{}
+	credCacheTime time.Time
+	credCacheTTL  time.Duration
 }
 
 func NewDashboardHandler(database *db.DB, dl *downloader.Downloader, downloadDir string) *DashboardHandler {
-	return &DashboardHandler{db: database, downloader: dl, downloadDir: downloadDir}
+	return &DashboardHandler{
+		db:           database,
+		downloader:   dl,
+		downloadDir:  downloadDir,
+		credCacheTTL: 5 * time.Minute,
+	}
 }
 
 func (h *DashboardHandler) SetCooldownInfoFunc(fn func() (bool, int)) {
 	h.getCooldownInfo = fn
+}
+
+// getCredentialStatus 获取凭证状态（带缓存，5分钟TTL）
+func (h *DashboardHandler) getCredentialStatus() map[string]interface{} {
+	// 缓存有效期内直接返回
+	if h.credCache != nil && time.Since(h.credCacheTime) < h.credCacheTTL {
+		return h.credCache
+	}
+
+	result := map[string]interface{}{
+		"has_credential": false,
+		"source":         "none",
+		"status":         "none",
+		"status_label":   "未登录",
+	}
+
+	credJSON, _ := h.db.GetSetting("credential_json")
+	credSource, _ := h.db.GetSetting("credential_source")
+	cred := bilibili.CredentialFromJSON(credJSON)
+
+	if cred == nil || cred.IsEmpty() {
+		h.credCache = result
+		h.credCacheTime = time.Now()
+		return result
+	}
+
+	result["has_credential"] = true
+	result["source"] = credSource
+
+	if cred.UpdatedAt > 0 {
+		result["updated_at"] = time.Unix(cred.UpdatedAt, 0).Format("2006-01-02 15:04:05")
+	}
+
+	// 验证用户信息
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	verifyResult, err := bilibili.VerifyCredential(cred, httpClient)
+	if err != nil {
+		log.Printf("[dashboard] credential verify error: %v", err)
+		result["status"] = "error"
+		result["status_label"] = "验证失败"
+	} else if verifyResult != nil {
+		if !verifyResult.LoggedIn {
+			result["status"] = "expired"
+			result["status_label"] = "已过期"
+			result["need_refresh"] = true
+		} else {
+			result["status"] = "ok"
+			result["status_label"] = "正常"
+			result["username"] = verifyResult.Username
+			result["vip_label"] = verifyResult.VIPLabel
+			result["max_quality"] = verifyResult.MaxQuality
+			result["vip_active"] = verifyResult.VIPActive
+		}
+	}
+
+	h.credCache = result
+	h.credCacheTime = time.Now()
+	return result
+}
+
+// InvalidateCredentialCache 使凭证缓存失效（登录/刷新后调用）
+func (h *DashboardHandler) InvalidateCredentialCache() {
+	h.credCache = nil
 }
 
 // GET /api/dashboard
@@ -97,6 +173,9 @@ func (h *DashboardHandler) HandleDashboard(w http.ResponseWriter, r *http.Reques
 	if byMonth, err := h.db.GetStatsByMonth(); err == nil {
 		result["by_month"] = byMonth
 	}
+
+	// 凭证状态（带缓存）
+	result["credential"] = h.getCredentialStatus()
 
 	apiOK(w, result)
 }

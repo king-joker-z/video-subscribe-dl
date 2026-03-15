@@ -224,13 +224,13 @@ function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'dashboard': return h(DashboardPage);
+      case 'dashboard': return h(DashboardPage, { onNavigate: navigate });
       case 'sources': return h(SourcesPage, { onNavigate: navigate });
       case 'videos': return h(VideosPage, { params: hashParams });
       case 'uploaders': return h(UploadersPage, { onNavigate: navigate });
       case 'settings': return h(SettingsPage);
       case 'logs': return h(LogsPage);
-      default: return h(DashboardPage);
+      default: return h(DashboardPage, { onNavigate: navigate });
     }
   };
 
