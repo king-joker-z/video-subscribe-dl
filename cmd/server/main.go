@@ -137,6 +137,7 @@ func main() {
 	server.SetCookieUpdateFunc(sched.UpdateCookie)
 	server.SetCredentialUpdateFunc(sched.UpdateCredential)
 	server.SetRetryDownloadFunc(sched.RetryByID)
+	server.SetSyncAllFunc(sched.SyncAll)
 	server.SetSyncSourceFunc(sched.CheckOneSource)
 	server.SetFullScanSourceFunc(sched.FullScanSource)
 	server.SetProcessPendingFunc(sched.ProcessAllPending)

@@ -57,6 +57,11 @@ func (rt *Router) SetCallbacks(
 	rt.uploaders.SetProcessPendingFunc(onProcessPending)
 }
 
+// SetSyncAllFunc 设置全部同步回调
+func (rt *Router) SetSyncAllFunc(fn func()) {
+	rt.onSyncAll = fn
+}
+
 // SetFullScanSourceFunc 设置全量补漏扫描回调
 func (rt *Router) SetFullScanSourceFunc(fn func(int64)) {
 	rt.sources.SetFullScanSourceFunc(fn)

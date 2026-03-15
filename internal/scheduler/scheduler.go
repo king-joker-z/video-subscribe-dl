@@ -653,3 +653,8 @@ func (s *Scheduler) getFilenameTemplate() string {
 	}
 	return config.DefaultFilenameTemplate
 }
+
+// SyncAll 触发全部源检查（供 API 调用）
+func (s *Scheduler) SyncAll() {
+	go s.checkAllForce()
+}

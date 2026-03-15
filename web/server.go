@@ -153,6 +153,9 @@ func (s *Server) setupRoutes() {
 		}
 		s.apiRouter.SetBuildTime(s.buildTime)
 		s.apiRouter.SetStartTime(s.startTime)
+		if s.onSyncAll != nil {
+			s.apiRouter.SetSyncAllFunc(func() { s.onSyncAll() })
+		}
 		if s.onFullScanSource != nil {
 			s.apiRouter.SetFullScanSourceFunc(func(id int64) { s.onFullScanSource(id) })
 		}
@@ -179,6 +182,10 @@ func (s *Server) SetCredentialUpdateFunc(fn func(*bilibili.Credential)) {
 
 func (s *Server) SetRetryDownloadFunc(fn func(int64)) {
 	s.onRetryDownload = fn
+}
+
+func (s *Server) SetSyncAllFunc(fn func()) {
+	s.onSyncAll = fn
 }
 
 func (s *Server) SetSyncSourceFunc(fn func(int64)) {
