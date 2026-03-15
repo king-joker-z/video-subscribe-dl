@@ -167,6 +167,44 @@ func (h *VideosHandler) HandleCancel(w http.ResponseWriter, r *http.Request, id 
 	apiOK(w, map[string]interface{}{"id": id, "message": "已取消"})
 }
 
+// POST /api/videos/:id/redownload — 重新下载（删除旧文件，重置为 pending）
+func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request, id int64) {
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+	if dl.Status != "completed" && dl.Status != "relocated" {
+		apiError(w, CodeInvalidParam, "只能重新下载已完成的视频")
+		return
+	}
+
+	// 删除旧文件及关联文件
+	if dl.FilePath != "" {
+		if _, err := os.Stat(dl.FilePath); err == nil {
+			os.Remove(dl.FilePath)
+			log.Printf("[video] Removed old file for redownload: %s", dl.FilePath)
+		}
+		util.RemoveAssociatedFiles(dl.FilePath)
+		util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+	}
+
+	// 重置状态为 pending
+	h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+	h.db.ResetRetryCount(id)
+	// 清空旧的 file_path 和 thumb_path
+	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
+
+	// 触发 pending 处理
+	if h.onProcessPending != nil {
+		go h.onProcessPending()
+	}
+
+	log.Printf("[video] Redownload %d (%s)", id, dl.Title)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重新下载"})
+}
+
+
 // DELETE /api/videos/:id — 删除下载记录及文件
 func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, _ := h.db.GetDownload(id)
@@ -190,7 +228,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string  `json:"action"` // retry | cancel | delete
+		Action string  `json:"action"` // retry | cancel | delete | redownload
 		IDs    []int64 `json:"ids"`
 	}
 	if err := parseJSON(r, &req); err != nil {
@@ -214,6 +252,21 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 				h.db.ResetRetryCount(id)
 			}
 			affected++
+		case "redownload":
+			dl, _ := h.db.GetDownload(id)
+			if dl != nil && (dl.Status == "completed" || dl.Status == "relocated") {
+				if dl.FilePath != "" {
+					if _, err := os.Stat(dl.FilePath); err == nil {
+						os.Remove(dl.FilePath)
+					}
+					util.RemoveAssociatedFiles(dl.FilePath)
+					util.RemoveEmptyDirs(filepath.Dir(dl.FilePath), h.downloadDir, 3)
+				}
+				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
+				h.db.ResetRetryCount(id)
+				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
+				affected++
+			}
 		case "cancel":
 			h.db.UpdateDownloadStatus(id, "cancelled", "", 0, "批量取消")
 			affected++
@@ -232,6 +285,11 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			apiError(w, CodeInvalidParam, "未知操作: "+req.Action)
 			return
 		}
+	}
+
+	// 批量重新下载后触发 pending 处理
+	if req.Action == "redownload" && h.onProcessPending != nil {
+		go h.onProcessPending()
 	}
 
 	log.Printf("[video] Batch %s: %d items", req.Action, affected)
@@ -262,6 +320,18 @@ func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.HandleRetry(w, r, id)
+		return
+	}
+
+	// /api/videos/:id/redownload
+	if strings.HasSuffix(path, "/redownload") && r.Method == "POST" {
+		idStr := strings.TrimSuffix(path, "/redownload")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "无效的 ID")
+			return
+		}
+		h.HandleRedownload(w, r, id)
 		return
 	}
 

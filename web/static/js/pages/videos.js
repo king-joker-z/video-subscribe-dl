@@ -56,9 +56,12 @@ export function VideosPage({ params = {} } = {}) {
 
   const handleBatch = async (action) => {
     if (selected.size === 0) return;
+    if (action === 'redownload' && !confirm('将删除旧文件并重新下载，确认？')) return;
+    if (action === 'delete' && !confirm('确定批量删除？')) return;
     try {
       await api.batchVideos(action, Array.from(selected));
-      toast.success(`批量${action === 'retry' ? '重试' : action === 'cancel' ? '取消' : '删除'}成功`);
+      const labels = { retry: '重试', cancel: '取消', delete: '删除', redownload: '重新下载' };
+      toast.success(`批量${labels[action] || action}成功`);
       setSelected(new Set()); load();
     } catch (e) { toast.error(e.message); }
   };
@@ -140,6 +143,7 @@ export function VideosPage({ params = {} } = {}) {
     selected.size > 0 && h('div', { className: 'flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-lg px-4 py-2' },
       h('span', { className: 'text-sm text-blue-400' }, `已选 ${selected.size} 项`),
       h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm' }, '重试'),
+      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm' }, '重新下载'),
       h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm' }, '取消'),
       h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm' }, '删除'),
       h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto' }, '清除选择')
@@ -189,6 +193,10 @@ export function VideosPage({ params = {} } = {}) {
                           ((v.status === 'failed' || v.status === 'permanent_failed') && v.status !== 'charge_blocked') && h('button', {
                             onClick: async () => { try { await api.retryVideo(v.id); toast.success('已重试'); load(); } catch (e) { toast.error(e.message); } },
                             className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '重试'
+                          }, h(Icon, { name: 'refresh', size: 14 })),
+                          (v.status === 'completed' || v.status === 'relocated') && h('button', {
+                            onClick: async () => { if (confirm('将删除旧文件并重新下载，确认？')) { try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-blue-900/50 text-slate-400 hover:text-blue-400', title: '重新下载'
                           }, h(Icon, { name: 'refresh', size: 14 })),
                           h('button', {
                             onClick: async () => { if (confirm('确定删除？')) { try { await api.deleteVideo(v.id); toast.success('已删除'); load(); } catch (e) { toast.error(e.message); } } },

@@ -201,3 +201,97 @@ func TestExtractWatchLaterInfo_NotWatchLater(t *testing.T) {
 		t.Errorf("expected 0, got %d", mid)
 	}
 }
+
+func TestSanitizePath_ReplacementChar(t *testing.T) {
+	result := SanitizePath("hello" + string([]rune{0xFFFD}) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_ZeroWidthSpace(t *testing.T) {
+	result := SanitizePath("hello" + string(rune(0x200B)) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_BOM(t *testing.T) {
+	result := SanitizePath(string([]rune{0xFEFF}) + "hello")
+	if result != "hello" {
+		t.Errorf("expected 'hello', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_ControlChars(t *testing.T) {
+	result := SanitizePath("hello" + string([]rune{0x00, 0x01, 0x1F}) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_VariationSelector(t *testing.T) {
+	// U+FE0F emoji 变体选择器应被移除
+	result := SanitizePath("star" + string(rune(0xFE0F)) + "test")
+	if result != "startest" {
+		t.Errorf("expected 'startest', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_MixedInvisible(t *testing.T) {
+	// 零宽字符 + 替换字符混合
+	result := SanitizePath("hello" + string(rune(0x200B)) + "world" + string(rune(0xFFFD)) + "test")
+	if result != "helloworldtest" {
+		t.Errorf("expected 'helloworldtest', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_ConsecutiveSpaces(t *testing.T) {
+	result := SanitizePath("hello   world")
+	if result != "hello world" {
+		t.Errorf("expected 'hello world', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_LeadingTrailingSpaces(t *testing.T) {
+	result := SanitizePath("  hello  ")
+	if result != "hello" {
+		t.Errorf("expected 'hello', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_RuneTruncation(t *testing.T) {
+	// 中文字符（每个 3 字节），100 个 rune 应截断到 80 rune
+	long := ""
+	for i := 0; i < 100; i++ {
+		long += "中"
+	}
+	result := SanitizePath(long)
+	runes := []rune(result)
+	if len(runes) != 80 {
+		t.Errorf("expected 80 runes, got %d", len(runes))
+	}
+}
+
+func TestSanitizePath_C1ControlChars(t *testing.T) {
+	result := SanitizePath("hello" + string([]rune{0x0080, 0x009F}) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_InvisibleFormatChars(t *testing.T) {
+	// U+2060 word joiner, U+206F nominal digit shapes
+	result := SanitizePath("hello" + string([]rune{0x2060, 0x206F}) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}
+
+func TestSanitizePath_LineSeparator(t *testing.T) {
+	// U+2028 line separator, U+2029 paragraph separator
+	result := SanitizePath("hello" + string([]rune{0x2028, 0x2029}) + "world")
+	if result != "helloworld" {
+		t.Errorf("expected 'helloworld', got '%s'", result)
+	}
+}

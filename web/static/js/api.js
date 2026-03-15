@@ -36,6 +36,7 @@ export const api = {
   },
   getVideo: (id) => request(`/api/videos/${id}`),
   retryVideo: (id) => request(`/api/videos/${id}/retry`, { method: 'POST' }),
+  redownloadVideo: (id) => request(`/api/videos/${id}/redownload`, { method: 'POST' }),
   cancelVideo: (id) => request(`/api/videos/${id}/cancel`, { method: 'POST' }),
   deleteVideo: (id) => request(`/api/videos/${id}`, { method: 'DELETE' }),
   detectCharge: () => request('/api/videos/detect-charge', { method: 'POST' }),
