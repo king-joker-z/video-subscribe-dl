@@ -57,6 +57,10 @@ type Scheduler struct {
 	// cron 调度器
 	cronScheduler *cron.Cron
 
+	// 全量扫描去重
+	fullScanRunning   map[int64]bool
+	fullScanRunningMu sync.Mutex
+
 	// 风控断点续检：被中断的 source 列表
 	pendingSourcesMu sync.Mutex
 	pendingSources   []db.Source
@@ -78,7 +82,8 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		notifier:    notify.New(database),
 		stopCh:      make(chan struct{}),
 		hotConfig:   config.NewHotConfig(),
-		upInfoCache: make(map[int64]*upInfoCacheEntry),
+		upInfoCache:     make(map[int64]*upInfoCacheEntry),
+		fullScanRunning: make(map[int64]bool),
 		videoSema:   bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:    bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}

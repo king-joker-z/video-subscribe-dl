@@ -249,9 +249,24 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		return
 	}
 
+	// 防止同一 source 重复扫描
+	s.fullScanRunningMu.Lock()
+	if s.fullScanRunning[sourceID] {
+		s.fullScanRunningMu.Unlock()
+		log.Printf("[full-scan] Source %d (%s) 已在扫描中，跳过", sourceID, src.Name)
+		return
+	}
+	s.fullScanRunning[sourceID] = true
+	s.fullScanRunningMu.Unlock()
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer func() {
+			s.fullScanRunningMu.Lock()
+			delete(s.fullScanRunning, sourceID)
+			s.fullScanRunningMu.Unlock()
+		}()
 		log.Printf("[full-scan] 开始全量补漏扫描: %s (id=%d)", src.Name, src.ID)
 		s.fullScanUP(*src)
 		log.Printf("[full-scan] 全量补漏扫描完成: %s (id=%d)", src.Name, src.ID)
