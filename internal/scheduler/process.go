@@ -129,6 +129,12 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 		dlID, _ = s.db.CreateDownload(dl)
 	}
 
+	// 暂停时不提交到下载队列，保持 pending 等下轮处理
+	if s.dl.IsPaused() {
+		log.Printf("[scheduler] Downloader paused, keeping %s as pending", videoID)
+		return
+	}
+
 	resultCh := make(chan *downloader.Result, 1)
 	s.wg.Add(1)
 	go func() {
@@ -217,15 +223,30 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		}
 	}()
 
-	// 超时保护：避免 downloader 卡住导致 goroutine 泄漏
+	// 超时保护：动态计算（默认1小时，限速时根据码率调整）
+	timeout := 1 * time.Hour
+	rateLimitBps := s.dl.GetRateLimit()
+	if rateLimitBps > 0 {
+		// 给 handleDownloadResult 额外 5 分钟缓冲
+		timeout = timeout + 5*time.Minute
+	}
+
 	var result *downloader.Result
 	select {
 	case result = <-ch:
 		// 正常收到结果
-	case <-time.After(30 * time.Minute):
-		log.Printf("[TIMEOUT] handleDownloadResult 等待超时 (videoID=%s)", videoID)
-		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, "download timeout (30min)")
-		s.notifier.Send(notify.EventDownloadFailed, "下载超时: "+videoID, "等待下载结果超过30分钟")
+	case <-time.After(timeout):
+		// 暂停状态下超时不算失败，标记 pending 等恢复后重试
+		if s.dl.IsPaused() {
+			log.Printf("[TIMEOUT] handleDownloadResult 超时但 downloader 处于暂停状态 (videoID=%s, paused=true, activeWorkers=%d, queueLen=%d)",
+				videoID, s.dl.ActiveCount(), s.dl.QueueLen())
+			s.db.UpdateDownloadStatus(dlID, "pending", "", 0, "timeout during pause, will retry")
+			return
+		}
+		log.Printf("[TIMEOUT] handleDownloadResult 等待超时 (videoID=%s, paused=%v, activeWorkers=%d, queueLen=%d)",
+			videoID, s.dl.IsPaused(), s.dl.ActiveCount(), s.dl.QueueLen())
+		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("download timeout (%v)", timeout))
+		s.notifier.Send(notify.EventDownloadFailed, "下载超时: "+videoID, fmt.Sprintf("等待下载结果超过%v", timeout))
 		return
 	}
 	if result == nil {

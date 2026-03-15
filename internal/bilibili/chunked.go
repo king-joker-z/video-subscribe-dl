@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"errors"
+
 	"video-subscribe-dl/internal/util"
 )
 
@@ -22,6 +24,9 @@ const (
 	// MaxChunkRetries 单块最大重试次数
 	MaxChunkRetries = 3
 )
+
+// ErrRangeNotSatisfiable HTTP 416 Range Not Satisfiable
+var ErrRangeNotSatisfiable = errors.New("HTTP 416 Range Not Satisfiable")
 
 // chunkRange 描述一个下载块的字节范围
 type chunkRange struct {
@@ -220,6 +225,10 @@ func downloadOneChunk(ctx context.Context, rawURL, dest string, chunk chunkRange
 		if lastErr == nil {
 			return nil
 		}
+		// HTTP 416: Range 参数不变重试无意义，立即返回
+		if errors.Is(lastErr, ErrRangeNotSatisfiable) {
+			return lastErr
+		}
 	}
 	return fmt.Errorf("after %d retries: %w", MaxChunkRetries, lastErr)
 }
@@ -257,6 +266,9 @@ func downloadOneChunkAttempt(ctx context.Context, rawURL, dest string, chunk chu
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 416 {
+		return ErrRangeNotSatisfiable
+	}
 	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

@@ -417,7 +417,9 @@ func (d *Downloader) download(job *Job) *Result {
 	d.mu.Unlock()
 	// 6. 下载并合并（带进度回调 + 限速 + 分块并行）
 	chunks := d.GetDownloadChunks()
-	downloadCtx, downloadCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	dlTimeout := calculateDownloadTimeout(int64(bestVideo.Bandwidth+bestAudio.Bandwidth), currentRateLimit)
+	log.Printf("  Download timeout: %v (bitrate=%dkbps, rateLimit=%d)", dlTimeout, (bestVideo.Bandwidth+bestAudio.Bandwidth)/1000, currentRateLimit)
+	downloadCtx, downloadCancel := context.WithTimeout(context.Background(), dlTimeout)
 	defer downloadCancel()
 	outputPath, err := bilibili.DownloadDashWithProgressChunked(downloadCtx, bestVideo, bestAudio, videoDir, safeName, progressCb, currentRateLimit, chunks)
 	if err != nil {
@@ -470,4 +472,34 @@ func (d *Downloader) download(job *Job) *Result {
 		FilePath: outputPath,
 		FileSize: fileSize,
 	}
+}
+
+// calculateDownloadTimeout 根据码率和限速动态计算下载超时
+// 公式: estimatedSize / effectiveSpeed * safetyMultiplier + basePadding
+// 范围: [30min, 4h]
+func calculateDownloadTimeout(totalBitrateBps int64, rateLimitBps int64) time.Duration {
+	const (
+		minTimeout      = 30 * time.Minute
+		maxTimeout      = 4 * time.Hour
+		basePadding     = 10 * time.Minute
+		safetyMultiply  = 3.0
+		defaultDuration = 1 * time.Hour // 无限速时默认
+	)
+
+	if rateLimitBps <= 0 {
+		return defaultDuration
+	}
+
+	// 估算 30 分钟视频的文件大小 (bytes)
+	estimatedSize := float64(totalBitrateBps) / 8.0 * 1800.0 // 30min 视频
+	downloadTime := estimatedSize / float64(rateLimitBps) * safetyMultiply
+	timeout := time.Duration(downloadTime)*time.Second + basePadding
+
+	if timeout < minTimeout {
+		timeout = minTimeout
+	}
+	if timeout > maxTimeout {
+		timeout = maxTimeout
+	}
+	return timeout
 }

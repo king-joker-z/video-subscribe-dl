@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"errors"
+
 	"video-subscribe-dl/internal/util"
 )
 
@@ -98,43 +100,72 @@ func downloadSmartProgress(ctx context.Context, rawURL, dest, phase string, onPr
 	if contentLength > ChunkThreshold && numChunks > 1 {
 		log.Printf("  Large file (%.1f MB > 50 MB), using %d-chunk parallel download",
 			float64(contentLength)/1024/1024, numChunks)
-		return downloadChunked(ctx, rawURL, dest, contentLength, numChunks, phase, onProgress, rateLimitBps)
+		err := downloadChunked(ctx, rawURL, dest, contentLength, numChunks, phase, onProgress, rateLimitBps)
+		if err != nil && errors.Is(err, ErrRangeNotSatisfiable) {
+			log.Printf("  HTTP 416 in chunked download, fallback to single-thread")
+			os.Remove(dest) // 清理可能的部分文件
+			return downloadWithResumeProgress(ctx, rawURL, dest, phase, onProgress, rateLimitBps)
+		}
+		return err
 	}
 
 	// 小文件：单线程
 	return downloadWithResumeProgress(ctx, rawURL, dest, phase, onProgress, rateLimitBps)
 }
 
+// max416Retries 断点续传遇 416 后删文件重试的最大次数
+const max416Retries = 2
+
 func downloadWithResumeProgress(ctx context.Context, rawURL, dest, phase string, onProgress ProgressCallback, rateLimitBps int64) error {
-	client := &http.Client{Timeout: 0}
+	for attempt := 0; attempt <= max416Retries; attempt++ {
+		var startByte int64
+		if fi, err := os.Stat(dest); err == nil {
+			startByte = fi.Size()
+		}
 
-	var startByte int64
-	if fi, err := os.Stat(dest); err == nil {
-		startByte = fi.Size()
-	}
+		req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("User-Agent", randUA())
+		req.Header.Set("Referer", "https://www.bilibili.com")
+		req.Header.Set("Origin", "https://www.bilibili.com")
+		if startByte > 0 {
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startByte))
+		}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
-	if err != nil {
+		resp, err := sharedLargeDownloadClient.Do(req)
+		if err != nil {
+			return err
+		}
+
+		if resp.StatusCode == 416 {
+			resp.Body.Close()
+			// 文件可能已完成或损坏，删除后重试
+			if startByte > 0 {
+				if rmErr := os.Remove(dest); rmErr != nil {
+					return fmt.Errorf("416 and cannot remove %s: %w", dest, rmErr)
+				}
+				log.Printf("  HTTP 416 at %s, removed partial file (%d bytes), retry %d/%d",
+					phase, startByte, attempt+1, max416Retries)
+				continue
+			}
+			return ErrRangeNotSatisfiable
+		}
+		if resp.StatusCode != 200 && resp.StatusCode != 206 {
+			resp.Body.Close()
+			return fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+
+		err = downloadStreamToFile(resp, dest, startByte, phase, onProgress, rateLimitBps)
+		resp.Body.Close()
 		return err
 	}
+	return ErrRangeNotSatisfiable
+}
 
-	req.Header.Set("User-Agent", randUA())
-	req.Header.Set("Referer", "https://www.bilibili.com")
-	req.Header.Set("Origin", "https://www.bilibili.com")
-	if startByte > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startByte))
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 && resp.StatusCode != 206 {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
+// downloadStreamToFile 将 HTTP 响应体写入文件（带进度回调和限速）
+func downloadStreamToFile(resp *http.Response, dest string, startByte int64, phase string, onProgress ProgressCallback, rateLimitBps int64) error {
 	flags := os.O_CREATE | os.O_WRONLY
 	if startByte > 0 && resp.StatusCode == 206 {
 		flags |= os.O_APPEND
@@ -149,7 +180,6 @@ func downloadWithResumeProgress(ctx context.Context, rawURL, dest, phase string,
 	}
 	defer f.Close()
 
-	// Apply rate limiting if configured
 	var body io.Reader = resp.Body
 	if rateLimitBps > 0 {
 		body = util.NewRateLimitedReader(resp.Body, rateLimitBps)
@@ -175,7 +205,6 @@ func downloadWithResumeProgress(ctx context.Context, rawURL, dest, phase string,
 
 			now := time.Now()
 
-			// 每秒更新一次进度回调
 			if onProgress != nil && now.Sub(lastProgressTime) >= 500*time.Millisecond {
 				elapsed := now.Sub(lastProgressTime).Seconds()
 				speed := float64(written-lastProgressBytes) / elapsed
@@ -184,7 +213,6 @@ func downloadWithResumeProgress(ctx context.Context, rawURL, dest, phase string,
 				lastProgressBytes = written
 			}
 
-			// 日志输出（每 3 秒）
 			if now.Sub(lastLog) > 3*time.Second {
 				if totalSize > 0 {
 					pct := float64(written) / float64(totalSize) * 100
@@ -203,7 +231,6 @@ func downloadWithResumeProgress(ctx context.Context, rawURL, dest, phase string,
 		}
 	}
 
-	// 最终进度更新
 	if onProgress != nil {
 		onProgress(phase, written, totalSize, 0)
 	}

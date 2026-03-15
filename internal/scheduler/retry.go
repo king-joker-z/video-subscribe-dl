@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"errors"
+
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
@@ -15,6 +17,12 @@ import (
 
 // retryOneDownload 执行单个失败下载的重试
 func (s *Scheduler) retryOneDownload(dl db.Download) {
+	// 暂停时跳过重试
+	if s.dl.IsPaused() {
+		log.Printf("[retry-scheduler] Downloader paused, skipping retry for %s", dl.VideoID)
+		return
+	}
+
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
 		log.Printf("[retry-scheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
@@ -31,6 +39,12 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	client := s.clientForSource(*src)
 	detail, err := client.GetVideoDetail(actualBvID)
 	if err != nil {
+		if errors.Is(err, bilibili.ErrRateLimited) {
+			log.Printf("[retry-scheduler] 风控触发，停止重试: %s", dl.VideoID)
+			s.triggerCooldown()
+			s.dl.Pause()
+			return
+		}
 		log.Printf("[retry-scheduler] Get detail failed for %s: %v", dl.VideoID, err)
 		s.db.IncrementRetryCount(dl.ID, "retry: get detail failed: "+err.Error())
 		return
@@ -119,6 +133,11 @@ func (s *Scheduler) retryFailedDownloads() {
 	log.Printf("[retry-scheduler] Found %d retryable failed downloads", len(retryable))
 
 	for _, dl := range retryable {
+		// 暂停时终止重试周期
+		if s.dl.IsPaused() {
+			log.Printf("[retry-scheduler] Downloader paused, stopping retry cycle")
+			return
+		}
 		s.retryOneDownload(dl)
 		time.Sleep(2 * time.Second)
 	}
