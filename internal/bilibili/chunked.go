@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	// ChunkThreshold 分块下载阈值：50MB
-	ChunkThreshold = 50 * 1024 * 1024
+	// ChunkThreshold 分块下载阈值：20MB（参考 bili-sync）
+	ChunkThreshold = 20 * 1024 * 1024
 	// DefaultChunks 默认分块数
 	DefaultChunks = 4
 	// MaxChunkRetries 单块最大重试次数

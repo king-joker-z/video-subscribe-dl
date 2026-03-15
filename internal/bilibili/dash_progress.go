@@ -122,7 +122,7 @@ func downloadSmartProgress(ctx context.Context, rawURL, dest, phase string, onPr
 
 	// 大文件且 numChunks > 1：分块并行
 	if contentLength > ChunkThreshold && numChunks > 1 {
-		log.Printf("  Large file (%.1f MB > 50 MB), using %d-chunk parallel download",
+		log.Printf("  Large file (%.1f MB > 20 MB), using %d-chunk parallel download",
 			float64(contentLength)/1024/1024, numChunks)
 		err := downloadChunked(ctx, rawURL, dest, contentLength, numChunks, phase, onProgress, rateLimitBps)
 		if err != nil && errors.Is(err, ErrRangeNotSatisfiable) {
