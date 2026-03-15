@@ -368,12 +368,21 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		return
 	}
 
-	// 高级过滤规则（完整检查：包含 duration/pages）
+	// 高级过滤规则（完整检查：包含 duration/pages/tags）
 	if len(advRules) > 0 {
 		fullInfo := VideoInfo{
 			Title:    title,
 			Duration: detail.Duration,
 			Pages:    len(pages),
+		}
+		// 只在有 tags 规则时才调用 GetVideoTags（节省 API 请求）
+		for _, r := range advRules {
+			if r.Target == "tags" {
+				if tags, err := client.GetVideoTags(bvid); err == nil {
+					fullInfo.Tags = strings.Join(tags, ",")
+				}
+				break
+			}
 		}
 		if !MatchesFilterRules(advRules, fullInfo) {
 			log.Printf("视频 %s (%s) 未通过高级过滤规则，跳过", title, bvid)
