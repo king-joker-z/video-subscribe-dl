@@ -1,0 +1,13 @@
+.git
+.gitignore
+*.md
+LICENSE
+data/
+downloads/
+*.db
+*.sqlite
+*.log
+.DS_Store
+.vscode/
+.idea/
+tmp/

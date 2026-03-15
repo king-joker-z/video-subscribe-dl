@@ -1,0 +1,390 @@
+package scheduler
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
+
+	"video-subscribe-dl/internal/bilibili"
+	"video-subscribe-dl/internal/config"
+	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/downloader"
+	"video-subscribe-dl/internal/nfo"
+	"video-subscribe-dl/internal/notify"
+)
+
+type Scheduler struct {
+	db          *db.DB
+	dl          *downloader.Downloader
+	bili        *bilibili.Client
+	downloadDir string
+	cookiePath  string
+	notifier    *notify.Notifier
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+
+	// bili client 保护
+	biliMu sync.RWMutex
+
+	// 风控退避
+	rateLimitMu          sync.Mutex
+	rateLimitUntil       time.Time // 风控冷却截止时间
+	lastCooldownNotify   time.Time // 上次风控通知时间（防重复）
+
+	// Cookie 定期检测
+	lastCookieCheck      time.Time // 上次 Cookie 主动检测时间
+}
+
+func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
+	cookie := bilibili.ReadCookieFile(cookiePath)
+	return &Scheduler{
+		db:          database,
+		dl:          dl,
+		bili:        bilibili.NewClient(cookie),
+		downloadDir: downloadDir,
+		cookiePath:  cookiePath,
+		notifier:    notify.New(database),
+		stopCh:      make(chan struct{}),
+	}
+}
+
+// GetNotifier 返回通知器实例（供 web server 使用）
+func (s *Scheduler) GetNotifier() *notify.Notifier {
+	return s.notifier
+}
+
+// getBili 线程安全地获取 bilibili client
+func (s *Scheduler) getBili() *bilibili.Client {
+	s.biliMu.RLock()
+	defer s.biliMu.RUnlock()
+	return s.bili
+}
+
+func (s *Scheduler) Start() {
+	// 初始化 cookiePath 缓存
+	if s.cookiePath == "" {
+		if cp, err := s.db.GetSetting("cookie_path"); err == nil && cp != "" {
+			s.cookiePath = cp
+		}
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		// 启动时重置 stale pending/downloading 状态（容器重启后队列已清空）
+		if reset, err := s.db.ResetStaleDownloads(); err == nil && reset > 0 {
+			log.Printf("[startup] Reset %d stale pending/downloading records (will be requeued)", reset)
+		}
+		s.verifyCookie("startup")
+		s.checkAll()
+		ticker := time.NewTicker(config.DefaultSchedulerTick)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				// 风控冷却期内跳过
+				if s.isInCooldown() {
+					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
+					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
+					continue
+				}
+				// Cookie 定期主动检测（每 6 小时）
+				s.periodicCookieCheck()
+				s.checkAll()
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+	log.Println("Scheduler started (interval: 5min)")
+}
+
+// isInCooldown 检查是否在风控冷却期内
+func (s *Scheduler) isInCooldown() bool {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	return time.Now().Before(s.rateLimitUntil)
+}
+
+// triggerCooldown 触发风控冷却
+func (s *Scheduler) triggerCooldown() {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	s.rateLimitUntil = time.Now().Add(config.CooldownDuration)
+	log.Printf("[WARN] 触发B站风控，暂停 %v（恢复时间: %s）",
+		config.CooldownDuration, s.rateLimitUntil.Format("15:04:05"))
+
+	// 防重复通知：30分钟内只发一次
+	if time.Since(s.lastCooldownNotify) > 30*time.Minute {
+		s.lastCooldownNotify = time.Now()
+		s.notifier.Send(notify.EventRateLimited, "B站风控触发",
+			fmt.Sprintf("已暂停 %v，预计 %s 恢复",
+				config.CooldownDuration, s.rateLimitUntil.Format("15:04:05")))
+	}
+}
+
+func (s *Scheduler) Stop() {
+	close(s.stopCh)
+	s.wg.Wait()
+}
+
+func (s *Scheduler) CheckNow() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.checkAllForce()
+	}()
+}
+
+// ProcessAllPending 把所有 pending 记录提交到下载队列
+func (s *Scheduler) ProcessAllPending() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		downloads, err := s.db.GetDownloadsByStatus("pending", 10000)
+		if err != nil {
+			log.Printf("[process-pending] Error: %v", err)
+			return
+		}
+		if len(downloads) == 0 {
+			log.Printf("[process-pending] No pending downloads")
+			return
+		}
+		// 分批处理：同时只有 3 个在下载队列中（和 worker 数一致）
+		batchSize := 3
+		log.Printf("[process-pending] Processing %d pending downloads (batch size: %d)", len(downloads), batchSize)
+		for i := 0; i < len(downloads); i += batchSize {
+			end := i + batchSize
+			if end > len(downloads) {
+				end = len(downloads)
+			}
+			batch := downloads[i:end]
+			for _, dl := range batch {
+				s.retryOneDownload(dl)
+				time.Sleep(1 * time.Second)
+			}
+			// 等当前批次下载完再提交下一批（检查队列是否空了）
+			log.Printf("[process-pending] Batch %d-%d submitted, waiting for completion...", i+1, end)
+			for s.dl.IsBusy() {
+				time.Sleep(5 * time.Second)
+			}
+		}
+		log.Printf("[process-pending] All %d pending downloads processed", len(downloads))
+	}()
+}
+
+// CheckOneSource 只同步指定 source
+func (s *Scheduler) CheckOneSource(sourceID int64) {
+	src, err := s.db.GetSource(sourceID)
+	if err != nil || src == nil {
+		log.Printf("[scheduler] Source %d not found", sourceID)
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.checkSource(*src)
+		log.Printf("Manual sync completed for source %d: %s", src.ID, src.Name)
+	}()
+}
+
+func (s *Scheduler) UpdateCookie(cookiePath string) {
+	s.cookiePath = cookiePath // 同步更新缓存
+	cookie := bilibili.ReadCookieFile(cookiePath)
+	s.biliMu.Lock()
+	s.bili = bilibili.NewClient(cookie)
+	client := s.bili
+	s.biliMu.Unlock()
+	s.dl.UpdateClient(client)
+}
+
+func (s *Scheduler) checkAll() {
+	s.verifyCookie("scheduled sync")
+
+	// Retry failed downloads
+	s.retryFailedDownloads()
+
+	// 读取全局 check_interval_minutes 设置
+	globalInterval := 0
+	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			globalInterval = n * 60 // 转为秒
+		}
+	}
+
+	sources, err := s.db.GetSourcesDueForCheck(globalInterval)
+	if err != nil {
+		log.Printf("Get due sources failed: %v", err)
+		return
+	}
+	for _, src := range sources {
+		s.checkSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
+
+		// 检查风控冷却
+		if s.isInCooldown() {
+			log.Printf("[scheduler] 风控冷却已触发，停止当前轮次剩余 source 检查")
+			return
+		}
+	}
+
+	// Auto-cleanup: retention-based and disk-pressure
+}
+
+func (s *Scheduler) checkAllForce() {
+	log.Println("Manual sync triggered")
+	s.verifyCookie("manual sync")
+	sources, err := s.db.GetEnabledSources()
+	if err != nil {
+		log.Printf("Get sources failed: %v", err)
+		return
+	}
+	for _, src := range sources {
+		s.checkSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
+	}
+	log.Println("Manual sync completed")
+}
+
+func (s *Scheduler) checkSource(src db.Source) {
+	log.Printf("Checking: %s (%s) [type=%s]", src.Name, src.URL, src.Type)
+
+	switch src.Type {
+	case "season":
+		s.checkSeason(src)
+	case "favorite":
+		s.checkFavorite(src)
+	case "watchlater":
+		s.checkWatchLater(src)
+	case "up", "channel", "":
+		s.checkUP(src)
+	default:
+		log.Printf("[WARN] Unknown source type: %s, treating as UP", src.Type)
+		s.checkUP(src)
+	}
+}
+
+func (s *Scheduler) clientForSource(src db.Source) *bilibili.Client {
+	if src.CookiesFile != "" {
+		cookie := bilibili.ReadCookieFile(src.CookiesFile)
+		if cookie != "" {
+			return bilibili.NewClient(cookie)
+		}
+	}
+	return s.getBili()
+}
+
+func (s *Scheduler) ensurePeopleDir(upInfo *bilibili.UPInfo) {
+	if upInfo == nil || upInfo.Name == "" {
+		return
+	}
+	dir := filepath.Join(s.downloadDir, "metadata", "people", bilibili.SanitizePath(upInfo.Name))
+	os.MkdirAll(dir, 0755)
+	nfoPath := filepath.Join(dir, "person.nfo")
+	if _, err := os.Stat(nfoPath); os.IsNotExist(err) {
+		nfo.GeneratePersonNFO(&nfo.PersonMeta{Name: upInfo.Name, Thumb: upInfo.Face}, dir)
+	}
+	if upInfo.Face != "" {
+		avatarPath := filepath.Join(dir, "folder.jpg")
+		if _, err := os.Stat(avatarPath); os.IsNotExist(err) {
+			if err := bilibili.DownloadFile(upInfo.Face, avatarPath); err != nil {
+				log.Printf("Avatar download failed for %s: %v", upInfo.Name, err)
+			}
+		}
+	}
+}
+
+// periodicCookieCheck 每 6 小时主动检测 Cookie 有效性
+func (s *Scheduler) periodicCookieCheck() {
+	if time.Since(s.lastCookieCheck) < 6*time.Hour {
+		return
+	}
+	s.lastCookieCheck = time.Now()
+	log.Println("[scheduler] Periodic cookie check triggered")
+
+	result, err := s.getBili().VerifyCookie()
+	if err != nil {
+		log.Printf("[WARN] Periodic cookie check failed: %v", err)
+		return
+	}
+	if !result.LoggedIn {
+		log.Printf("[WARN] Periodic cookie check: Cookie is invalid or expired")
+		s.notifier.Send(notify.EventCookieExpired, "Cookie 已过期（定期检测）",
+			"定期检测发现 Cookie 已失效，请及时更新")
+		// 尝试自动刷新
+		s.tryCookieRefresh("periodic check")
+	}
+}
+// verifyCookie 验证当前 cookie 是否有效，即将过期时自动刷新，失效打 warning
+func (s *Scheduler) verifyCookie(trigger string) {
+	result, err := s.getBili().VerifyCookie()
+	if err != nil {
+		log.Printf("[WARN] Cookie verify failed during %s: %v", trigger, err)
+		return
+	}
+	if !result.LoggedIn {
+		log.Printf("[WARN] Cookie is invalid or expired (trigger: %s). Attempting refresh...", trigger)
+		s.tryCookieRefresh(trigger)
+		return
+	}
+
+	vipLabel := "无"
+	switch result.VIPType {
+	case 1:
+		vipLabel = "月度大会员"
+	case 2:
+		vipLabel = "年度大会员"
+	}
+
+	// 检查 VIP 到期时间
+	if result.VIPDueDate != "" {
+		dueDate, parseErr := time.Parse("2006-01-02", result.VIPDueDate)
+		if parseErr == nil {
+			daysUntil := time.Until(dueDate).Hours() / 24
+			if daysUntil < -30 {
+				// 过期超过30天，不再尝试刷新，只在 startup 时提示一次
+				if trigger == "startup" {
+					log.Printf("[INFO] Cookie valid: user=%s, VIP=%s (已过期: %s). 非大会员仍可下载 1080P/192kbps",
+						result.Username, vipLabel, result.VIPDueDate)
+				}
+				return
+			} else if daysUntil < 7 {
+				log.Printf("[INFO] Cookie/VIP 将在 %s 到期（<7天），尝试刷新...", result.VIPDueDate)
+				s.tryCookieRefresh(trigger)
+			}
+		}
+	}
+
+	log.Printf("[INFO] Cookie valid: user=%s, VIP=%s, expires=%s (trigger: %s)",
+		result.Username, vipLabel, result.VIPDueDate, trigger)
+}
+
+// tryCookieRefresh 尝试自动刷新 Cookie
+func (s *Scheduler) tryCookieRefresh(trigger string) {
+	cookiePath := s.cookiePath
+	if cookiePath == "" {
+		log.Printf("[WARN] No cookie path configured, cannot auto-refresh")
+		s.notifier.Send(notify.EventCookieExpired, "Cookie 已过期", "未配置 cookie 路径，请手动更新 Cookie")
+		return
+	}
+
+	refreshResult, err := s.getBili().RefreshCookie(cookiePath)
+	if err != nil {
+		log.Printf("[WARN] Cookie refresh error during %s: %v", trigger, err)
+		s.notifier.Send(notify.EventCookieExpired, "Cookie 刷新失败", fmt.Sprintf("错误: %v，请手动更新 Cookie", err))
+		return
+	}
+
+	if refreshResult.Success {
+		log.Printf("[INFO] Cookie 自动刷新成功 (trigger: %s)", trigger)
+		// 刷新下载器的 client
+		s.dl.UpdateClient(s.getBili())
+	} else {
+		log.Printf("[WARN] Cookie 刷新失败: %s (trigger: %s). 请手动更新 Cookie。", refreshResult.Message, trigger)
+		s.notifier.Send(notify.EventCookieExpired, "Cookie 需要手动更新", refreshResult.Message)
+	}
+}

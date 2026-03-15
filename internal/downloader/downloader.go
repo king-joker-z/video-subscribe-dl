@@ -1,0 +1,473 @@
+package downloader
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"video-subscribe-dl/internal/bilibili"
+	appconfig "video-subscribe-dl/internal/config"
+	"video-subscribe-dl/internal/danmaku"
+)
+
+// Retry constants
+const (
+	MaxRetries  = 3
+	RetryDelay1 = 5 * time.Second
+	RetryDelay2 = 15 * time.Second
+	RetryDelay3 = 30 * time.Second
+)
+
+type Config struct {
+	MaxConcurrent   int
+	RequestInterval int // 秒
+}
+
+// ProgressInfo 描述一个下载任务的实时进度
+type ProgressInfo struct {
+	BvID       string  `json:"bvid"`
+	Title      string  `json:"title"`
+	Status     string  `json:"status"`     // "downloading_video", "downloading_audio", "merging", "done", "error"
+	Phase      string  `json:"phase"`      // "video", "audio", "merge"
+	Percent    float64 `json:"percent"`    // 0-100
+	Speed      int64   `json:"speed"`      // bytes/sec
+	Downloaded int64   `json:"downloaded"` // bytes
+	Total      int64   `json:"total"`      // bytes
+}
+
+type Downloader struct {
+	config         Config
+	bili           *bilibili.Client
+	queue          chan *Job
+	paused         bool
+	pauseCh        chan struct{}
+	resumeCh       chan struct{}
+	activeJobs     int64
+	mu             sync.Mutex
+	rateLimitBps   int64 // bytes per second, 0 = unlimited
+	downloadChunks int   // parallel chunks for large files, 0 = use default (4)
+
+	// 进度追踪
+	progressMu sync.RWMutex
+	progress   map[string]*ProgressInfo // key = bvid
+}
+
+type Job struct {
+	BvID        string // 直接用 BV 号
+	CID         int64  // 视频 CID
+	Title       string
+	OutputDir   string
+	Quality     string // "best", "1080p", "720p"
+	Codec       string // "avc", "hevc", "av1", ""
+	Danmaku     bool
+	CookiesFile string
+	ResultCh    chan *Result
+	OnStart     func() // 开始下载时回调（用于更新 DB 状态）
+}
+
+type Result struct {
+	Success  bool
+	FilePath string
+	FileSize int64
+	Error    error
+}
+
+func New(config Config, biliClient *bilibili.Client) *Downloader {
+	d := &Downloader{
+		config:   config,
+		bili:     biliClient,
+		queue:    make(chan *Job, appconfig.DefaultQueueSize),
+		pauseCh:  make(chan struct{}),
+		resumeCh: make(chan struct{}),
+		progress: make(map[string]*ProgressInfo),
+	}
+	for i := 0; i < config.MaxConcurrent; i++ {
+		go d.worker(i)
+	}
+	return d
+}
+
+func (d *Downloader) UpdateClient(client *bilibili.Client) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.bili = client
+}
+
+func (d *Downloader) worker(id int) {
+	for job := range d.queue {
+		d.processOneJob(id, job)
+	}
+}
+
+// processOneJob 处理单个下载任务，内含 recover 保护防止 panic 导致 worker 退出
+func (d *Downloader) processOneJob(id int, job *Job) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[w%d] PANIC recovered in worker: %v", id, r)
+			if job.ResultCh != nil {
+				job.ResultCh <- &Result{Error: fmt.Errorf("worker panic: %v", r)}
+			}
+		}
+	}()
+
+	d.mu.Lock()
+	paused := d.paused
+	d.mu.Unlock()
+	if paused {
+		<-d.resumeCh
+	}
+
+	log.Printf("[w%d] Downloading: %s (%s)", id, job.Title, job.BvID)
+	if job.OnStart != nil {
+		job.OnStart()
+	}
+	result := d.downloadWithRetry(job)
+	if job.ResultCh != nil {
+		job.ResultCh <- result
+	}
+
+	// 防封延迟
+	jitter := time.Duration(rand.Intn(10)) * time.Second
+	delay := time.Duration(d.config.RequestInterval)*time.Second + jitter
+	time.Sleep(delay)
+}
+
+func (d *Downloader) Submit(job *Job) error {
+	select {
+	case d.queue <- job:
+		return nil
+	case <-time.After(5 * time.Second):
+		log.Printf("[WARN] Download queue is full, failed to submit job: %s (%s)", job.Title, job.BvID)
+		return fmt.Errorf("download queue is full, could not submit %s within 5s timeout", job.BvID)
+	}
+}
+
+func (d *Downloader) Pause() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.paused {
+		d.paused = true
+		d.pauseCh = make(chan struct{})
+	}
+}
+
+func (d *Downloader) Resume() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.paused {
+		d.paused = false
+		close(d.resumeCh)
+		d.resumeCh = make(chan struct{})
+	}
+}
+
+func (d *Downloader) IsPaused() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.paused
+}
+
+// SetRateLimit sets the download speed limit in bytes per second (0 = unlimited)
+func (d *Downloader) SetRateLimit(bytesPerSec int64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.rateLimitBps = bytesPerSec
+}
+
+// GetRateLimit returns the current rate limit in bytes per second
+func (d *Downloader) GetRateLimit() int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.rateLimitBps
+}
+
+// SetDownloadChunks sets the number of parallel chunks for large file downloads
+func (d *Downloader) SetDownloadChunks(n int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.downloadChunks = n
+}
+
+// GetDownloadChunks returns the current chunk count
+func (d *Downloader) GetDownloadChunks() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.downloadChunks <= 0 {
+		return bilibili.DefaultChunks
+	}
+	return d.downloadChunks
+}
+
+// GetProgress 返回当前所有活跃下载的进度快照
+func (d *Downloader) QueueLen() int { return len(d.queue) }
+
+func (d *Downloader) ActiveCount() int { return int(atomic.LoadInt64(&d.activeJobs)) }
+
+func (d *Downloader) IsBusy() bool { return d.QueueLen() > 0 || d.ActiveCount() > 0 }
+
+func (d *Downloader) GetProgress() []ProgressInfo {
+	d.progressMu.RLock()
+	defer d.progressMu.RUnlock()
+	result := make([]ProgressInfo, 0, len(d.progress))
+	for _, p := range d.progress {
+		result = append(result, *p)
+	}
+	return result
+}
+
+// setProgress 更新某个 bvid 的下载进度
+func (d *Downloader) setProgress(bvid string, info *ProgressInfo) {
+	d.progressMu.Lock()
+	defer d.progressMu.Unlock()
+	d.progress[bvid] = info
+}
+
+// removeProgress 移除已完成的进度记录
+func (d *Downloader) removeProgress(bvid string) {
+	d.progressMu.Lock()
+	defer d.progressMu.Unlock()
+	delete(d.progress, bvid)
+}
+
+// isRetryableError checks if the error is retryable (network errors yes, 403/404 no)
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// 风控错误不重试，由 scheduler 层面统一处理冷却
+	if errors.Is(err, bilibili.ErrRateLimited) {
+		return false
+	}
+	errStr := err.Error()
+	// Non-retryable: resource not found or permission denied
+	if strings.Contains(errStr, "HTTP 403") || strings.Contains(errStr, "HTTP 404") ||
+		strings.Contains(errStr, "HTTP 410") || strings.Contains(errStr, "HTTP 451") {
+		return false
+	}
+	// Non-retryable: no streams available (content issue, not network)
+	if strings.Contains(errStr, "no video streams") || strings.Contains(errStr, "no audio streams") ||
+		strings.Contains(errStr, "no suitable video stream") {
+		return false
+	}
+	// Everything else is retryable (network errors, timeouts, 5xx, etc.)
+	return true
+}
+
+// retryDelay returns the delay for a given retry attempt (1-indexed)
+func retryDelay(attempt int) time.Duration {
+	switch attempt {
+	case 1:
+		return RetryDelay1
+	case 2:
+		return RetryDelay2
+	case 3:
+		return RetryDelay3
+	default:
+		return RetryDelay3
+	}
+}
+
+// downloadWithRetry wraps download with automatic retry logic
+func (d *Downloader) downloadWithRetry(job *Job) *Result {
+	result := d.download(job)
+	if result.Success || result.Error == nil {
+		return result
+	}
+
+	// 风控错误：暂停下载队列，不重试
+	if errors.Is(result.Error, bilibili.ErrRateLimited) {
+		log.Printf("[downloader] 风控错误，暂停下载队列: %s", job.BvID)
+		d.Pause()
+		return result
+	}
+
+	// Check if error is retryable
+	if !isRetryableError(result.Error) {
+		log.Printf("[retry] Non-retryable error for %s: %v", job.BvID, result.Error)
+		return result
+	}
+
+	// Retry with exponential backoff
+	for attempt := 1; attempt <= MaxRetries; attempt++ {
+		delay := retryDelay(attempt)
+		log.Printf("[retry] Attempt %d/%d for %s (waiting %v): %v", attempt, MaxRetries, job.BvID, delay, result.Error)
+		time.Sleep(delay)
+
+		result = d.download(job)
+		if result.Success || result.Error == nil {
+			log.Printf("[retry] Success on attempt %d for %s", attempt, job.BvID)
+			return result
+		}
+
+		if !isRetryableError(result.Error) {
+			log.Printf("[retry] Non-retryable error on attempt %d for %s: %v", attempt, job.BvID, result.Error)
+			return result
+		}
+	}
+
+	log.Printf("[retry] All %d retries exhausted for %s: %v", MaxRetries, job.BvID, result.Error)
+	return result
+}
+
+func (d *Downloader) download(job *Job) *Result {
+	d.mu.Lock()
+	client := d.bili
+	d.mu.Unlock()
+
+	// 初始化进度
+	prog := &ProgressInfo{
+		BvID:   job.BvID,
+		Title:  job.Title,
+		Status: "downloading_video",
+		Phase:  "video",
+	}
+	d.setProgress(job.BvID, prog)
+	defer d.removeProgress(job.BvID)
+
+	// 如果 job 有独立 cookie，用独立的 client
+	if job.CookiesFile != "" {
+		cookie := bilibili.ReadCookieFile(job.CookiesFile)
+		if cookie != "" {
+			client = bilibili.NewClient(cookie)
+		}
+	}
+
+	// 1. 获取 DASH 流
+	dash, err := client.GetDashStreams(job.BvID, job.CID)
+	if err != nil {
+		prog.Status = "error"
+		d.setProgress(job.BvID, prog)
+		return &Result{Error: fmt.Errorf("get dash streams: %w", err)}
+	}
+
+	if len(dash.Video) == 0 {
+		prog.Status = "error"
+		d.setProgress(job.BvID, prog)
+		return &Result{Error: fmt.Errorf("no video streams available")}
+	}
+
+	// 2. 选择最优视频流
+	maxHeight := 0
+	switch job.Quality {
+	case "1080p":
+		maxHeight = 1080
+	case "720p":
+		maxHeight = 720
+	case "480p":
+		maxHeight = 480
+	}
+	bestVideo := bilibili.SelectBestVideo(dash.Video, job.Codec, maxHeight)
+	if bestVideo == nil {
+		prog.Status = "error"
+		d.setProgress(job.BvID, prog)
+		return &Result{Error: fmt.Errorf("no suitable video stream")}
+	}
+	log.Printf("  Video: %s", bilibili.FormatVideoInfo(bestVideo))
+
+	// 3. 选择最优音频流
+	if len(dash.Audio) > 0 {
+		log.Printf("  Available audio streams (%d):", len(dash.Audio))
+		for i := range dash.Audio {
+			log.Printf("    - %s", bilibili.FormatAudioInfo(&dash.Audio[i]))
+		}
+	}
+	bestAudio := bilibili.SelectBestAudio(dash.Audio)
+	if bestAudio == nil {
+		prog.Status = "error"
+		d.setProgress(job.BvID, prog)
+		return &Result{Error: fmt.Errorf("no audio streams available")}
+	}
+	if bestAudio.ID == bilibili.Audio64K || bestAudio.Bandwidth < 100000 {
+		log.Printf("  ⚠️  Low audio quality (%s) — consider configuring a valid cookie for better quality", bilibili.FormatAudioInfo(bestAudio))
+	}
+	log.Printf("  Selected audio: %s", bilibili.FormatAudioInfo(bestAudio))
+
+	// 4. 构建输出路径
+	safeName := bilibili.SanitizeFilename(job.Title) + " [" + job.BvID + "]"
+	videoDir := filepath.Join(job.OutputDir, safeName)
+	os.MkdirAll(videoDir, 0755)
+
+	// 5. 构造进度回调
+	progressCb := func(phase string, downloaded, total int64, speed float64) {
+		prog.Phase = phase
+		prog.Downloaded = downloaded
+		prog.Total = total
+		prog.Speed = int64(speed)
+		if phase == "video" {
+			prog.Status = "downloading_video"
+		} else if phase == "audio" {
+			prog.Status = "downloading_audio"
+		}
+		if total > 0 {
+			prog.Percent = float64(downloaded) / float64(total) * 100
+		}
+		d.setProgress(job.BvID, prog)
+	}
+
+	d.mu.Lock()
+	currentRateLimit := d.rateLimitBps
+	d.mu.Unlock()
+	// 6. 下载并合并（带进度回调 + 限速 + 分块并行）
+	chunks := d.GetDownloadChunks()
+	downloadCtx, downloadCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer downloadCancel()
+	outputPath, err := bilibili.DownloadDashWithProgressChunked(downloadCtx, bestVideo, bestAudio, videoDir, safeName, progressCb, currentRateLimit, chunks)
+	if err != nil {
+		prog.Status = "error"
+		d.setProgress(job.BvID, prog)
+		return &Result{Error: fmt.Errorf("download dash: %w", err)}
+	}
+
+	// 获取文件大小
+	var fileSize int64
+	if fi, err := os.Stat(outputPath); err == nil {
+		fileSize = fi.Size()
+	}
+
+	// 7. 弹幕下载（如果启用）
+	if job.Danmaku && job.CID > 0 {
+		log.Printf("  Downloading danmaku for cid=%d...", job.CID)
+		ext := filepath.Ext(outputPath)
+		baseName := strings.TrimSuffix(filepath.Base(outputPath), ext)
+		xmlPath := filepath.Join(videoDir, baseName+".danmaku.xml")
+		assPath := filepath.Join(videoDir, baseName+".danmaku.ass")
+
+		if err := danmaku.DownloadDanmakuXML(job.CID, xmlPath); err != nil {
+			log.Printf("  Danmaku download failed: %v", err)
+		} else {
+			log.Printf("  Danmaku XML saved: %s", xmlPath)
+			if err := danmaku.XMLToASS(xmlPath, assPath, 1920, 1080); err != nil {
+				log.Printf("  Danmaku XML->ASS failed: %v", err)
+			} else {
+				log.Printf("  Danmaku ASS saved: %s", assPath)
+				// 删除中间 XML 文件，只保留 ASS
+				os.Remove(xmlPath)
+			}
+		}
+	}
+
+	prog.Status = "done"
+	prog.Percent = 100
+	d.setProgress(job.BvID, prog)
+
+	// 验证文件确实存在且非空
+	if fi, statErr := os.Stat(outputPath); statErr != nil || fi.Size() == 0 {
+		log.Printf("  Output file missing or empty after download: %s", outputPath)
+		return &Result{Error: fmt.Errorf("output file missing or empty: %s", outputPath)}
+	}
+
+	log.Printf("  Done: %s (%.1f MB)", outputPath, float64(fileSize)/1024/1024)
+	return &Result{
+		Success:  true,
+		FilePath: outputPath,
+		FileSize: fileSize,
+	}
+}
