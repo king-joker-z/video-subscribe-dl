@@ -71,6 +71,7 @@ type Server struct {
 	onProcessPending    func()
 	onRedownload        func(int64)
 	getBiliClient      func() *bilibili.Client
+	onConfigReload      func()
 
 	version        string
 	buildTime      string
@@ -126,6 +127,7 @@ func (s *Server) setupRoutes() {
 		s.apiRouter.SetBuildTime(s.buildTime)
 		s.apiRouter.SetStartTime(s.startTime)
 		s.apiRouter.SetBiliClientFunc(s.getBiliClient)
+		s.apiRouter.SetConfigReloadFunc(s.onConfigReload)
 	}
 }
 
@@ -159,6 +161,10 @@ func (s *Server) SetRedownloadFunc(fn func(int64)) {
 
 func (s *Server) SetBiliClientFunc(fn func() *bilibili.Client) {
 	s.getBiliClient = fn
+}
+
+func (s *Server) SetConfigReloadFunc(fn func()) {
+	s.onConfigReload = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

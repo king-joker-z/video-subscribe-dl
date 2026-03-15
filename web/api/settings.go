@@ -10,10 +10,15 @@ import (
 type SettingsHandler struct {
 	db              *db.DB
 	onRefreshRate   func()
+	onConfigReload  func()
 }
 
 func NewSettingsHandler(database *db.DB) *SettingsHandler {
 	return &SettingsHandler{db: database}
+}
+
+func (h *SettingsHandler) SetConfigReloadFunc(fn func()) {
+	h.onConfigReload = fn
 }
 
 func (h *SettingsHandler) SetRefreshRateFunc(fn func()) {
@@ -30,6 +35,7 @@ var settingsKeys = []string{
 	"download_chunks", "max_download_speed_mb", "min_disk_free_gb",
 	"rate_limit_per_minute", "retention_days", "auto_cleanup_on_low_disk",
 	"auth_token",
+	"filename_template", "cooldown_minutes", "download_codec",
 }
 
 // 敏感字段，不返回明文
@@ -82,6 +88,10 @@ func (h *SettingsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 		h.onRefreshRate()
 	}
 
+	// 触发配置热更新
+	if h.onConfigReload != nil {
+		h.onConfigReload()
+	}
 	apiOK(w, map[string]interface{}{"message": "设置已更新"})
 }
 

@@ -44,6 +44,10 @@ type Scheduler struct {
 	// 并发控制信号量（参考 bili-sync workflow.rs）
 	videoSema *bilibili.Semaphore // video 级别并发限制
 	pageSema  *bilibili.Semaphore // page 级别并发限制
+
+	// 热配置
+	hotConfig     *config.HotConfig
+	configWatcher *config.ConfigWatcher
 }
 
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
@@ -56,6 +60,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		cookiePath:  cookiePath,
 		notifier:    notify.New(database),
 		stopCh:      make(chan struct{}),
+		hotConfig:   config.NewHotConfig(),
 		videoSema:   bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:    bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}
@@ -106,6 +111,10 @@ func (s *Scheduler) Start() {
 		if cp, err := s.db.GetSetting("cookie_path"); err == nil && cp != "" {
 			s.cookiePath = cp
 		}
+
+	// 启动配置热更新监视器
+	s.configWatcher = config.NewConfigWatcher(s.hotConfig, s.db, 30*time.Second)
+	s.configWatcher.Start()
 	}
 
 	s.wg.Add(1)
@@ -172,6 +181,9 @@ func (s *Scheduler) triggerCooldown() {
 }
 
 func (s *Scheduler) Stop() {
+	if s.configWatcher != nil {
+		s.configWatcher.Stop()
+	}
 	close(s.stopCh)
 	s.wg.Wait()
 }
@@ -485,4 +497,16 @@ func (s *Scheduler) checkAndRefreshCredential() {
 	// 更新 scheduler 的 client
 	s.UpdateCredential(newCred)
 	log.Printf("[credential] Auto-refresh successful")
+}
+
+// ReloadConfig 手动触发配置重载（API 调用后立即生效）
+func (s *Scheduler) ReloadConfig() {
+	if s.configWatcher != nil {
+		s.configWatcher.Reload()
+	}
+}
+
+// GetHotConfig 获取当前热配置快照
+func (s *Scheduler) GetHotConfig() config.HotConfigSnapshot {
+	return s.hotConfig.Get()
 }

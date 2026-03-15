@@ -156,9 +156,12 @@ export function SettingsPage() {
         h(Icon, { name: 'download', size: 18, className: 'text-blue-400' }), '下载设置'
       ),
       h(SettingRow, { label: '下载画质', keyName: 'download_quality', placeholder: '留空使用最高画质' }),
-      h(SettingRow, { label: '下载并发数', keyName: 'download_chunks', placeholder: '默认 3', help: '同时下载的分片数' }),
+      h(SettingRow, { label: '视频编码', keyName: 'download_codec', placeholder: 'all / avc / hevc / av1', help: '全局默认视频编码偏好' }),
+      h(SettingRow, { label: '下载并发数', keyName: 'max_concurrent', placeholder: '默认 3', help: '同时下载的视频数（热更新生效）' }),
+      h(SettingRow, { label: '下载分片数', keyName: 'download_chunks', placeholder: '默认 3', help: '每个视频并行分片数' }),
       h(SettingRow, { label: '速度限制 (MB/s)', keyName: 'max_download_speed_mb', placeholder: '0 = 无限制' }),
       h(SettingRow, { label: '最小磁盘空间 (GB)', keyName: 'min_disk_free_gb', placeholder: '默认 5', help: '低于此值停止下载' }),
+      h(SettingRow, { label: '文件名模板', keyName: 'filename_template', placeholder: '{{.Title}} [{{.BvID}}]', help: '可用变量: Title, BvID, UploaderName, Quality, Codec, PubDate, PartIndex, PartTitle' }),
     ),
 
     // 检查间隔
@@ -169,7 +172,9 @@ export function SettingsPage() {
       h(SettingRow, { label: '检查间隔 (分钟)', keyName: 'check_interval_minutes', placeholder: '默认 30' }),
       h(SettingRow, { label: 'NFO 格式', keyName: 'nfo_type', placeholder: 'kodi 或 emby' }),
       h(SettingRow, { label: '下载弹幕', keyName: 'download_danmaku', placeholder: 'true/false' }),
-      h(SettingRow, { label: '请求限速 (次/分钟)', keyName: 'rate_limit_per_minute', placeholder: '200', help: 'API 速率限制' }),
+      h(SettingRow, { label: '请求限速 (次/分钟)', keyName: 'rate_limit_per_minute', placeholder: '200', help: 'API 速率限制（热更新生效）' }),
+      h(SettingRow, { label: '请求间隔 (秒)', keyName: 'request_interval', placeholder: '30', help: '两次请求之间的最小间隔' }),
+      h(SettingRow, { label: '风控冷却 (分钟)', keyName: 'cooldown_minutes', placeholder: '30', help: '触发风控后冷却时间（热更新生效）' }),
     ),
 
     // 通知设置

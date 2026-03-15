@@ -141,6 +141,7 @@ func main() {
 	server.SetRedownloadFunc(sched.RedownloadByID)
 	server.SetNotifier(sched.GetNotifier())
 	server.SetBiliClientFunc(sched.GetBiliClient)
+	server.SetConfigReloadFunc(sched.ReloadConfig)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {
