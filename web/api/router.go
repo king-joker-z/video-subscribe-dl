@@ -112,6 +112,10 @@ func (rt *Router) Register(mux *http.ServeMux) {
 			apiError(w, CodeMethodNotAllow, "method not allowed")
 		}
 	})
+	// Sources Export/Import
+	mux.HandleFunc("/api/sources/export", rt.sources.HandleExport)
+	mux.HandleFunc("/api/sources/import", rt.sources.HandleImport)
+
 	mux.HandleFunc("/api/sources/", rt.sources.HandleByID)
 
 	// Videos

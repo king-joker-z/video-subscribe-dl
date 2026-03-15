@@ -28,6 +28,17 @@ export const api = {
   deleteSource: (id) => request(`/api/sources/${id}`, { method: 'DELETE' }),
   syncSource: (id) => request(`/api/sources/${id}/sync`, { method: 'POST' }),
   fullScanSource: (id) => request(`/api/sources/${id}/fullscan`, { method: 'POST' }),
+  exportSources: () => {
+    // Direct download - returns file blob
+    return fetch("/api/sources/export").then(res => {
+      if (!res.ok) throw new Error("导出失败");
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="(.+)"/);
+      const filename = match ? match[1] : "vsd-sources.json";
+      return res.blob().then(blob => ({ blob, filename }));
+    });
+  },
+  importSources: (jsonData) => request("/api/sources/import", { method: "POST", body: JSON.stringify(jsonData) }),
 
   // Videos
   getVideos: (params = {}) => {

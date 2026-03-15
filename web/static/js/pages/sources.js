@@ -380,6 +380,47 @@ export function SourcesPage({ onNavigate }) {
     catch (e) { toast.error(e.message); }
   };
 
+  // === Export / Import ===
+  const [showImportResult, setShowImportResult] = useState(null);
+
+  const handleExport = async () => {
+    try {
+      const { blob, filename } = await api.exportSources();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('已导出 ' + sources.length + ' 个订阅源');
+    } catch (e) { toast.error('导出失败: ' + e.message); }
+  };
+
+  const handleImportFile = () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!data.sources || !Array.isArray(data.sources)) {
+          toast.error('无效的导入文件：缺少 sources 数组');
+          return;
+        }
+        const res = await api.importSources(data);
+        const r = res.data;
+        setShowImportResult(r);
+        if (r.created > 0) {
+          toast.success('导入完成: 新增 ' + r.created + ' 个，跳过 ' + r.skipped + ' 个');
+          load();
+        } else {
+          toast.info('导入完成: 全部已存在，跳过 ' + r.skipped + ' 个');
+        }
+      } catch (err) { toast.error('导入失败: ' + err.message); }
+    };
+    input.click();
+  };
+
   return h('div', { className: 'page-enter space-y-4' },
     // 编辑弹窗
     editSource && h(EditModal, {
@@ -387,11 +428,48 @@ export function SourcesPage({ onNavigate }) {
       onSave: () => { setEditSource(null); load(); },
       onClose: () => setEditSource(null)
     }),
+    // 导入结果弹窗
+    showImportResult && h('div', { className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50', onClick: (e) => { if (e.target === e.currentTarget) setShowImportResult(null); } },
+      h('div', { className: 'bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4' },
+        h('div', { className: 'flex items-center justify-between' },
+          h('h3', { className: 'text-lg font-semibold text-slate-200' }, '导入结果'),
+          h('button', { onClick: () => setShowImportResult(null), className: 'p-1 rounded hover:bg-slate-700 text-slate-400' }, h(Icon, { name: 'x', size: 18 }))
+        ),
+        h('div', { className: 'grid grid-cols-3 gap-4 text-center' },
+          h('div', null,
+            h('div', { className: 'text-2xl font-bold text-emerald-400' }, showImportResult.created),
+            h('div', { className: 'text-xs text-slate-500' }, '新增')
+          ),
+          h('div', null,
+            h('div', { className: 'text-2xl font-bold text-amber-400' }, showImportResult.skipped),
+            h('div', { className: 'text-xs text-slate-500' }, '跳过')
+          ),
+          h('div', null,
+            h('div', { className: 'text-2xl font-bold text-red-400' }, showImportResult.errors),
+            h('div', { className: 'text-xs text-slate-500' }, '失败')
+          )
+        ),
+        showImportResult.details && showImportResult.details.length > 0 && h('div', { className: 'max-h-48 overflow-y-auto space-y-1' },
+          showImportResult.details.map((d, i) =>
+            h('div', { key: i, className: 'text-xs px-2 py-1 rounded ' + (d.startsWith('创建') ? 'text-emerald-400 bg-emerald-900/20' : d.startsWith('跳过') ? 'text-amber-400 bg-amber-900/20' : 'text-red-400 bg-red-900/20') }, d)
+          )
+        ),
+        h('div', { className: 'flex justify-end pt-2' },
+          h(Button, { onClick: () => setShowImportResult(null), size: 'md' }, '确定')
+        )
+      )
+    ),
     // 顶栏
     h('div', { className: 'flex items-center justify-between' },
       h('h2', { className: 'text-lg font-semibold' }, '订阅源'),
-      h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm' },
-        h(Icon, { name: 'plus', size: 14 }), '新增')
+      h('div', { className: 'flex items-center gap-2' },
+        h(Button, { onClick: handleExport, size: 'sm', variant: 'ghost', title: '导出订阅源' },
+          h(Icon, { name: 'download', size: 14 }), '导出'),
+        h(Button, { onClick: handleImportFile, size: 'sm', variant: 'ghost', title: '导入订阅源' },
+          h(Icon, { name: 'upload', size: 14 }), '导入'),
+        h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm' },
+          h(Icon, { name: 'plus', size: 14 }), '新增')
+      )
     ),
     // 新增订阅弹窗
     showAdd && h('div', { className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50', onClick: (e) => { if (e.target === e.currentTarget) resetAddModal(); } },
