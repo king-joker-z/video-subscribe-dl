@@ -7,31 +7,104 @@ export function LogsPage() {
   const [logs, setLogs] = useState([]);
   const [filter, setFilter] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [connType, setConnType] = useState(''); // 'ws' | 'sse'
   const containerRef = useRef(null);
-  const esRef = useRef(null);
+  const connectionRef = useRef(null);
+  const reconnectKey = useRef(0); // 用于强制重连
 
-  // 加载历史日志
-  useEffect(() => {
-    api.getLogs(200).then(res => {
-      setLogs(res.data || []);
-    }).catch(e => toast.error(e.message));
+  // 连接管理：WebSocket 优先，SSE 降级
+  const connect = useCallback(() => {
+    // 关闭旧连接
+    if (connectionRef.current) {
+      connectionRef.current.close();
+      connectionRef.current = null;
+    }
+
+    // 尝试 WebSocket
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${location.host}/api/ws/logs`;
+    
+    try {
+      const ws = new WebSocket(wsUrl);
+      let wsConnected = false;
+      
+      ws.onopen = () => {
+        wsConnected = true;
+        setConnType('ws');
+        console.log('[logs] WebSocket 已连接');
+      };
+      
+      ws.onmessage = (e) => {
+        try {
+          const entry = JSON.parse(e.data);
+          setLogs(prev => [...prev.slice(-999), entry]);
+        } catch {}
+      };
+      
+      ws.onerror = () => {
+        if (!wsConnected) {
+          // WebSocket 连接失败，降级到 SSE
+          ws.close();
+          fallbackToSSE();
+        }
+      };
+      
+      ws.onclose = () => {
+        if (wsConnected) {
+          setConnType('');
+          // 5 秒后自动重连
+          setTimeout(() => connect(), 5000);
+        }
+      };
+      
+      connectionRef.current = {
+        close: () => ws.close(),
+        type: 'ws',
+      };
+    } catch {
+      fallbackToSSE();
+    }
   }, []);
 
-  // SSE 实时日志
-  useEffect(() => {
-    let es;
+  const fallbackToSSE = useCallback(() => {
     try {
-      es = new EventSource('/api/events');
+      const es = new EventSource('/api/events');
       es.addEventListener('log', (e) => {
         try {
           const entry = JSON.parse(e.data);
           setLogs(prev => [...prev.slice(-999), entry]);
         } catch {}
       });
-      esRef.current = es;
+      es.addEventListener('connected', () => {
+        setConnType('sse');
+        console.log('[logs] SSE 已连接');
+      });
+      es.onerror = () => {
+        setConnType('');
+        es.close();
+        setTimeout(() => connect(), 5000);
+      };
+      connectionRef.current = {
+        close: () => es.close(),
+        type: 'sse',
+      };
     } catch {}
-    return () => { if (es) es.close(); };
   }, []);
+
+  // 加载历史日志 + 建立连接
+  useEffect(() => {
+    api.getLogs(200).then(res => {
+      setLogs(res.data || []);
+    }).catch(e => toast.error(e.message));
+    
+    connect();
+    
+    return () => {
+      if (connectionRef.current) {
+        connectionRef.current.close();
+      }
+    };
+  }, [reconnectKey.current]);
 
   // 自动滚动
   useEffect(() => {
@@ -44,6 +117,23 @@ export function LogsPage() {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     setAutoScroll(scrollHeight - scrollTop - clientHeight < 50);
+  };
+
+  // 清空日志：调 API 清后端 buffer → 清前端数组 → 断开重连
+  const handleClear = async () => {
+    try {
+      await api.clearLogs();
+    } catch (e) {
+      // 即使后端 API 失败也清前端
+      console.warn('清空后端日志失败:', e);
+    }
+    setLogs([]);
+    // 断开当前连接并重新建立（重连时后端 buffer 已空，只推新日志）
+    if (connectionRef.current) {
+      connectionRef.current.close();
+      connectionRef.current = null;
+    }
+    setTimeout(() => connect(), 300);
   };
 
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => {
@@ -75,6 +165,10 @@ export function LogsPage() {
     h('div', { className: 'flex items-center justify-between mb-3' },
       h('h2', { className: 'text-lg font-semibold' }, '实时日志'),
       h('div', { className: 'flex items-center gap-3' },
+        // 连接状态指示
+        connType && h('span', { className: cn('px-2 py-0.5 rounded text-[10px] font-medium',
+          connType === 'ws' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400')
+        }, connType === 'ws' ? 'WS' : 'SSE'),
         h('div', { className: 'flex gap-1' },
           filters.map(f => h('button', {
             key: f.value,
@@ -87,9 +181,9 @@ export function LogsPage() {
           className: cn('px-3 py-1 rounded text-xs font-medium', autoScroll ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500')
         }, autoScroll ? '⏬ 自动滚动' : '⏸ 已暂停'),
         h('button', {
-          onClick: () => setLogs([]),
-          className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-slate-300'
-        }, '清空')
+          onClick: handleClear,
+          className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-red-400 transition-colors'
+        }, '🗑 清空')
       )
     ),
     // 日志容器
