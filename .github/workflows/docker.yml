@@ -12,6 +12,13 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Run tests with coverage
+        env:
+          GOPROXY: https://proxy.golang.org,direct
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -1
+
       - name: Go build test
         env:
           GOPROXY: https://proxy.golang.org,direct
