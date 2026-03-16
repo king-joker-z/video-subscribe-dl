@@ -1,6 +1,7 @@
 package douyin
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -198,14 +199,56 @@ func TestSanitizePath(t *testing.T) {
 		input string
 		want  string
 	}{
+		// 基础非法字符
 		{"normal name", "normal name"},
 		{"with/slash", "with_slash"},
 		{"with:colon", "with_colon"},
 		{"with*star", "with_star"},
 		{"with?question", "with_question"},
-		{"with\nnewline", "with newline"},
+		{"with<angle>brackets", "with_angle_brackets"},
+		{`with"quotes`, "with_quotes"},
+		{"with|pipe", "with_pipe"},
+		{"with\\backslash", "with_backslash"},
+		// 控制字符（C0: 0x00-0x1F, 包括 \n \r \t）
+		{"with\nnewline", "withnewline"},
+		{"with\rcarriage", "withcarriage"},
+		{"with\ttab", "withtab"},
+		{"hello\x00world", "helloworld"},
+		// DEL (0x7F)
+		{"hello\x7fworld", "helloworld"},
+		// C1 控制字符 (0x80-0x9F)
+		{"hello\u0085world", "helloworld"},
+		{"hello\u008Aworld", "helloworld"},
+		// 零宽字符 (0x200B-0x200F)
+		{"hello\u200Bworld", "helloworld"},       // zero-width space
+		{"hello\u200Dworld", "helloworld"},       // zero-width joiner
+		{"hello\u200Fworld", "helloworld"},       // right-to-left mark
+		// BOM (0xFEFF)
+		{"\uFEFFhello world", "hello world"},
+		// 变体选择器 (0xFE00-0xFE0F)
+		{"hello\uFE0Fworld", "helloworld"},
+		// 替换字符 (0xFFFD)
+		{"hello\uFFFDworld", "helloworld"},
+		// 行/段分隔符 (0x2028-0x202F)
+		{"hello\u2028world", "helloworld"},
+		// 不可见格式字符 (0x2060-0x206F)
+		{"hello\u2060world", "helloworld"},       // word joiner
+		// 连续空格压缩
+		{"hello   world", "hello world"},
+		{"a  b   c    d", "a b c d"},
+		// 特殊值
 		{"", "unknown"},
 		{"   ", "unknown"},
+		{".", "unknown"},
+		{"..", "unknown"},
+		// 80字符截断
+		{strings.Repeat("あ", 100), strings.Repeat("あ", 80)},
+		{strings.Repeat("a", 81), strings.Repeat("a", 80)},
+		{strings.Repeat("a", 80), strings.Repeat("a", 80)},   // exactly 80: no truncation
+		{strings.Repeat("a", 79), strings.Repeat("a", 79)},   // under 80: no truncation
+		// 混合场景
+		{"hello/world\u200B test\n", "hello_world test"},
+		{"\uFEFF  多余空格  \u200B", "多余空格"},
 	}
 
 	for _, tt := range tests {
