@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"fmt"
+	"math/rand"
+	"strings"
 	"io"
 	"log"
 	"net/http"
@@ -48,10 +50,16 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		return
 	}
 
-	// 图集暂时跳过（Phase 1 只处理视频）
-	if detail.IsNote || detail.VideoURL == "" {
-		log.Printf("[douyin-dl] Skipping note/image post %s (no video)", dl.VideoID)
-		s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: image/note post")
+	// 图集下载（Phase 2）
+	if detail.IsNote && len(detail.Images) > 0 {
+		s.downloadDouyinNote(dl, *src, detail)
+		return
+	}
+
+	// 既不是图集也没有视频 URL，跳过
+	if detail.VideoURL == "" {
+		log.Printf("[douyin-dl] Skipping post %s: no video URL and no images", dl.VideoID)
+		s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: no downloadable content")
 		return
 	}
 
@@ -231,4 +239,124 @@ func downloadDouyinThumb(thumbURL, destPath string) error {
 
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+// downloadDouyinNote 下载抖音图集（笔记）
+// 将所有图片下载到 {uploader}/{title} [aweme_id]/ 目录中
+func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *douyin.DouyinVideo) {
+	uploaderName := detail.Author.Nickname
+	if uploaderName == "" {
+		uploaderName = dl.Uploader
+	}
+	if uploaderName == "" {
+		uploaderName = src.Name
+	}
+
+	title := detail.Desc
+	if title == "" {
+		title = dl.Title
+	}
+	if title == "" {
+		title = fmt.Sprintf("douyin_%s", dl.VideoID)
+	}
+	safeTitle := douyin.SanitizePath(title)
+	if len(safeTitle) > 100 {
+		safeTitle = safeTitle[:100]
+	}
+
+	uploaderDir := douyin.SanitizePath(uploaderName)
+	noteDir := filepath.Join(s.downloadDir, uploaderDir, safeTitle+" ["+dl.VideoID+"]")
+	os.MkdirAll(noteDir, 0755)
+
+	log.Printf("[douyin-note] Downloading %d images for note %s → %s", len(detail.Images), dl.VideoID, noteDir)
+
+	var totalSize int64
+	successCount := 0
+
+	for i, imgURL := range detail.Images {
+		if imgURL == "" {
+			continue
+		}
+
+		ext := ".jpg"
+		if strings.Contains(imgURL, ".png") {
+			ext = ".png"
+		} else if strings.Contains(imgURL, ".webp") {
+			ext = ".webp"
+		}
+
+		imgPath := filepath.Join(noteDir, fmt.Sprintf("%02d%s", i+1, ext))
+
+		var fileSize int64
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			fileSize, err = downloadDouyinFile(imgURL, imgPath)
+			if err == nil {
+				break
+			}
+			log.Printf("[douyin-note] Download image %d attempt %d failed: %v", i+1, attempt, err)
+			if attempt < 3 {
+				backoff := time.Duration(3*(1<<(attempt-1))) * time.Second
+				time.Sleep(backoff)
+			}
+		}
+		if err != nil {
+			log.Printf("[douyin-note] Failed to download image %d for %s: %v", i+1, dl.VideoID, err)
+			continue
+		}
+
+		totalSize += fileSize
+		successCount++
+
+		// 图片间短暂间隔，避免风控
+		if i < len(detail.Images)-1 {
+			time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
+		}
+	}
+
+	if successCount == 0 {
+		log.Printf("[douyin-note] All images failed for %s", dl.VideoID)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "all images download failed")
+		s.db.IncrementRetryCount(dl.ID, "all images download failed")
+		return
+	}
+
+	log.Printf("[douyin-note] Downloaded %d/%d images for %s (%.1f MB total)",
+		successCount, len(detail.Images), dl.VideoID, float64(totalSize)/(1024*1024))
+
+	// 下载封面（使用第一张图作为封面）
+	if !src.SkipPoster && detail.Cover != "" {
+		coverPath := filepath.Join(noteDir, "cover.jpg")
+		if err := downloadDouyinThumb(detail.Cover, coverPath); err != nil {
+			log.Printf("[douyin-note] Download cover failed: %v", err)
+		}
+	}
+
+	// 生成 NFO
+	if !src.SkipNFO {
+		meta := &nfo.VideoMeta{
+			BvID:         dl.VideoID,
+			Title:        title,
+			Description:  detail.Desc,
+			UploaderName: uploaderName,
+			UploadDate:   detail.CreateTimeUnix(),
+			Thumbnail:    detail.Cover,
+			WebpageURL:   fmt.Sprintf("https://www.douyin.com/note/%s", dl.VideoID),
+			LikeCount:    detail.DiggCount,
+			ShareCount:   detail.ShareCount,
+			ReplyCount:   detail.CommentCount,
+		}
+		nfoPath := filepath.Join(noteDir, safeTitle+" ["+dl.VideoID+"].nfo")
+		if err := nfo.GenerateMovieNFO(meta, nfoPath); err != nil {
+			log.Printf("[douyin-note] Generate NFO failed: %v", err)
+		}
+	}
+
+	// 更新 DB —— 存目录路径
+	s.db.UpdateDownloadStatus(dl.ID, "completed", noteDir, totalSize, "")
+	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, 0)
+
+	s.notifier.Send(notify.EventDownloadComplete,
+		fmt.Sprintf("抖音图集下载完成: %s (%d张)", title, successCount),
+		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(totalSize)/(1024*1024)))
 }

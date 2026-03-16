@@ -36,9 +36,49 @@ export function extractBiliUrl(text) {
   const shortMatch = trimmed.match(/https?:\/\/b23\.tv\/[\w]+/i);
   if (shortMatch) return shortMatch[0];
   // 从混合文本中提取 BV 号
-  const bvMatch = trimmed.match(/(BV[\w]{10})/i);
+  const bvMatch = trimmed.match(/(BV[\w]{10})/i);
   if (bvMatch) return bvMatch[1];
   return '';
+}
+
+// 检测文本中是否包含抖音链接
+export function extractDouyinUrl(text) {
+  if (!text || typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  // v.douyin.com 短链接
+  if (/v\.douyin\.com\/[\w]+/i.test(trimmed)) {
+    const m = trimmed.match(/https?:\/\/v\.douyin\.com\/[\w]+\/?/i);
+    return m ? m[0] : trimmed;
+  }
+  // www.douyin.com/video/xxx
+  if (/douyin\.com\/video\/\d+/i.test(trimmed)) {
+    const m = trimmed.match(/https?:\/\/(?:www\.)?douyin\.com\/video\/\d+[^\s]*/i);
+    return m ? m[0] : trimmed;
+  }
+  // www.iesdouyin.com/share/video/xxx
+  if (/iesdouyin\.com\/share\/video\/\d+/i.test(trimmed)) {
+    const m = trimmed.match(/https?:\/\/(?:www\.)?iesdouyin\.com\/share\/video\/\d+[^\s]*/i);
+    return m ? m[0] : trimmed;
+  }
+  // 从混合文本中提取
+  const shortM = trimmed.match(/https?:\/\/v\.douyin\.com\/[\w]+\/?/i);
+  if (shortM) return shortM[0];
+  const fullM = trimmed.match(/https?:\/\/(?:www\.)?douyin\.com\/video\/\d+[^\s]*/i);
+  if (fullM) return fullM[0];
+  return '';
+}
+
+// 综合检测：B站 or 抖音
+export function extractVideoUrl(text) {
+  return extractBiliUrl(text) || extractDouyinUrl(text);
+}
+
+// 检测平台类型
+function detectPlatform(url) {
+  if (!url) return null;
+  if (/douyin\.com|iesdouyin\.com/i.test(url)) return 'douyin';
+  if (/bilibili\.com|b23\.tv|^BV|^av\d/i.test(url)) return 'bilibili';
+  return null;
 }
 
 export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
@@ -132,6 +172,9 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
 
   if (!open) return null;
 
+  const platform = preview?.platform || detectPlatform(url);
+  const isDouyin = platform === 'douyin';
+
   return h('div', {
     className: 'fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center pt-[15vh]',
     onClick: (e) => { if (e.target === e.currentTarget) onClose(); }
@@ -161,7 +204,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
             value: url,
             onChange: (e) => { setUrl(e.target.value); setPreview(null); },
             onKeyDown: handleKeyDown,
-            placeholder: '粘贴 B 站视频链接、BV 号或 AV 号...',
+            placeholder: '粘贴 B站/抖音 视频链接...',
             className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
           }),
           h(Button, {
@@ -171,7 +214,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
           },
             loading ? h(Fragment, null, h('span', { className: 'animate-spin inline-block' }, '⏳'), ' 解析中')
             : downloading ? h(Fragment, null, h('span', { className: 'animate-spin inline-block' }, '⏳'), ' 提交中')
-            : preview ? h(Fragment, null, h(Icon, { name: 'download', size: 16 }), ' 下载')
+            : preview ? h(Fragment, null, h(Icon, { name: 'download', size: 16 }), preview.is_note ? ' 下载图集' : ' 下载')
             : h(Fragment, null, h(Icon, { name: 'search', size: 16 }), ' 解析')
           )
         ),
@@ -181,8 +224,10 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
           h('div', null, '支持格式:'),
           h('div', { className: 'text-slate-600 space-y-0.5 ml-2' },
             h('div', null, '• bilibili.com/video/BVxxxxxx'),
-            h('div', null, '• b23.tv/xxxxxx（短链接）'),
-            h('div', null, '• BV 号或 AV 号（如 BV1xx411c7mD、av12345）')
+            h('div', null, '• b23.tv/xxxxxx（B站短链接）'),
+            h('div', null, '• BV 号或 AV 号（如 BV1xx411c7mD、av12345）'),
+            h('div', { className: 'mt-1 text-pink-600/80' }, '• v.douyin.com/xxxxxx（抖音分享链接）'),
+            h('div', { className: 'text-pink-600/80' }, '• douyin.com/video/xxxxxx（抖音视频链接）')
           )
         ),
 
@@ -203,27 +248,41 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
               h('div', { className: 'text-sm font-medium text-slate-200 line-clamp-2' }, preview.title),
               h('div', { className: 'text-xs text-slate-400 flex items-center gap-2 flex-wrap' },
                 h('span', null, preview.uploader),
-                preview.tname && h('span', { className: 'text-slate-600' }, '·'),
-                preview.tname && h('span', null, preview.tname),
+                // 平台标识
+                isDouyin && h('span', { className: 'text-xs px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400' }, '抖音'),
+                !isDouyin && preview.tname && h(Fragment, null,
+                  h('span', { className: 'text-slate-600' }, '·'),
+                  h('span', null, preview.tname)
+                ),
                 h('span', { className: 'text-slate-600' }, '·'),
                 h('span', null, formatDuration(preview.duration))
               ),
               h('div', { className: 'text-xs text-slate-500 flex items-center gap-3 flex-wrap' },
-                h('span', null, '▶ ' + formatCount(preview.stat?.view)),
-                h('span', null, '👍 ' + formatCount(preview.stat?.like)),
-                h('span', null, '💰 ' + formatCount(preview.stat?.coin)),
-                h('span', null, '⭐ ' + formatCount(preview.stat?.favorite)),
+                // B站统计
+                !isDouyin && h(Fragment, null,
+                  h('span', null, '▶ ' + formatCount(preview.stat?.view)),
+                  h('span', null, '👍 ' + formatCount(preview.stat?.like)),
+                  h('span', null, '💰 ' + formatCount(preview.stat?.coin)),
+                  h('span', null, '⭐ ' + formatCount(preview.stat?.favorite)),
+                ),
+                // 抖音统计
+                isDouyin && h(Fragment, null,
+                  h('span', null, '❤️ ' + formatCount(preview.stat?.like)),
+                  h('span', null, '💬 ' + formatCount(preview.stat?.comment)),
+                  h('span', null, '🔗 ' + formatCount(preview.stat?.share)),
+                ),
               ),
-              preview.pages > 1 && h('div', { className: 'text-xs text-blue-400' }, `${preview.pages} 个分P`)
+              !isDouyin && preview.pages > 1 && h('div', { className: 'text-xs text-blue-400' }, `${preview.pages} 个分P`)
             )
           ),
 
           // 状态标记
-          (preview.is_charge_plus || preview.is_bangumi || preview.is_unavailable || preview.existing_status) &&
+          (preview.is_charge_plus || preview.is_bangumi || preview.is_unavailable || preview.existing_status || preview.is_note) &&
             h('div', { className: 'flex gap-2 mt-3 flex-wrap' },
               preview.is_charge_plus && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400' }, '充电专属'),
               preview.is_bangumi && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400' }, '番剧'),
               preview.is_unavailable && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400' }, '不可用'),
+              preview.is_note && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-400' }, '图集' + (preview.image_count ? ' · ' + preview.image_count + '张' : '')),
               preview.existing_status && h('span', { className: 'text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400' }, '已' + preview.existing_status)
             )
         )
@@ -232,7 +291,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
       // Footer hint
       h('div', { className: 'px-5 py-3 border-t border-slate-700/30 text-xs text-slate-600 flex items-center justify-between' },
         h('span', null, 'Enter 快速操作 · Esc 关闭 · Ctrl+D 开关'),
-        preview && h('span', { className: 'text-slate-500' }, preview.bvid)
+        preview && h('span', { className: 'text-slate-500' }, preview.bvid || preview.aweme_id || '')
       )
     )
   );
@@ -250,7 +309,7 @@ export function DropZoneOverlay({ active }) {
     },
       h(Icon, { name: 'download', size: 48, className: 'text-blue-400 mx-auto mb-4' }),
       h('div', { className: 'text-lg font-medium text-slate-200 mb-1' }, '松开以下载视频'),
-      h('div', { className: 'text-sm text-slate-400' }, '支持 B 站视频链接、BV 号或 AV 号')
+      h('div', { className: 'text-sm text-slate-400' }, '支持 B站/抖音 视频链接')
     )
   );
 }

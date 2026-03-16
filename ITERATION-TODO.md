@@ -342,3 +342,16 @@
 - [x] 布局优化：搜索框和排序下拉横向排列，支持 flex-wrap 响应式
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.20.0
+
+## 迭代 #33 (v2.21.0) — 抖音图集下载支持
+- [x] process_douyin.go: 图集（IsNote）不再跳过，改为下载全部图片到 {author}/{title} [aweme_id]/ 目录
+- [x] 新增 downloadDouyinNote 方法：逐张下载图片、带重试（3次指数退避）、图片间 500-1000ms 间隔防风控
+- [x] 自动检测图片格式（jpg/png/webp），按 01.jpg、02.jpg... 编号
+- [x] 图集下载封面图（cover.jpg）和 NFO 元数据
+- [x] quickdl.go: 快速下载也支持抖音图集（不再返回"暂不支持"错误）
+- [x] 新增 executeDouyinNoteDownload 方法：快速下载场景的图集异步下载
+- [x] 预览 API 返回 image_count 字段，前端展示"图集 · N张"标签
+- [x] 快速下载按钮文案：图集时显示"下载图集"，视频时显示"下载"
+- [x] 通知集成：图集下载完成发送通知（含图片数量和总大小）
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.21.0

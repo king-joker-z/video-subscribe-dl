@@ -8,7 +8,7 @@ import { VideosPage } from './pages/videos.js';
 import { UploadersPage } from './pages/uploaders.js';
 import { SettingsPage } from './pages/settings.js';
 import { LogsPage } from './pages/logs.js';
-import { QuickDownloadDialog, QuickDownloadFAB, DropZoneOverlay, extractBiliUrl } from './components/quick-download.js';
+import { QuickDownloadDialog, QuickDownloadFAB, DropZoneOverlay, extractBiliUrl, extractVideoUrl } from './components/quick-download.js';
 import { CommandPalette } from './components/command-palette.js';
 
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
@@ -190,7 +190,7 @@ function App() {
       const tag = e.target.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
       const text = e.clipboardData?.getData('text/plain') || '';
-      const biliUrl = extractBiliUrl(text);
+      const biliUrl = extractVideoUrl(text);
       if (biliUrl) {
         e.preventDefault();
         setQuickDlUrl(biliUrl);
@@ -222,7 +222,7 @@ function App() {
       dragCounter.current = 0;
       setDropZoneActive(false);
       const text = e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('text/uri-list') || '';
-      const biliUrl = extractBiliUrl(text);
+      const biliUrl = extractVideoUrl(text);
       if (biliUrl) {
         setQuickDlUrl(biliUrl);
         setQuickDlOpen(true);
