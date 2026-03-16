@@ -37,7 +37,16 @@ func (h *DouyinCookieHandler) HandleValidate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	cookie := strings.TrimSpace(req.Cookie)
+	// 清洗 Cookie：移除换行符和多余空白（用户从浏览器复制常带这些）
+	cookie := req.Cookie
+	cookie = strings.ReplaceAll(cookie, "\r\n", "")
+	cookie = strings.ReplaceAll(cookie, "\r", "")
+	cookie = strings.ReplaceAll(cookie, "\n", "")
+	cookie = strings.ReplaceAll(cookie, "\t", " ")
+	for strings.Contains(cookie, "  ") {
+		cookie = strings.ReplaceAll(cookie, "  ", " ")
+	}
+	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
 		apiError(w, CodeInvalidParam, "Cookie 不能为空")
 		return

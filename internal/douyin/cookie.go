@@ -66,6 +66,15 @@ func generateMsToken() string {
 func (cm *cookieManager) SetUserCookie(cookie string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	// 清洗 Cookie：移除换行符和多余空白（用户从浏览器复制常带这些）
+	cookie = strings.ReplaceAll(cookie, "\r\n", "")
+	cookie = strings.ReplaceAll(cookie, "\r", "")
+	cookie = strings.ReplaceAll(cookie, "\n", "")
+	cookie = strings.ReplaceAll(cookie, "\t", " ")
+	// 压缩多个连续空格
+	for strings.Contains(cookie, "  ") {
+		cookie = strings.ReplaceAll(cookie, "  ", " ")
+	}
 	cm.userCookie = strings.TrimSpace(cookie)
 	if cm.userCookie != "" {
 		logger.Info("user cookie set", "len", len(cm.userCookie))
