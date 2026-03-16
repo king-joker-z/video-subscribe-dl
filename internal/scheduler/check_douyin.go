@@ -182,3 +182,16 @@ func (s *Scheduler) resolveDouyinSecUID(client *douyin.DouyinClient, rawURL stri
 
 	return "", fmt.Errorf("URL is not a douyin user page: %s", rawURL)
 }
+
+// getDouyinSetting 获取抖音平台配置，优先使用 douyin_ 前缀的设置，fallback 到全局
+func (s *Scheduler) getDouyinSetting(key string) string {
+	// 优先平台特有配置
+	if val, err := s.db.GetSetting("douyin_" + key); err == nil && val != "" {
+		return val
+	}
+	// fallback 到全局配置
+	if val, err := s.db.GetSetting(key); err == nil && val != "" {
+		return val
+	}
+	return ""
+}

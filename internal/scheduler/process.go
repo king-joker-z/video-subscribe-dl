@@ -46,8 +46,7 @@ func (s *Scheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Client
 		archives, m, err := client.GetSeasonVideos(mid, seasonID, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				s.triggerCooldown()
-				s.dl.Pause()
+				s.triggerBiliCooldown()
 				return
 			}
 			log.Printf("Get season %d page %d failed: %v", seasonID, page, err)
@@ -341,8 +340,7 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 	detail, err := client.GetVideoDetail(bvid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 		} else {
 			log.Printf("Get detail failed for %s: %v", bvid, err)
 		}

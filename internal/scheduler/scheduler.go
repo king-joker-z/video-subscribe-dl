@@ -31,9 +31,10 @@ type Scheduler struct {
 	// bili client 保护
 	biliMu sync.RWMutex
 
-	// 风控退避
+	// 风控退避（平台级隔离）
 	rateLimitMu        sync.Mutex
-	rateLimitUntil     time.Time // 风控冷却截止时间
+	biliCooldownUntil    time.Time // B站风控冷却截止时间
+	douyinCooldownUntil  time.Time // 抖音风控冷却截止时间
 	lastCooldownNotify time.Time // 上次风控通知时间（防重复）
 
 	// Cookie 定期检测
@@ -174,15 +175,12 @@ func (s *Scheduler) Start() {
 				// Cookie 检查不受风控冷却影响
 				s.periodicCookieCheck()
 
-				if s.isInCooldown() {
-					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
-					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
-					return
-				}
-				if s.dl.IsPaused() {
+				// B站冷却结束时恢复下载器
+				if s.dl.IsPaused() && !s.isBiliInCooldown() {
 					s.dl.Resume()
-					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
+					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
 				}
+				// 不再整轮跳过，改为 checkSourceList 内部按平台跳过
 				s.checkAll()
 			})
 			if err != nil {
@@ -212,17 +210,12 @@ func (s *Scheduler) Start() {
 				// Cookie 检查不受风控冷却影响
 				s.periodicCookieCheck()
 
-				// 风控冷却期内跳过检查
-				if s.isInCooldown() {
-					remaining := time.Until(s.rateLimitUntil).Round(time.Second)
-					log.Printf("[scheduler] 风控冷却中，剩余 %v，跳过本轮检查", remaining)
-					continue
-				}
-				// 冷却已过期，自动恢复 downloader
-				if s.dl.IsPaused() {
+				// B站冷却结束时恢复下载器
+				if s.dl.IsPaused() && !s.isBiliInCooldown() {
 					s.dl.Resume()
-					log.Printf("[scheduler] 风控冷却结束，恢复下载器")
+					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
 				}
+				// 不再整轮跳过，改为 checkSourceList 内部按平台跳过
 				s.checkAll()
 			case <-s.stopCh:
 				return
@@ -232,39 +225,69 @@ func (s *Scheduler) Start() {
 	log.Println("Scheduler started (interval: 5min)")
 }
 
-// isInCooldown 检查是否在风控冷却期内
+// isBiliInCooldown 检查B站是否在风控冷却期内
+func (s *Scheduler) isBiliInCooldown() bool {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	return time.Now().Before(s.biliCooldownUntil)
+}
+
+// isDouyinInCooldown 检查抖音是否在风控冷却期内
+func (s *Scheduler) isDouyinInCooldown() bool {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	return time.Now().Before(s.douyinCooldownUntil)
+}
+
+// isInCooldown 检查是否有任一平台在风控冷却期内（用于全局判断）
 func (s *Scheduler) isInCooldown() bool {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
-	return time.Now().Before(s.rateLimitUntil)
+	return time.Now().Before(s.biliCooldownUntil) || time.Now().Before(s.douyinCooldownUntil)
 }
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
-	if time.Now().Before(s.rateLimitUntil) {
-		return true, int(time.Until(s.rateLimitUntil).Seconds())
+	now := time.Now()
+	// 返回两个平台中较晚的冷却截止时间
+	latest := s.biliCooldownUntil
+	if s.douyinCooldownUntil.After(latest) {
+		latest = s.douyinCooldownUntil
+	}
+	if now.Before(latest) {
+		return true, int(time.Until(latest).Seconds())
 	}
 	return false, 0
 }
 
-// triggerCooldown 触发风控冷却
-func (s *Scheduler) triggerCooldown() {
+// triggerBiliCooldown 触发B站风控冷却
+func (s *Scheduler) triggerBiliCooldown() {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
-	s.rateLimitUntil = time.Now().Add(config.CooldownDuration)
-	s.dl.Pause()
-	log.Printf("[WARN] 触发B站风控，暂停下载器 %v（恢复时间: %s）",
-		config.CooldownDuration, s.rateLimitUntil.Format("15:04:05"))
+	s.biliCooldownUntil = time.Now().Add(config.CooldownDuration)
+	s.dl.Pause() // B站用 Downloader 队列，需要暂停
+	log.Printf("[WARN] 触发B站风控，暂停B站下载器 %v（恢复时间: %s）",
+		config.CooldownDuration, s.biliCooldownUntil.Format("15:04:05"))
 
 	// 防重复通知：30分钟内只发一次
 	if time.Since(s.lastCooldownNotify) > 30*time.Minute {
 		s.lastCooldownNotify = time.Now()
 		s.notifier.Send(notify.EventRateLimited, "B站风控触发",
 			fmt.Sprintf("已暂停 %v，预计 %s 恢复",
-				config.CooldownDuration, s.rateLimitUntil.Format("15:04:05")))
+				config.CooldownDuration, s.biliCooldownUntil.Format("15:04:05")))
 	}
+}
+
+// triggerDouyinCooldown 触发抖音风控冷却
+func (s *Scheduler) triggerDouyinCooldown() {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	s.douyinCooldownUntil = time.Now().Add(config.CooldownDuration)
+	// 抖音不走 Downloader 队列，不调 s.dl.Pause()
+	log.Printf("[WARN] 触发抖音风控，暂停抖音检查 %v（恢复时间: %s）",
+		config.CooldownDuration, s.douyinCooldownUntil.Format("15:04:05"))
 }
 
 func (s *Scheduler) Stop() {
@@ -342,10 +365,10 @@ func (s *Scheduler) UpdateCookie(cookiePath string) {
 }
 
 func (s *Scheduler) checkAll() {
-	// 如果冷却已过期但 downloader 还在 paused，自动恢复
-	if s.dl.IsPaused() && !s.isInCooldown() {
+	// B站冷却已过期但 downloader 还在 paused，自动恢复
+	if s.dl.IsPaused() && !s.isBiliInCooldown() {
 		s.dl.Resume()
-		log.Printf("[scheduler] checkAll: 风控冷却已过期，恢复下载器")
+		log.Printf("[scheduler] checkAll: B站风控冷却已过期，恢复下载器")
 	}
 	// 先检查 Credential 是否需要刷新
 	s.checkAndRefreshCredential()
@@ -389,29 +412,39 @@ func (s *Scheduler) checkAll() {
 	// Auto-cleanup: retention-based and disk-pressure
 }
 
-// checkSourceList 检查一组 source，风控时保存剩余到断点队列
+// checkSourceList 检查一组 source，按平台级冷却跳过对应源
 func (s *Scheduler) checkSourceList(sources []db.Source) {
 	for i, src := range sources {
-		s.checkSource(src)
-		s.db.UpdateSourceLastCheck(src.ID)
-
-		// 检查风控冷却
-		if s.isInCooldown() {
-			remaining := sources[i+1:]
-			if len(remaining) > 0 {
-				s.pendingSourcesMu.Lock()
-				s.pendingSources = remaining
-				s.pendingSourcesMu.Unlock()
-				log.Printf("[scheduler] 风控冷却已触发，保存 %d 个剩余 source 到断点队列", len(remaining))
+		// 平台级冷却检查：只跳过对应平台的 source
+		switch src.Type {
+		case "douyin":
+			if s.isDouyinInCooldown() {
+				continue // 跳过抖音但不跳过B站
 			}
-			return
+		default: // B站类型: up, channel, favorite, season, series, watchlater
+			if s.isBiliInCooldown() {
+				continue // 跳过B站但不跳过抖音
+			}
 		}
+
+		s.safeCheckSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
 
 		// source 间隔 5 秒，避免触发风控
 		if i < len(sources)-1 {
 			time.Sleep(5 * time.Second)
 		}
 	}
+}
+
+// safeCheckSource 带 panic 保护的 checkSource 调用
+func (s *Scheduler) safeCheckSource(src db.Source) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] checkSource panic for %s (id=%d): %v", src.Name, src.ID, r)
+		}
+	}()
+	s.checkSource(src)
 }
 
 func (s *Scheduler) checkAllForce() {
@@ -423,14 +456,20 @@ func (s *Scheduler) checkAllForce() {
 		return
 	}
 	for i, src := range sources {
-		s.checkSource(src)
-		s.db.UpdateSourceLastCheck(src.ID)
-
-		// 检查风控冷却
-		if s.isInCooldown() {
-			log.Printf("[scheduler] 风控冷却已触发，停止当前轮次剩余 source 检查")
-			break
+		// 平台级冷却检查
+		switch src.Type {
+		case "douyin":
+			if s.isDouyinInCooldown() {
+				continue
+			}
+		default:
+			if s.isBiliInCooldown() {
+				continue
+			}
 		}
+
+		s.safeCheckSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
 
 		// source 间隔 3 秒，避免触发风控
 		if i < len(sources)-1 {

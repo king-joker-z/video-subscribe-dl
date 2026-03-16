@@ -26,8 +26,7 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 		folders, err := client.GetFavoriteList(mid)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				s.triggerCooldown()
-				s.dl.Pause()
+				s.triggerBiliCooldown()
 				return
 			}
 			log.Printf("Get favorite list failed: %v", err)
@@ -45,8 +44,7 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 		} else {
 			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
 		}
@@ -91,8 +89,7 @@ func (s *Scheduler) checkFavorite(src db.Source) {
 		videos, hasMore, err := client.GetFavoriteVideos(mediaID, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				s.triggerCooldown()
-				s.dl.Pause()
+				s.triggerBiliCooldown()
 				return
 			}
 			log.Printf("Get favorite videos page %d failed: %v", page, err)

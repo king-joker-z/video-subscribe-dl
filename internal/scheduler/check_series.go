@@ -32,8 +32,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 			return
 		}
 		log.Printf("[series] Get UP info failed: %v", err)
@@ -49,8 +48,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 	seriesMeta, err := client.GetSeriesInfo(mid, seriesID)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 			return
 		}
 		log.Printf("[series] Get series info failed: %v", err)
@@ -97,8 +95,7 @@ func (s *Scheduler) checkSeries(src db.Source) {
 		archives, _, err := client.GetSeriesVideosSorted(mid, seriesID, page, pageSize, sortOrder)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				s.triggerCooldown()
-				s.dl.Pause()
+				s.triggerBiliCooldown()
 				return
 			}
 			log.Printf("[series] Get series page %d failed: %v", page, err)

@@ -22,8 +22,7 @@ func (s *Scheduler) checkSeason(src db.Source) {
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 		} else {
 			log.Printf("Get UP info failed (mid=%d): %v", mid, err)
 		}

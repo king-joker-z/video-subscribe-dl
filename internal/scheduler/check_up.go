@@ -95,8 +95,7 @@ func (s *Scheduler) checkUP(src db.Source) {
 					return
 				}
 				if bilibili.IsRiskControl(err) {
-					s.triggerCooldown()
-					s.dl.Pause()
+					s.triggerBiliCooldown()
 				}
 				return
 			}
@@ -223,8 +222,7 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 	videos, err := client.FetchDynamicVideosIncremental(mid, latestVideoAt)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 			return
 		}
 		log.Printf("[动态API] 拉取动态失败 (mid=%d): %v", mid, err)
@@ -342,7 +340,7 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 
 func (s *Scheduler) fullScanUP(src db.Source) {
 	// 开头就检查冷却状态，避免冷却期内浪费请求
-	if s.isInCooldown() {
+	if s.isBiliInCooldown() {
 		log.Printf("[full-scan] %s: 当前处于风控冷却期，跳过", src.Name)
 		return
 	}
@@ -374,7 +372,7 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 
 	log.Printf("[full-scan] %s: 第一阶段 - 拉取视频列表", uploaderName)
 	for {
-		if s.isInCooldown() {
+		if s.isBiliInCooldown() {
 			log.Printf("[full-scan] %s: 风控冷却中，已拉取 %d 个视频 ID（第 %d 页）", uploaderName, len(allVideos), page)
 			return
 		}
@@ -382,7 +380,7 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				s.triggerCooldown()
+				s.triggerBiliCooldown()
 				log.Printf("[full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
 				// 不 return，用已拉到的部分继续处理
 				break

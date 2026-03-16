@@ -15,8 +15,7 @@ func (s *Scheduler) checkWatchLater(src db.Source) {
 	videos, err := client.GetWatchLater()
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 			return
 		}
 		log.Printf("Get watch later list failed: %v", err)

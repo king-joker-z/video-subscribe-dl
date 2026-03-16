@@ -18,12 +18,12 @@ import (
 func (s *Scheduler) retryOneDownload(dl db.Download) {
 	// 暂停时检查冷却是否已过期
 	if s.dl.IsPaused() {
-		if !s.isInCooldown() {
+		if !s.isBiliInCooldown() {
 			s.dl.Resume()
 			log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
 		} else {
 			s.rateLimitMu.Lock()
-			until := s.rateLimitUntil
+			until := s.biliCooldownUntil
 			s.rateLimitMu.Unlock()
 			log.Printf("[retry-scheduler] Downloader paused (cooldown until %s), skipping retry for %s", until.Format("15:04:05"), dl.VideoID)
 			return
@@ -54,8 +54,7 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
 			log.Printf("[retry-scheduler] 风控触发，停止重试: %s", dl.VideoID)
-			s.triggerCooldown()
-			s.dl.Pause()
+			s.triggerBiliCooldown()
 			return
 		}
 		log.Printf("[retry-scheduler] Get detail failed for %s: %v", dl.VideoID, err)
@@ -196,7 +195,7 @@ func (s *Scheduler) retryFailedDownloads() {
 	for _, dl := range retryable {
 		// 暂停时检查冷却是否已过期
 		if s.dl.IsPaused() {
-			if !s.isInCooldown() {
+			if !s.isBiliInCooldown() {
 				s.dl.Resume()
 				log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
 			} else {
@@ -235,12 +234,12 @@ func (s *Scheduler) RedownloadByID(dlID int64) {
 	}
 	// 暂停时检查冷却是否已过期
 	if s.dl.IsPaused() {
-		if !s.isInCooldown() {
+		if !s.isBiliInCooldown() {
 			s.dl.Resume()
 			log.Printf("[redownload] 风控冷却结束，恢复下载器")
 		} else {
 			s.rateLimitMu.Lock()
-			until := s.rateLimitUntil
+			until := s.biliCooldownUntil
 			s.rateLimitMu.Unlock()
 			log.Printf("[redownload] Downloader paused (cooldown until %s), skipping", until.Format("15:04:05"))
 			return
