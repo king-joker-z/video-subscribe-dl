@@ -12,6 +12,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
+	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/nfo"
@@ -73,6 +74,8 @@ type Scheduler struct {
 	douyinPauseReason string
 	douyinPausedAt    time.Time
 
+	// 抖音下载频率限制器（每分钟最多 2 条）
+	douyinDownloadLimiter *douyin.RateLimiter
 }
 
 type upInfoCacheEntry struct {
@@ -96,6 +99,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		fullScanRunning: make(map[int64]bool),
 		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
+		douyinDownloadLimiter: douyin.NewRateLimiter(2, 1, 30*time.Second), // 每分钟最多 2 条抖音下载
 	}
 }
 
@@ -343,6 +347,9 @@ func (s *Scheduler) GetDouyinPauseStatus() (paused bool, reason string, pausedAt
 func (s *Scheduler) Stop() {
 	if s.configWatcher != nil {
 		s.configWatcher.Stop()
+	}
+	if s.douyinDownloadLimiter != nil {
+		s.douyinDownloadLimiter.Stop()
 	}
 	close(s.stopCh)
 	s.wg.Wait()

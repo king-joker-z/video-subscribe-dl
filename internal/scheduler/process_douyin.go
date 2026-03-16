@@ -27,6 +27,9 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		return
 	}
 
+	// 下载频率限制: 每分钟最多 2 条
+	s.douyinDownloadLimiter.Acquire()
+
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
 		log.Printf("[douyin-dl] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
