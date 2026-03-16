@@ -19,6 +19,9 @@ type RateLimiter struct {
 
 	// HTTP 状态码感知: 上次是否收到限流响应
 	penaltyUntil time.Time
+
+	// 幂等 Stop 保护
+	stopped sync.Once
 }
 
 // NewRateLimiter 创建令牌桶限流器
@@ -98,9 +101,11 @@ func (rl *RateLimiter) ReportResult(statusCode int) {
 	}
 }
 
-// Stop 停止补充循环
+// Stop 停止补充循环（幂等：重复调用不 panic）
 func (rl *RateLimiter) Stop() {
-	close(rl.stopCh)
+	rl.stopped.Do(func() {
+		close(rl.stopCh)
+	})
 }
 
 func (rl *RateLimiter) refillLoop() {

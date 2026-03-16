@@ -127,3 +127,10 @@ func TestDefaultRateLimiter(t *testing.T) {
 		t.Errorf("DefaultRateLimiter interval = %v, want 3s", rl.interval)
 	}
 }
+
+// TestRateLimiterDoubleStop 测试 Stop() 幂等性：重复调用不 panic
+func TestRateLimiterDoubleStop(t *testing.T) {
+	rl := NewRateLimiter(1, 1, time.Second)
+	rl.Stop() // 第一次
+	rl.Stop() // 第二次不应 panic
+}

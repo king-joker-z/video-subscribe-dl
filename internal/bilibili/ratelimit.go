@@ -14,6 +14,9 @@ type RateLimiter struct {
 	refill   int
 	interval time.Duration
 	stopCh   chan struct{}
+
+	// 幂等 Stop 保护
+	stopped sync.Once
 }
 
 // NewRateLimiter 创建令牌桶限流器
@@ -64,9 +67,11 @@ func (rl *RateLimiter) TryAcquire() bool {
 	return false
 }
 
-// Stop 停止限流器的补充协程
+// Stop 停止限流器的补充协程（幂等：重复调用不 panic）
 func (rl *RateLimiter) Stop() {
-	close(rl.stopCh)
+	rl.stopped.Do(func() {
+		close(rl.stopCh)
+	})
 }
 
 func (rl *RateLimiter) refillLoop() {

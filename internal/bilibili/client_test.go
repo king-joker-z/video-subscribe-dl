@@ -2,6 +2,7 @@ package bilibili
 
 import (
 	"testing"
+	"time"
 )
 
 // === TestExtractMID ===
@@ -369,4 +370,11 @@ func TestExtractBVID_InvalidURL(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for YouTube URL")
 	}
+}
+
+// TestBiliRateLimiterDoubleStop 测试 bilibili RateLimiter Stop() 幂等性
+func TestBiliRateLimiterDoubleStop(t *testing.T) {
+	rl := NewRateLimiter(1, 1, time.Second)
+	rl.Stop()
+	rl.Stop() // 第二次不应 panic
 }
