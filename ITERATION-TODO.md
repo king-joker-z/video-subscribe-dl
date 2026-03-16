@@ -56,6 +56,7 @@
 
 ### P1 — 代码质量
 - [x] checkDouyin/fullScanDouyin mock 测试（30+ 用例，覆盖 11.7%）— 97f7442 / eb647bb
+- [x] checkDouyin/fullScanDouyin 覆盖率补充测试（12 用例：profile error/author fallback/backoff progression/cap/字段验证等）
 - [x] 单元测试覆盖提升 — processDouyin/retryOneDouyinDownload/resolveDouyinSecUID/getDouyinSetting/loadDouyinUserCookie mock 测试（scheduler 21.3%→28.3%）— 7e7f260
 - [x] downloadDouyinFile 去重（scheduler 和 web/api 中有完全重复实现）
 - [ ] HTTP Client 复用（文件下载每次新建 Client，应使用连接池）
