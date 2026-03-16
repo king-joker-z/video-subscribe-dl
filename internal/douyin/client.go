@@ -204,7 +204,7 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 
 // getVideoDetailAPI 使用 douyin.com/aweme/v1/web/aweme/detail/ API 获取视频详情
 func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
-	apiURL := "https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=" + videoID
+	apiURL := BuildVideoDetailURL(videoID)
 
 	parsed, err := url.Parse(apiURL)
 	if err != nil {
@@ -224,7 +224,7 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 		return nil, err
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", "https://www.douyin.com/")
+	req.Header.Set("Referer", DouyinReferer)
 	req.Header.Set("User-Agent", pcUA)
 
 	resp, err := c.normalClient.Do(req)
@@ -259,7 +259,7 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 
 // getVideoDetailPage 通过 iesdouyin.com 页面解析 _ROUTER_DATA（降级方案）
 func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) {
-	pageURL := fmt.Sprintf("https://www.iesdouyin.com/share/video/%s", videoID)
+	pageURL := BuildVideoPageURL(videoID)
 
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
@@ -318,10 +318,7 @@ func (c *DouyinClient) getNoteDetail(videoID string) (*DouyinVideo, error) {
 	webID := generateWebID()
 	aBogus := randAlphaNum(64)
 
-	apiURL := fmt.Sprintf(
-		"https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/?reflow_source=reflow_page&web_id=%s&device_id=%s&aweme_ids=%%5B%s%%5D&request_source=200&a_bogus=%s",
-		webID, webID, videoID, aBogus,
-	)
+	apiURL := BuildNoteSlideInfoURL(webID, videoID, aBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -552,14 +549,14 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 		return nil, fmt.Errorf("sign failed: %w", err)
 	}
 
-	apiURL := fmt.Sprintf("https://www.douyin.com/aweme/v1/web/aweme/post/?%s&X-Bogus=%s", queryStr, xBogus)
+	apiURL := fmt.Sprintf("%s?%s&X-Bogus=%s", UserVideosAPI, queryStr, xBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", "https://www.douyin.com/")
+	req.Header.Set("Referer", DouyinReferer)
 	req.Header.Set("User-Agent", pcUA)
 
 	resp, err := c.normalClient.Do(req)

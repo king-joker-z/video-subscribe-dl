@@ -63,7 +63,7 @@ func generateMsToken() string {
 // fetchRealMsToken 从 mssdk 获取真实 msToken
 // 优先使用真实 token，失败降级为随机生成
 func fetchRealMsToken(httpClient *http.Client) string {
-	req, err := http.NewRequest("POST", "https://mssdk.bytedance.com/web/common", strings.NewReader("{}"))
+	req, err := http.NewRequest("POST", MsTokenAPI, strings.NewReader("{}"))
 	if err != nil {
 		log.Printf("[douyin] msToken request build failed: %v, using random token", err)
 		return generateMsToken()
@@ -121,7 +121,7 @@ func fetchTTWID(httpClient *http.Client) (string, error) {
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", "https://ttwid.bytedance.com/ttwid/union/register/", strings.NewReader(string(payloadBytes)))
+	req, err := http.NewRequest("POST", TTWidAPI, strings.NewReader(string(payloadBytes)))
 	if err != nil {
 		return "", err
 	}
