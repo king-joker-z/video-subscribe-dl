@@ -765,6 +765,10 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 		"contentType", resp.Header.Get("Content-Type"),
 		"bodyLen", len(body))
 
+	// 小 body 完整记录，方便排查翻页失败
+	if len(body) < 200 {
+		logger.Info("GetUserVideos small body", "body", string(body))
+	}
 	if len(body) == 0 {
 		return nil, fmt.Errorf("user videos API returned empty body (status=%d, contentType=%s)",
 			resp.StatusCode, resp.Header.Get("Content-Type"))
@@ -816,6 +820,14 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("parse user videos: %w (body=%s)", err, truncate(string(body), 200))
+	}
+
+	// 记录 API status_code（非零值通常表示风控或参数错误）
+	if apiResp.StatusCode != 0 {
+		logger.Warn("GetUserVideos non-zero status_code",
+			"statusCode", apiResp.StatusCode,
+			"cursor", maxCursor,
+			"bodyLen", len(body))
 	}
 
 	result := &UserVideosResult{
@@ -895,6 +907,11 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read user profile: %w", err)
+	}
+
+	// 小 body 完整记录，方便排查翻页失败
+	if len(body) < 200 {
+		logger.Info("GetUserProfile small body", "body", string(body))
 	}
 
 	c.limiter.ReportResult(resp.StatusCode)
