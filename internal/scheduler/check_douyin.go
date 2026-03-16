@@ -20,7 +20,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 	// 解析 sec_user_id
 	secUID, err := s.resolveDouyinSecUID(client, src.URL)
 	if err != nil {
-		log.Printf("[douyin] 解析 sec_user_id 失败: %v", err)
+		log.Printf("[douyin] 抖音链接解析失败，请检查 URL 格式是否正确: %v", err)
 		return
 	}
 
@@ -34,7 +34,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 					profile.Nickname, profile.UniqueID, profile.FollowerCount, profile.AwemeCount)
 			}
 		} else {
-			log.Printf("[douyin] GetUserProfile 失败（非致命）: %v", err)
+			log.Printf("[douyin] 获取用户信息失败（不影响视频检查）: %v", err)
 		}
 	}
 
@@ -81,9 +81,9 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 				strings.Contains(errMsg, "blocked")
 
 			if isRiskControl {
-				log.Printf("[douyin] ⚠️ 检测到风控拦截 (连续第%d次): %v", consecutiveErrors, err)
+				log.Printf("[douyin] ⚠️ 抖音风控拦截 (第%d次)，可能是请求频率过高或 IP 被限制: %v", consecutiveErrors, err)
 				if consecutiveErrors >= 2 {
-					log.Printf("[douyin] 风控连续 %d 次，立即停止本轮检查", consecutiveErrors)
+					log.Printf("[douyin] 连续 %d 次风控拦截，暂停本轮检查，将在下个周期重试", consecutiveErrors)
 					break
 				}
 				// 风控退避: 30s + 随机 0-30s
@@ -91,9 +91,9 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 				log.Printf("[douyin] 风控退避 %v 后重试", backoff)
 				time.Sleep(backoff)
 			} else {
-				log.Printf("[douyin] GetUserVideos 失败 (连续第%d次): %v", consecutiveErrors, err)
+				log.Printf("[douyin] 获取视频列表失败 (第%d次)，可能是网络问题或账号设为私密: %v", consecutiveErrors, err)
 				if consecutiveErrors >= 5 {
-					log.Printf("[douyin] 连续失败 %d 次，停止本轮检查", consecutiveErrors)
+					log.Printf("[douyin] 连续 %d 次失败，暂停检查，将在下个周期重试", consecutiveErrors)
 					break
 				}
 				// 普通错误指数退避: 5s, 10s, 20s, 40s
@@ -152,13 +152,16 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 					Duration:  v.Duration / 1000,
 				}
 				if _, err := s.db.CreateDownload(dl); err != nil {
-					log.Printf("[douyin] 创建 pending 记录失败 %s: %v", v.AwemeID, err)
+					log.Printf("[douyin] 保存待下载记录失败 %s: %v", v.AwemeID, err)
 				} else {
 					pendingCreated++
 				}
 			}
 		}
 
+		if len(result.Videos) == 0 && page == 1 {
+			log.Printf("[douyin] ⚠️ 未获取到视频列表，可能是账号设为私密或被风控限制")
+		}
 		if stopped || !result.HasMore || len(result.Videos) == 0 {
 			break
 		}
