@@ -329,8 +329,8 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		log.Printf("[full-scan] 开始全量补漏扫描: %s (id=%d)", src.Name, src.ID)
 		switch src.Type {
 		case "douyin":
-			// 抖音全量扫描: 复用 checkDouyin（已支持全量/增量）
-			s.checkDouyin(*src)
+			// 抖音全量扫描: 使用专门的全量补漏方法（忽略增量基准）
+			s.fullScanDouyin(*src)
 		default:
 			s.fullScanUP(*src)
 		}
