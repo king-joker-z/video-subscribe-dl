@@ -61,14 +61,19 @@ export function SettingsPage() {
   const [qrData, setQrData] = useState(null);
   const [dirty, setDirty] = useState({});
   const [testingNotify, setTestingNotify] = useState(false);
+  const [douyinCookieInput, setDouyinCookieInput] = useState('');
+  const [douyinCookieStatus, setDouyinCookieStatus] = useState(null);
+  const [validatingDouyinCookie, setValidatingDouyinCookie] = useState(false);
+  const [savingDouyinCookie, setSavingDouyinCookie] = useState(false);
   const [templatePreview, setTemplatePreview] = useState('');
   const previewTimer = React.useRef(null);
 
   const load = useCallback(async () => {
     try {
-      const [sRes, cRes] = await Promise.all([api.getSettings(), api.getCredential()]);
+      const [sRes, cRes, dyRes] = await Promise.all([api.getSettings(), api.getCredential(), api.getDouyinCookieStatus()]);
       setSettings(sRes.data || {});
       setCredential(cRes.data || {});
+      setDouyinCookieStatus(dyRes.data || null);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, []);
@@ -257,6 +262,86 @@ export function SettingsPage() {
         h('p', { className: 'text-center text-sm text-slate-400' }, '等待扫码...'),
         h('div', { className: 'flex justify-center mt-4' },
           h(Button, { onClick: () => setShowQR(false), variant: 'ghost', size: 'sm' }, '取消')
+        )
+      )
+    ),
+
+    // 抖音 Cookie 管理
+    h(Card, null,
+      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+        h(Icon, { name: 'settings', size: 18, className: 'text-blue-400' }), '抖音 Cookie'
+      ),
+      h('div', { className: 'space-y-3' },
+        // 状态显示
+        douyinCookieStatus && h('div', { className: 'flex items-center gap-2 mb-2' },
+          h(Badge, { variant: douyinCookieStatus.mode === 'user' ? 'success' : 'outline' },
+            douyinCookieStatus.mode === 'user' ? '用户 Cookie' : '自动生成'
+          ),
+          h('span', { className: 'text-xs text-slate-500' },
+            douyinCookieStatus.mode === 'user'
+              ? '使用用户配置的浏览器 Cookie，翻页更稳定'
+              : '使用自动生成的 Cookie，翻页可能被拦截'
+          )
+        ),
+        // Cookie 输入框
+        h('div', { className: 'space-y-1.5' },
+          h('label', { className: 'text-sm text-slate-400' }, '浏览器 Cookie'),
+          h('textarea', {
+            value: douyinCookieInput,
+            onChange: (e) => setDouyinCookieInput(e.target.value),
+            placeholder: '从浏览器开发者工具复制抖音的 Cookie，例如: msToken=xxx; ttwid=xxx; sessionid=xxx; ...',
+            rows: 3,
+            className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono resize-none'
+          })
+        ),
+        h('div', { className: 'text-xs text-slate-500' },
+          '打开抖音网页版 → F12 开发者工具 → Network 标签 → 复制任意请求的 Cookie 请求头'
+        ),
+        // 操作按钮
+        h('div', { className: 'flex gap-2 mt-2' },
+          h(Button, {
+            onClick: async () => {
+              if (!douyinCookieInput.trim()) { toast.error('请输入 Cookie'); return; }
+              setValidatingDouyinCookie(true);
+              try {
+                const res = await api.validateDouyinCookie(douyinCookieInput.trim());
+                if (res.data && res.data.valid) {
+                  toast.success('Cookie 验证通过: ' + (res.data.message || ''));
+                } else {
+                  toast.error('Cookie 验证失败: ' + (res.data && res.data.message || '无效'));
+                }
+              } catch (e) { toast.error(e.message); }
+              finally { setValidatingDouyinCookie(false); }
+            },
+            disabled: validatingDouyinCookie || !douyinCookieInput.trim(),
+            variant: 'secondary', size: 'sm'
+          }, validatingDouyinCookie ? '验证中...' : '验证 Cookie'),
+          h(Button, {
+            onClick: async () => {
+              if (!douyinCookieInput.trim()) { toast.error('请输入 Cookie'); return; }
+              setSavingDouyinCookie(true);
+              try {
+                await api.updateSettings({ douyin_cookie: douyinCookieInput.trim() });
+                toast.success('抖音 Cookie 已保存');
+                setDouyinCookieInput('');
+                load();
+              } catch (e) { toast.error(e.message); }
+              finally { setSavingDouyinCookie(false); }
+            },
+            disabled: savingDouyinCookie || !douyinCookieInput.trim(),
+            size: 'sm'
+          }, savingDouyinCookie ? '保存中...' : '保存 Cookie'),
+          douyinCookieStatus && douyinCookieStatus.has_user_cookie && h(Button, {
+            onClick: async () => {
+              try {
+                await api.updateSettings({ douyin_cookie: '' });
+                toast.success('已清除用户 Cookie，恢复自动生成模式');
+                setDouyinCookieInput('');
+                load();
+              } catch (e) { toast.error(e.message); }
+            },
+            variant: 'ghost', size: 'sm'
+          }, '清除 Cookie')
         )
       )
     ),

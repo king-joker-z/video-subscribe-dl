@@ -27,8 +27,9 @@ type Router struct {
 	notify     *NotifyHandler
 	diag       *DiagHandler
 	metrics    *MetricsHandler
-	signReload *SignReloadHandler
-	onSyncAll  func()
+	signReload   *SignReloadHandler
+	douyinCookie *DouyinCookieHandler
+	onSyncAll    func()
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {
@@ -47,7 +48,8 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		quickdl:    NewQuickDownloadHandler(database, dl, downloadDir),
 		stream:     NewStreamHandler(database, downloadDir),
 		search:     NewSearchHandler(database),
-		diag:       NewDiagHandler(database),
+		diag:         NewDiagHandler(database),
+		douyinCookie: NewDouyinCookieHandler(database),
 	}
 }
 
@@ -98,6 +100,11 @@ func (rt *Router) SetBiliClientFunc(fn func() *bilibili.Client) {
 
 func (rt *Router) SetConfigReloadFunc(fn func()) {
 	rt.settings.SetConfigReloadFunc(fn)
+}
+
+// SetDouyinCookieUpdateFunc 设置抖音 Cookie 更新回调
+func (rt *Router) SetDouyinCookieUpdateFunc(fn func(string)) {
+	rt.settings.SetDouyinCookieUpdateFunc(fn)
 }
 
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
@@ -243,6 +250,10 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Sign Reload
 	mux.HandleFunc("/api/sign/reload", rt.signReload.HandleReload)
+
+	// Douyin Cookie Management
+	mux.HandleFunc("/api/douyin/cookie/validate", rt.douyinCookie.HandleValidate)
+	mux.HandleFunc("/api/douyin/cookie/status", rt.douyinCookie.HandleStatus)
 
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)

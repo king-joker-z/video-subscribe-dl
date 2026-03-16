@@ -123,6 +123,10 @@ export const api = {
   // Global Search
   // Notify test
   testNotification: () => request("/api/notify/test", { method: "POST" }),
+
+  // Douyin Cookie
+  validateDouyinCookie: (cookie) => request('/api/douyin/cookie/validate', { method: 'POST', body: JSON.stringify({ cookie }) }),
+  getDouyinCookieStatus: () => request('/api/douyin/cookie/status'),
   getNotifyStatus: () => request("/api/notify/status"),
 
   globalSearch: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

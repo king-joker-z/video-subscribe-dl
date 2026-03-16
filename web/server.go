@@ -77,6 +77,7 @@ type Server struct {
 	onRedownload       func(int64)
 	getBiliClient      func() *bilibili.Client
 	onConfigReload     func()
+	onDouyinCookieUpdate func(string)
 
 	version   string
 	buildTime string
@@ -162,6 +163,9 @@ func (s *Server) setupRoutes() {
 		}
 		s.apiRouter.SetBiliClientFunc(s.getBiliClient)
 		s.apiRouter.SetConfigReloadFunc(s.onConfigReload)
+		if s.onDouyinCookieUpdate != nil {
+			s.apiRouter.SetDouyinCookieUpdateFunc(s.onDouyinCookieUpdate)
+		}
 		if s.notifier != nil {
 			s.apiRouter.SetNotifier(s.notifier)
 		}
@@ -214,6 +218,10 @@ func (s *Server) SetBiliClientFunc(fn func() *bilibili.Client) {
 
 func (s *Server) SetConfigReloadFunc(fn func()) {
 	s.onConfigReload = fn
+}
+
+func (s *Server) SetDouyinCookieUpdateFunc(fn func(string)) {
+	s.onDouyinCookieUpdate = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

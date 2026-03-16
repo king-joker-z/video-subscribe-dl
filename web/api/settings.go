@@ -11,8 +11,9 @@ import (
 // SettingsHandler 设置 API
 type SettingsHandler struct {
 	db              *db.DB
-	onRefreshRate   func()
-	onConfigReload  func()
+	onRefreshRate        func()
+	onConfigReload       func()
+	onDouyinCookieUpdate func(string) // 抖音 Cookie 更新回调
 }
 
 func NewSettingsHandler(database *db.DB) *SettingsHandler {
@@ -27,6 +28,10 @@ func (h *SettingsHandler) SetRefreshRateFunc(fn func()) {
 	h.onRefreshRate = fn
 }
 
+func (h *SettingsHandler) SetDouyinCookieUpdateFunc(fn func(string)) {
+	h.onDouyinCookieUpdate = fn
+}
+
 // 公开的设置 key 列表
 var settingsKeys = []string{
 	"download_quality", "max_concurrent", "request_interval", "cookie_path",
@@ -37,6 +42,7 @@ var settingsKeys = []string{
 	"download_chunks", "max_download_speed_mb", "min_disk_free_gb",
 	"rate_limit_per_minute", "retention_days", "auto_cleanup_on_low_disk",
 	"auth_token",
+	"douyin_cookie",
 	"filename_template", "cooldown_minutes", "download_codec",
 }
 
@@ -45,6 +51,7 @@ var sensitiveKeys = map[string]bool{
 	"auth_token":         true,
 	"telegram_bot_token": true,
 	"bark_key":           true,
+	"douyin_cookie":      true,
 }
 
 // GET /api/settings
@@ -94,6 +101,12 @@ func (h *SettingsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	if h.onConfigReload != nil {
 		h.onConfigReload()
 	}
+
+	// 抖音 Cookie 更新回调（热更新）
+	if _, ok := settings["douyin_cookie"]; ok && h.onDouyinCookieUpdate != nil {
+		h.onDouyinCookieUpdate(settings["douyin_cookie"])
+	}
+
 	apiOK(w, map[string]interface{}{"message": "设置已更新"})
 }
 

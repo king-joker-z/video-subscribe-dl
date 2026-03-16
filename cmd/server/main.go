@@ -162,6 +162,7 @@ func main() {
 	server.SetNotifier(sched.GetNotifier())
 	server.SetBiliClientFunc(sched.GetBiliClient)
 	server.SetConfigReloadFunc(sched.ReloadConfig)
+	server.SetDouyinCookieUpdateFunc(sched.RefreshDouyinUserCookie)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

@@ -19,9 +19,10 @@ import (
 // - parse-video: 使用 iesdouyin.com 页面不需要复杂 Cookie
 // - Evil0ctal: verify_fp / s_v_web_id 随机字符串
 type cookieManager struct {
-	mu      sync.Mutex
-	ttwid   string
-	ttwidAt time.Time
+	mu         sync.Mutex
+	ttwid      string
+	ttwidAt    time.Time
+	userCookie string // 用户配置的 Cookie（非空时优先使用，跳过自动生成）
 }
 
 var globalCookieMgr = &cookieManager{}
@@ -60,6 +61,25 @@ func generateMsToken() string {
 }
 
 
+// SetUserCookie 设置用户配置的 Cookie（非空时优先使用，跳过自动生成）
+// 这是抖音独有的 Cookie 管理，和 B 站的凭证系统完全独立
+func (cm *cookieManager) SetUserCookie(cookie string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.userCookie = strings.TrimSpace(cookie)
+	if cm.userCookie != "" {
+		logger.Info("user cookie set", "len", len(cm.userCookie))
+	} else {
+		logger.Info("user cookie cleared, falling back to auto-generate")
+	}
+}
+
+// GetUserCookie 返回用户配置的 Cookie（线程安全）
+func (cm *cookieManager) GetUserCookie() string {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.userCookie
+}
 
 // fetchTTWID 通过 bytedance ttwid API 获取 ttwid
 // 参考 lux: 从 response 的 Set-Cookie header 中提取 ttwid
@@ -113,6 +133,12 @@ func fetchTTWID(httpClient *http.Client) (string, error) {
 func (cm *cookieManager) getCookieString(httpClient *http.Client) string {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// 优先使用用户配置的 Cookie（原样使用，不再自动生成）
+	if cm.userCookie != "" {
+		logger.Info("using user cookie", "len", len(cm.userCookie))
+		return cm.userCookie
+	}
 
 	// msToken: 随机生成（mssdk API 永远返回 protobuf 不是 JSON，不再尝试）
 	msToken := generateMsToken()
@@ -171,6 +197,12 @@ func (cm *cookieManager) getCookieStringWithMsToken(httpClient *http.Client, msT
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
+	// 优先使用用户配置的 Cookie（原样使用，不再自动生成）
+	if cm.userCookie != "" {
+		logger.Info("using user cookie (with msToken override)", "len", len(cm.userCookie))
+		return cm.userCookie
+	}
+
 	// ttwid 缓存（有 TTL）
 	if cm.ttwid == "" || time.Since(cm.ttwidAt) > ttwidTTL {
 		ttwid, err := fetchTTWID(httpClient)
@@ -203,4 +235,14 @@ func (cm *cookieManager) getCookieStringWithMsToken(httpClient *http.Client, msT
 	cookie := strings.Join(parts, "; ")
 	logger.Info("cookie complete (with session msToken)", "fields", 6, "len", len(cookie))
 	return cookie
+}
+
+// SetGlobalUserCookie 设置全局用户 Cookie（供 scheduler/API 层调用）
+func SetGlobalUserCookie(cookie string) {
+	globalCookieMgr.SetUserCookie(cookie)
+}
+
+// GetGlobalUserCookie 获取全局用户 Cookie（供 API 层调用）
+func GetGlobalUserCookie() string {
+	return globalCookieMgr.GetUserCookie()
 }

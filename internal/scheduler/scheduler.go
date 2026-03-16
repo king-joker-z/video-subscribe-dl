@@ -151,6 +151,7 @@ func (s *Scheduler) Start() {
 			log.Printf("[startup] Reset %d stale pending/downloading records (will be requeued)", reset)
 		}
 		s.verifyCookie("startup")
+		s.loadDouyinUserCookie() // 从 DB 加载用户配置的抖音 Cookie
 		// 启动时处理容器重启前遗留的 pending 下载
 		// 动态并发控制（从设置读取）
 		if v, err := s.db.GetSetting("concurrent_video"); err == nil && v != "" {
