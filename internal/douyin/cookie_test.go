@@ -173,3 +173,75 @@ func TestFixedConstants(t *testing.T) {
 		}
 	}
 }
+
+// TestSetUserCookie_SanitizesNewlines 验证 SetUserCookie 清洗换行符和多余空白
+func TestSetUserCookie_SanitizesNewlines(t *testing.T) {
+	origCookie := globalCookieMgr.GetUserCookie()
+	defer globalCookieMgr.SetUserCookie(origCookie)
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "newline in middle",
+			input: "msToken=abc;\nttwid=xyz",
+			want:  "msToken=abc;ttwid=xyz",
+		},
+		{
+			name:  "CRLF in middle",
+			input: "msToken=abc;\r\nttwid=xyz",
+			want:  "msToken=abc;ttwid=xyz",
+		},
+		{
+			name:  "CR only",
+			input: "msToken=abc;\rttwid=xyz",
+			want:  "msToken=abc;ttwid=xyz",
+		},
+		{
+			name:  "tabs replaced with space",
+			input: "msToken=abc;\tttwid=xyz",
+			want:  "msToken=abc; ttwid=xyz",
+		},
+		{
+			name:  "multiple spaces collapsed",
+			input: "msToken=abc;   ttwid=xyz",
+			want:  "msToken=abc; ttwid=xyz",
+		},
+		{
+			name:  "leading and trailing whitespace",
+			input: "  msToken=abc; ttwid=xyz  \n",
+			want:  "msToken=abc; ttwid=xyz",
+		},
+		{
+			name:  "complex mix",
+			input: "\r\n  msToken=abc;\r\n  ttwid=xyz;\n  odin_tt=123  \r\n",
+			want:  "msToken=abc; ttwid=xyz; odin_tt=123",
+		},
+		{
+			name:  "clean cookie unchanged",
+			input: "msToken=abc; ttwid=xyz",
+			want:  "msToken=abc; ttwid=xyz",
+		},
+		{
+			name:  "empty after sanitize",
+			input: "\r\n\t  ",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			globalCookieMgr.SetUserCookie(tt.input)
+			got := globalCookieMgr.GetUserCookie()
+			if got != tt.want {
+				t.Errorf("SetUserCookie(%q) → GetUserCookie() = %q, want %q", tt.input, got, tt.want)
+			}
+			// 确保结果不含换行符（net/http 会拒绝）
+			if strings.ContainsAny(got, "\r\n") {
+				t.Errorf("sanitized cookie still contains newline: %q", got)
+			}
+		})
+	}
+}
