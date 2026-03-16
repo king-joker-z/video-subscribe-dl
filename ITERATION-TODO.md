@@ -331,3 +331,14 @@
 - [x] VideoDetailModal 在简介和信息网格之间插入组件状态栏
 - [x] go build + go vet 全量通过
 - [x] 版本号更新 → v2.19.0
+
+## 迭代 #32 (v2.20.0) — UP主列表排序功能
+- [x] 后端 GetDownloadUploaders 新增 sort 参数：支持 8 种排序方式（白名单校验，防 SQL 注入）
+- [x] 排序选项：最近活跃(recent) / 视频最多(total_desc) / 视频最少(total_asc) / 完成最多(completed_desc) / 失败最多(failed_desc) / 待处理最多(pending_desc) / 名称正序(name_asc) / 名称倒序(name_desc)
+- [x] API /api/uploaders 新增 sort query 参数，传递到 DB 层
+- [x] HandleSuggestions 调用同步更新（传空字符串保持默认排序）
+- [x] 前端 UP 主页面新增排序下拉菜单：6 个常用选项（最近活跃/视频最多/完成最多/失败最多/待处理最多/名称A-Z）
+- [x] 切换排序自动重置到第 1 页
+- [x] 布局优化：搜索框和排序下拉横向排列，支持 flex-wrap 响应式
+- [x] go build + go vet 全量通过
+- [x] 版本号更新 → v2.20.0

@@ -395,8 +395,8 @@ type UploaderStats struct {
 	LastDownloadAt string `json:"last_download_at"`
 }
 
-// GetDownloadUploaders 获取 UP 主列表（分页 + 筛选）
-func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]UploaderStats, int, error) {
+// GetDownloadUploaders 获取 UP 主列表（分页 + 筛选 + 排序）
+func (d *DB) GetDownloadUploaders(status, search, sort string, page, pageSize int) ([]UploaderStats, int, error) {
 	where := "WHERE 1=1"
 	args := []interface{}{}
 
@@ -410,6 +410,27 @@ func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]
 	var total int
 	if err := d.QueryRow(countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
+	}
+
+	// 排序白名单
+	orderClause := "last_download_at DESC" // 默认：最近活跃
+	switch sort {
+	case "total_desc":
+		orderClause = "total DESC"
+	case "total_asc":
+		orderClause = "total ASC"
+	case "completed_desc":
+		orderClause = "completed DESC"
+	case "failed_desc":
+		orderClause = "failed DESC"
+	case "pending_desc":
+		orderClause = "pending DESC"
+	case "name_asc":
+		orderClause = "d.uploader ASC"
+	case "name_desc":
+		orderClause = "d.uploader DESC"
+	case "recent":
+		orderClause = "last_download_at DESC"
 	}
 
 	// 分页查询
@@ -426,9 +447,9 @@ func (d *DB) GetDownloadUploaders(status, search string, page, pageSize int) ([]
 		FROM downloads d
 		%s AND d.uploader != ''
 		GROUP BY d.uploader
-		ORDER BY last_download_at DESC
+		ORDER BY %s
 		LIMIT ? OFFSET ?
-	`, where)
+	`, where, orderClause)
 
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)

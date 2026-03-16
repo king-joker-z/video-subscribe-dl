@@ -42,8 +42,9 @@ func (h *UploadersHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	pg := ParsePagination(r)
 	search := r.URL.Query().Get("search")
+	sort := r.URL.Query().Get("sort")
 
-	uploaders, total, err := h.db.GetDownloadUploaders("", search, pg.Page, pg.PageSize)
+	uploaders, total, err := h.db.GetDownloadUploaders("", search, sort, pg.Page, pg.PageSize)
 	if err != nil {
 		apiError(w, CodeInternal, "查询失败: "+err.Error())
 		return
@@ -221,7 +222,7 @@ func (h *UploadersHandler) HandleSuggestions(w http.ResponseWriter, r *http.Requ
 		limit = 10
 	}
 
-	uploaders, _, err := h.db.GetDownloadUploaders("", search, 1, limit)
+	uploaders, _, err := h.db.GetDownloadUploaders("", search, "", 1, limit)
 	if err != nil {
 		apiError(w, CodeInternal, "查询失败")
 		return

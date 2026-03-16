@@ -33,19 +33,20 @@ export function UploadersPage({ onNavigate }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('recent');
   const [loading, setLoading] = useState(true);
   const searchTimer = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.getUploaders({ page, page_size: 24, search });
+      const res = await api.getUploaders({ page, page_size: 24, search, sort });
       const d = res.data || {};
       setUploaders(d.items || []);
       setTotal(d.total || 0);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, [page, search]);
+  }, [page, search, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -63,15 +64,29 @@ export function UploadersPage({ onNavigate }) {
   };
 
   return h('div', { className: 'page-enter space-y-4' },
-    h('div', { className: 'flex items-center justify-between' },
+    h('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
       h('h2', { className: 'text-lg font-semibold' }, 'UP 主'),
-      h('div', { className: 'relative' },
-        h(Icon, { name: 'search', size: 16, className: 'absolute left-3 top-1/2 -translate-y-1/2 text-slate-500' }),
-        h('input', {
-          type: 'text', placeholder: '搜索 UP 主...',
-          onChange: (e) => handleSearch(e.target.value),
-          className: 'bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-56'
-        })
+      h('div', { className: 'flex items-center gap-2' },
+        h('div', { className: 'relative' },
+          h(Icon, { name: 'search', size: 16, className: 'absolute left-3 top-1/2 -translate-y-1/2 text-slate-500' }),
+          h('input', {
+            type: 'text', placeholder: '搜索 UP 主...',
+            onChange: (e) => handleSearch(e.target.value),
+            className: 'bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-56'
+          })
+        ),
+        h('select', {
+          value: sort,
+          onChange: (e) => { setSort(e.target.value); setPage(1); },
+          className: 'bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300'
+        },
+          h('option', { value: 'recent' }, '最近活跃'),
+          h('option', { value: 'total_desc' }, '视频最多'),
+          h('option', { value: 'completed_desc' }, '完成最多'),
+          h('option', { value: 'failed_desc' }, '失败最多'),
+          h('option', { value: 'pending_desc' }, '待处理最多'),
+          h('option', { value: 'name_asc' }, '名称 A-Z'),
+        )
       )
     ),
     loading
