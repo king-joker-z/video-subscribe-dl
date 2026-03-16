@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net/http"
 	"regexp"
@@ -65,7 +64,7 @@ func generateMsToken() string {
 func fetchRealMsToken(httpClient *http.Client) string {
 	req, err := http.NewRequest("POST", MsTokenAPI, strings.NewReader("{}"))
 	if err != nil {
-		log.Printf("[douyin] msToken request build failed: %v, using random token", err)
+		logger.Warn("msToken request build failed, using random token", "error", err)
 		return generateMsToken()
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -78,14 +77,14 @@ func fetchRealMsToken(httpClient *http.Client) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[douyin] msToken fetch failed: %v, using random token", err)
+		logger.Warn("msToken fetch failed, using random token", "error", err)
 		return generateMsToken()
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("[douyin] msToken read failed: %v, using random token", err)
+		logger.Warn("msToken read failed, using random token", "error", err)
 		return generateMsToken()
 	}
 
@@ -96,14 +95,14 @@ func fetchRealMsToken(httpClient *http.Client) string {
 		// 尝试直接从 body 取（有些接口直接返回 token 字符串）
 		token := strings.TrimSpace(string(body))
 		if len(token) >= 100 && len(token) <= 200 {
-			log.Printf("[douyin] msToken fetched from raw body, len=%d", len(token))
+			logger.Info("msToken fetched from raw body", "len", len(token))
 			return token
 		}
-		log.Printf("[douyin] msToken parse failed or empty (body=%s), using random token", truncate(string(body), 100))
+		logger.Warn("msToken parse failed or empty, using random token", "body", truncate(string(body), 100))
 		return generateMsToken()
 	}
 
-	log.Printf("[douyin] msToken fetched from mssdk, len=%d", len(result.Data))
+	logger.Info("msToken fetched from mssdk", "len", len(result.Data))
 	return result.Data
 }
 
@@ -167,11 +166,11 @@ func (cm *cookieManager) getCookieString(httpClient *http.Client) string {
 	if cm.ttwid == "" || time.Since(cm.ttwidAt) > ttwidTTL {
 		ttwid, err := fetchTTWID(httpClient)
 		if err != nil {
-			log.Printf("[douyin] fetchTTWID failed: %v", err)
+			logger.Warn("fetchTTWID failed", "error", err)
 		} else if ttwid != "" {
 			cm.ttwid = ttwid
 			cm.ttwidAt = time.Now()
-			log.Printf("[douyin] ttwid refreshed, len=%d", len(ttwid))
+			logger.Info("ttwid refreshed", "len", len(ttwid))
 		}
 	}
 
@@ -203,9 +202,9 @@ func (cm *cookieManager) getCookieString(httpClient *http.Client) string {
 		}
 	}
 	if len(missing) > 0 {
-		log.Printf("[douyin] cookie incomplete, missing fields: %v", missing)
+		logger.Warn("cookie incomplete", "missingFields", missing)
 	} else {
-		log.Printf("[douyin] cookie complete, %d fields, len=%d", len(fields), len(cookie))
+		logger.Info("cookie complete", "fields", len(fields), "len", len(cookie))
 	}
 
 	return cookie
