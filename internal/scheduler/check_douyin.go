@@ -24,6 +24,20 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 		return
 	}
 
+	// 首次扫描时获取用户详情（头像、名称等）
+	if src.Name == "" || src.Name == "未命名" {
+		if profile, err := client.GetUserProfile(secUID); err == nil {
+			if profile.Nickname != "" {
+				src.Name = profile.Nickname
+				s.db.UpdateSource(&src)
+				log.Printf("[douyin] 用户信息更新: %s (@%s) 粉丝=%d 作品=%d",
+					profile.Nickname, profile.UniqueID, profile.FollowerCount, profile.AwemeCount)
+			}
+		} else {
+			log.Printf("[douyin] GetUserProfile 失败（非致命）: %v", err)
+		}
+	}
+
 	// 增量基准时间
 	latestVideoAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
 	isFirstScan := latestVideoAt == 0

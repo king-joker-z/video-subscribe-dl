@@ -724,6 +724,123 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	return result, nil
 }
 
+
+
+// GetUserProfile 获取抖音用户详情（头像、简介、粉丝数等）
+// 使用 /aweme/v1/web/user/profile/other/ API + X-Bogus 签名
+func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error) {
+	c.limiter.Acquire()
+
+	cookie := globalCookieMgr.getCookieString(c.normalClient)
+
+	params := url.Values{}
+	params.Set("sec_user_id", secUID)
+	params.Set("cookie_enabled", "true")
+	params.Set("platform", "PC")
+	params.Set("downlink", "10")
+
+	queryStr := params.Encode()
+
+	ua := c.fingerprint.UserAgent
+	xBogus, err := signURL(queryStr, ua)
+	if err != nil {
+		return nil, fmt.Errorf("sign failed: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("%s?%s&X-Bogus=%s", UserProfileAPI, queryStr, xBogus)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("Referer", DouyinReferer)
+	req.Header.Set("User-Agent", ua)
+	setClientHints(req, ua)
+
+	resp, err := c.normalClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch user profile: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read user profile: %w", err)
+	}
+
+	c.limiter.ReportResult(resp.StatusCode)
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("user profile API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var apiResp struct {
+		StatusCode int `json:"status_code"`
+		User       struct {
+			UID              string `json:"uid"`
+			SecUID           string `json:"sec_uid"`
+			ShortID          string `json:"short_id"`
+			Nickname         string `json:"nickname"`
+			Signature        string `json:"signature"`
+			AvatarLarger     struct {
+				URLList []string `json:"url_list"`
+			} `json:"avatar_larger"`
+			AvatarMedium     struct {
+				URLList []string `json:"url_list"`
+			} `json:"avatar_medium"`
+			AvatarThumb      struct {
+				URLList []string `json:"url_list"`
+			} `json:"avatar_thumb"`
+			FollowerCount    int64  `json:"follower_count"`
+			FollowingCount   int64  `json:"following_count"`
+			TotalFavorited   int64  `json:"total_favorited"`
+			AwemeCount       int64  `json:"aweme_count"`
+			FavoritingCount  int64  `json:"favoriting_count"`
+			UniqueID         string `json:"unique_id"`
+			IPLocation       string `json:"ip_location"`
+		} `json:"user"`
+	}
+
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("parse user profile: %w (body=%s)", err, truncate(string(body), 200))
+	}
+
+	if apiResp.StatusCode != 0 {
+		return nil, fmt.Errorf("user profile API status_code=%d", apiResp.StatusCode)
+	}
+
+	u := apiResp.User
+	profile := &DouyinUserProfile{
+		UID:            u.UID,
+		SecUID:         u.SecUID,
+		ShortID:        u.ShortID,
+		UniqueID:       u.UniqueID,
+		Nickname:       u.Nickname,
+		Signature:      u.Signature,
+		FollowerCount:  u.FollowerCount,
+		FollowingCount: u.FollowingCount,
+		TotalFavorited: u.TotalFavorited,
+		AwemeCount:     u.AwemeCount,
+		FavoritingCount: u.FavoritingCount,
+		IPLocation:     u.IPLocation,
+	}
+
+	// 选择头像 URL（优先大图）
+	if len(u.AvatarLarger.URLList) > 0 {
+		profile.AvatarURL = u.AvatarLarger.URLList[0]
+	} else if len(u.AvatarMedium.URLList) > 0 {
+		profile.AvatarURL = u.AvatarMedium.URLList[0]
+	} else if len(u.AvatarThumb.URLList) > 0 {
+		profile.AvatarURL = u.AvatarThumb.URLList[0]
+	}
+
+	log.Printf("[douyin] GetUserProfile: %s (@%s) followers=%d videos=%d",
+		profile.Nickname, profile.UniqueID, profile.FollowerCount, profile.AwemeCount)
+
+	return profile, nil
+}
+
 // ResolveVideoURL 跟随 302 获取无水印视频最终下载地址
 // 使用 HEAD 请求（不下载 body），跟随 301/302 重定向获取最终无水印地址
 func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {

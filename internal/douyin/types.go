@@ -38,3 +38,21 @@ type UserVideosResult struct {
 	HasMore   bool          `json:"has_more"`
 	MaxCursor int64         `json:"max_cursor"`
 }
+
+
+// DouyinUserProfile 抖音用户详细信息（来自 profile API）
+type DouyinUserProfile struct {
+	UID            string `json:"uid"`
+	SecUID         string `json:"sec_uid"`
+	ShortID        string `json:"short_id"`       // 抖音号（短 ID）
+	UniqueID       string `json:"unique_id"`       // 抖音号（自定义）
+	Nickname       string `json:"nickname"`
+	Signature      string `json:"signature"`       // 个人简介
+	AvatarURL      string `json:"avatar_url"`      // 头像 URL（大图）
+	FollowerCount  int64  `json:"follower_count"`  // 粉丝数
+	FollowingCount int64  `json:"following_count"` // 关注数
+	TotalFavorited int64  `json:"total_favorited"` // 获赞总数
+	AwemeCount     int64  `json:"aweme_count"`     // 作品数
+	FavoritingCount int64 `json:"favoriting_count"` // 喜欢数
+	IPLocation     string `json:"ip_location"`     // IP 属地
+}
