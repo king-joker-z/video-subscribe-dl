@@ -89,6 +89,7 @@ func (c *DouyinClient) setFullHeaders(req *http.Request) {
 
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Referer", DouyinReferer)
+	req.Header.Set("Origin", "https://www.douyin.com")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 	// 注意: 不手动设置 Accept-Encoding，让 Go http.Transport 自动处理 gzip 解压
