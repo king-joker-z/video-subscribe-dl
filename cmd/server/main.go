@@ -134,6 +134,8 @@ func main() {
 		} else if updated {
 			log.Println("[sign-updater] 签名脚本已从远端更新")
 		}
+		// 启动定时自动检查（每 6 小时）
+		signUpdater.StartAutoUpdate(6 * time.Hour)
 	}
 
 	sched := scheduler.New(database, dl, *downloadDir, cookiePath)
@@ -187,6 +189,9 @@ func main() {
 	// Graceful shutdown: scheduler → downloader → web server → DB
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// 0. 停止签名自动更新
+	signUpdater.StopAutoUpdate()
 
 	// 1. 停止调度器（不再提交新任务）
 	log.Println("[shutdown] 停止调度器...")

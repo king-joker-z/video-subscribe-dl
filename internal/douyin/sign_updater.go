@@ -27,6 +27,10 @@ type SignUpdater struct {
 
 	// HTTP 客户端
 	client *http.Client
+
+	// 自动更新
+	autoStopCh chan struct{}
+	autoStopped sync.Once
 }
 
 var (
@@ -224,4 +228,47 @@ func (su *SignUpdater) reloadABogusPool(jsCode string) error {
 
 	slog.Info("a_bogus pool reloaded", "module", "douyin", "size", abogusPoolSize)
 	return nil
+}
+
+// StartAutoUpdate 启动定时自动检查更新
+func (su *SignUpdater) StartAutoUpdate(interval time.Duration) {
+	su.mu.Lock()
+	su.autoStopCh = make(chan struct{})
+	su.autoStopped = sync.Once{}
+	su.mu.Unlock()
+
+	slog.Info("签名自动更新已启用", "module", "douyin", "interval", interval.String())
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if updated, err := su.CheckAndUpdate(); err != nil {
+					slog.Warn("auto sign update check failed", "module", "douyin", "error", err)
+				} else if updated {
+					slog.Info("auto sign update: script updated", "module", "douyin")
+				}
+			case <-su.autoStopCh:
+				return
+			}
+		}
+	}()
+}
+
+// StopAutoUpdate 停止定时自动检查（幂等）
+func (su *SignUpdater) StopAutoUpdate() {
+	su.mu.RLock()
+	ch := su.autoStopCh
+	su.mu.RUnlock()
+
+	if ch == nil {
+		return // 未启动过
+	}
+
+	su.autoStopped.Do(func() {
+		close(ch)
+		slog.Info("签名自动更新已停止", "module", "douyin")
+	})
 }
