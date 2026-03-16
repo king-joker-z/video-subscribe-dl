@@ -19,6 +19,9 @@ import (
 	"video-subscribe-dl/internal/notify"
 )
 
+// douyinMaxConcurrent 限制抖音快速下载的最大并发数
+const douyinMaxConcurrent = 3
+
 // QuickDownloadHandler 单视频快速下载 API
 type QuickDownloadHandler struct {
 	db            *db.DB
@@ -26,6 +29,7 @@ type QuickDownloadHandler struct {
 	downloader    *downloader.Downloader
 	notifier      *notify.Notifier
 	getBiliClient func() *bilibili.Client
+	douyinSem    chan struct{} // 抖音下载并发信号量
 }
 
 func NewQuickDownloadHandler(database *db.DB, dl *downloader.Downloader, downloadDir string) *QuickDownloadHandler {
@@ -33,6 +37,7 @@ func NewQuickDownloadHandler(database *db.DB, dl *downloader.Downloader, downloa
 		db:          database,
 		downloadDir: downloadDir,
 		downloader:  dl,
+		douyinSem:   make(chan struct{}, douyinMaxConcurrent),
 	}
 }
 
@@ -433,10 +438,21 @@ func (h *QuickDownloadHandler) handleDouyinQuickDownload(w http.ResponseWriter, 
 
 // executeDouyinDownload 异步执行抖音视频下载
 func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string, detail *douyin.DouyinVideo, client *douyin.DouyinClient) {
+	// 获取信号量（限制并发）
+	h.douyinSem <- struct{}{}
+	defer func() { <-h.douyinSem }()
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[PANIC] quickdl·douyin recovered: %v (awemeID=%s)", r, awemeID)
 			h.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("panic: %v", r))
+			// panic 时也发 SSE 失败事件
+			h.downloader.EmitEvent(downloader.DownloadEvent{
+				Type:  "failed",
+				BvID:  awemeID,
+				Title: detail.Desc,
+				Error: fmt.Sprintf("panic: %v", r),
+			})
 		}
 	}()
 
@@ -454,6 +470,12 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 		log.Printf("[quickdl·douyin] ResolveVideoURL failed: %v", err)
 		h.db.UpdateDownloadStatus(dlID, "failed", "", 0, err.Error())
 		h.db.IncrementRetryCount(dlID, err.Error())
+		h.downloader.EmitEvent(downloader.DownloadEvent{
+			Type:  "failed",
+			BvID:  awemeID,
+			Title: detail.Desc,
+			Error: err.Error(),
+		})
 		return
 	}
 
@@ -493,6 +515,15 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 		log.Printf("[quickdl·douyin] Download failed after retries: %v", err)
 		h.db.UpdateDownloadStatus(dlID, "failed", "", 0, err.Error())
 		h.db.IncrementRetryCount(dlID, err.Error())
+		h.downloader.EmitEvent(downloader.DownloadEvent{
+			Type:  "failed",
+			BvID:  awemeID,
+			Title: detail.Desc,
+			Error: err.Error(),
+		})
+		if h.notifier != nil {
+			h.notifier.Send(notify.EventDownloadFailed, "抖音视频下载失败: "+detail.Desc, err.Error())
+		}
 		return
 	}
 
@@ -550,15 +581,32 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 			fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(fileSize)/(1024*1024)))
 	}
 
+	// 发送 SSE 事件通知前端
+	h.downloader.EmitEvent(downloader.DownloadEvent{
+		Type:     "completed",
+		BvID:     awemeID,
+		Title:    title,
+		FileSize: fileSize,
+	})
+
 	log.Printf("[quickdl·douyin] Completed: %s -> %s", awemeID, videoFilePath)
 }
 
 // executeDouyinNoteDownload 异步执行抖音图集下载
 func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID string, detail *douyin.DouyinVideo) {
+	// 获取信号量（限制并发）— 注意：图集走这里时，信号量已在 executeDouyinDownload 中获取
+	// 但 executeDouyinNoteDownload 从 executeDouyinDownload 内部调用，所以不需要再获取
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[PANIC] quickdl·douyin-note recovered: %v (awemeID=%s)", r, awemeID)
 			h.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("panic: %v", r))
+			h.downloader.EmitEvent(downloader.DownloadEvent{
+				Type:  "failed",
+				BvID:  awemeID,
+				Title: detail.Desc,
+				Error: fmt.Sprintf("panic: %v", r),
+			})
 		}
 	}()
 
@@ -622,6 +670,12 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 	if successCount == 0 {
 		h.db.UpdateDownloadStatus(dlID, "failed", "", 0, "all images download failed")
 		h.db.IncrementRetryCount(dlID, "all images download failed")
+		h.downloader.EmitEvent(downloader.DownloadEvent{
+			Type:  "failed",
+			BvID:  awemeID,
+			Title: detail.Desc,
+			Error: "all images download failed",
+		})
 		return
 	}
 
@@ -654,6 +708,14 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 			fmt.Sprintf("抖音图集下载完成: %s (%d张)", title, successCount),
 			fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(totalSize)/(1024*1024)))
 	}
+
+	// 发送 SSE 事件通知前端
+	h.downloader.EmitEvent(downloader.DownloadEvent{
+		Type:     "completed",
+		BvID:     awemeID,
+		Title:    title,
+		FileSize: totalSize,
+	})
 
 	log.Printf("[quickdl·douyin-note] Completed: %s (%d/%d images, %.1f MB)", awemeID, successCount, len(detail.Images), float64(totalSize)/(1024*1024))
 }
@@ -844,6 +906,9 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 		}
 		h.db.UpdateDownloadStatus(dlID, "failed", "", 0, errMsg)
 		h.db.IncrementRetryCount(dlID, errMsg)
+		if h.notifier != nil {
+			h.notifier.Send(notify.EventDownloadFailed, "B站视频下载失败: "+videoID, errMsg)
+		}
 		log.Printf("[quickdl] Failed: %s - %s", videoID, errMsg)
 		return
 	}
@@ -907,6 +972,12 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 		statusBits |= db.StatusBitSubtitle
 	}
 	h.db.UpdateDetailStatus(dlID, statusBits)
+
+	// 发送通知
+	if h.notifier != nil && detail != nil {
+		h.notifier.Send(notify.EventDownloadComplete, "B站视频下载完成: "+detail.Title,
+			fmt.Sprintf("UP主: %s\n大小: %.1f MB", uploaderName, float64(result.FileSize)/(1024*1024)))
+	}
 
 	log.Printf("[quickdl] Completed: %s -> %s", videoID, result.FilePath)
 }

@@ -301,6 +301,11 @@ func (d *Downloader) UnsubscribeEvents(ch chan DownloadEvent) {
 	}
 }
 
+// EmitEvent 公开方法：广播下载事件给所有订阅者（供外部模块发送非 Downloader 管理的下载事件）
+func (d *Downloader) EmitEvent(evt DownloadEvent) {
+	d.emitEvent(evt)
+}
+
 // emitEvent 广播下载事件给所有订阅者
 func (d *Downloader) emitEvent(evt DownloadEvent) {
 	d.eventMu.RLock()

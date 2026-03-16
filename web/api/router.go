@@ -101,6 +101,7 @@ func (rt *Router) SetStartTime(t time.Time)     { rt.task.SetStartTime(t) }
 // SetNotifier 设置通知处理器
 func (rt *Router) SetNotifier(n *notify.Notifier) {
 	rt.notify = NewNotifyHandler(n)
+	rt.quickdl.SetNotifier(n)
 }
 
 // Register 注册新版 API 路由到 mux
