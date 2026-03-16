@@ -1,6 +1,6 @@
 # VSD 迭代记录
 
-> 最后更新: 2026-03-16
+> 最后更新: 2026-03-16（含 emoji过滤 + 删除订阅清文件）
 
 ## 已完成
 
@@ -34,6 +34,8 @@
 - [x] 抖音视频独立子目录（{title} [{awemeID}]/）— 5c3fe70
 - [x] SanitizePath 对齐 B 站（Unicode 不可见字符 + 80 字符截断）— 35af5aa
 - [x] 启动时版本化清理幽灵目录（cleanup v2）— adfc186
+- [x] SanitizePath 过滤 emoji（U+1F000-U+1FFFF，NAS 兼容性）— 4e42765
+- [x] 删除订阅时可选清除本地文件 + DB 记录（前端两步确认）— 16dbbb6
 
 ### 基础设施
 - [x] RateLimiter 生命周期管理 + DouyinClient.Close() — 8f812d1 / d33b77e
