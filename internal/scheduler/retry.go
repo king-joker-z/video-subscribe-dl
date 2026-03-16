@@ -16,8 +16,8 @@ import (
 
 // retryOneDownload 执行单个失败下载的重试
 func (s *Scheduler) retryOneDownload(dl db.Download) {
-	// 暂停时检查冷却是否已过期
-	if s.dl.IsPaused() {
+	// 暂停时检查冷却是否已过期（s.dl 为 nil 时跳过，抖音不走 B 站下载器）
+	if s.dl != nil && s.dl.IsPaused() {
 		if !s.isBiliInCooldown() {
 			s.dl.Resume()
 			log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
@@ -193,8 +193,8 @@ func (s *Scheduler) retryFailedDownloads() {
 	log.Printf("[retry-scheduler] Found %d retryable failed downloads", len(retryable))
 
 	for _, dl := range retryable {
-		// 暂停时检查冷却是否已过期
-		if s.dl.IsPaused() {
+		// 暂停时检查冷却是否已过期（s.dl 为 nil 时跳过，抖音不走 B 站下载器）
+		if s.dl != nil && s.dl.IsPaused() {
 			if !s.isBiliInCooldown() {
 				s.dl.Resume()
 				log.Printf("[retry-scheduler] 风控冷却结束，恢复下载器")
@@ -232,8 +232,8 @@ func (s *Scheduler) RedownloadByID(dlID int64) {
 		log.Printf("[redownload] Download %d status is %s, expected pending", dlID, dl.Status)
 		return
 	}
-	// 暂停时检查冷却是否已过期
-	if s.dl.IsPaused() {
+	// 暂停时检查冷却是否已过期（s.dl 为 nil 时跳过）
+	if s.dl != nil && s.dl.IsPaused() {
 		if !s.isBiliInCooldown() {
 			s.dl.Resume()
 			log.Printf("[redownload] 风控冷却结束，恢复下载器")

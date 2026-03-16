@@ -1,6 +1,7 @@
 package douyin
 
 import (
+	"time"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -147,18 +148,22 @@ func (ap *abogusPool) sign(queryStr, userAgent string) (string, error) {
 }
 
 // replaceEntry 异步替换一个池条目
+// 使用指数退避重试，防止全部失败导致池耗尽永久阻塞
 func (ap *abogusPool) replaceEntry() {
-	entry, err := ap.newEntry()
-	if err != nil {
-		slog.Error("failed to create replacement a_bogus VM", "module", "douyin", "error", err)
-		// 重试一次
-		entry, err = ap.newEntry()
-		if err != nil {
-			slog.Error("failed to create replacement a_bogus VM (retry)", "module", "douyin", "error", err)
+	for attempt := 1; attempt <= maxReplaceRetries; attempt++ {
+		entry, err := ap.newEntry()
+		if err == nil {
+			ap.pool <- entry
 			return
 		}
+		slog.Error("failed to create replacement a_bogus VM",
+			"module", "douyin", "pool", "abogus", "attempt", attempt, "error", err)
+		if attempt < maxReplaceRetries {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
 	}
-	ap.pool <- entry
+	slog.Error("all replacement attempts failed, pool capacity permanently reduced by 1",
+		"module", "douyin", "pool", "abogus")
 }
 
 // stats 返回池统计信息

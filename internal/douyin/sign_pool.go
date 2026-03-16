@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -27,8 +28,9 @@ type poolEntry struct {
 }
 
 const (
-	defaultPoolSize = 4   // 默认池大小
-	defaultMaxUses  = 500 // 每个 VM 最大使用次数后丢弃重建
+	defaultPoolSize   = 4   // 默认池大小
+	defaultMaxUses    = 500 // 每个 VM 最大使用次数后丢弃重建
+	maxReplaceRetries = 5   // replaceEntry 最大重试次数
 )
 
 var (
@@ -99,8 +101,11 @@ func (sp *signPool) sign(queryStr, userAgent string) (string, error) {
 	// 从池中获取 VM
 	entry := <-sp.pool
 
-	// 执行签名
-	code := fmt.Sprintf("sign('%s', '%s')", queryStr, userAgent)
+	// 对参数进行转义，防止 JS 注入（单引号）— 与 abogus_pool.go 保持一致
+	safeQuery := escapeJSString(queryStr)
+	safeUA := escapeJSString(userAgent)
+
+	code := fmt.Sprintf("sign('%s', '%s')", safeQuery, safeUA)
 	val, err := entry.vm.RunString(code)
 	if err != nil {
 		// 执行失败，丢弃这个 VM，创建新的放回池
@@ -125,18 +130,24 @@ func (sp *signPool) sign(queryStr, userAgent string) (string, error) {
 }
 
 // replaceEntry 异步替换一个池条目
+// 使用指数退避重试，防止全部失败导致池耗尽永久阻塞
 func (sp *signPool) replaceEntry() {
-	entry, err := sp.newEntry()
-	if err != nil {
-		slog.Error("failed to create replacement VM", "module", "douyin", "error", err)
-		// 重试一次
-		entry, err = sp.newEntry()
-		if err != nil {
-			slog.Error("failed to create replacement VM (retry)", "module", "douyin", "error", err)
+	for attempt := 1; attempt <= maxReplaceRetries; attempt++ {
+		entry, err := sp.newEntry()
+		if err == nil {
+			sp.pool <- entry
 			return
 		}
+		slog.Error("failed to create replacement VM",
+			"module", "douyin", "pool", "sign", "attempt", attempt, "error", err)
+		if attempt < maxReplaceRetries {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
 	}
-	sp.pool <- entry
+	// 所有重试都失败：池容量永久减 1，记录严重错误
+	// 这比之前的静默 return 更明确，且避免了调用方无限阻塞（池仍可用，只是少一个 slot）
+	slog.Error("all replacement attempts failed, pool capacity permanently reduced by 1",
+		"module", "douyin", "pool", "sign")
 }
 
 // stats 返回池统计信息

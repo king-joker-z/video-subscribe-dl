@@ -51,8 +51,8 @@
 ## 待做
 
 ### P0 — Bug 修复
-- [ ] sign_pool.go:103 缺少 escapeJSString 转义（与 abogus_pool.go 不一致，一行修复）
-- [ ] replaceEntry() 全部失败时池耗尽导致永久阻塞（加 fallback）
+- [x] sign_pool.go:103 缺少 escapeJSString 转义（与 abogus_pool.go 不一致，一行修复）
+- [x] replaceEntry() 全部失败时池耗尽导致永久阻塞（加 fallback）
 
 ### P1 — 代码质量
 - [x] checkDouyin/fullScanDouyin mock 测试（30+ 用例，覆盖 11.7%）— 97f7442 / eb647bb

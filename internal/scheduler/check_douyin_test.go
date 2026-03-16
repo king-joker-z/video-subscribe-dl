@@ -96,7 +96,9 @@ func newTestScheduler(t *testing.T, mock *mockDouyinAPI) *Scheduler {
 		fullScanRunning: make(map[int64]bool),
 		newDouyinClient: func() DouyinAPI { return mock },
 		sleepFn:         func(d time.Duration) {}, // 测试中跳过 sleep
+		douyinDownloadLimiter: douyin.NewRateLimiter(100, 100, time.Millisecond), // 测试中不限流
 	}
+	t.Cleanup(func() { s.douyinDownloadLimiter.Stop() })
 	return s
 }
 
