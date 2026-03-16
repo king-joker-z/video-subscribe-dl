@@ -191,10 +191,9 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 			defer dyClient.Close()
 			result, err := dyClient.ResolveShareURL(source.URL)
 			if err == nil && result.Type == douyin.URLTypeUser {
-				// 尝试获取第一个视频来取用户名
-				videos, err := dyClient.GetUserVideos(result.SecUID, 0)
-				if err == nil && len(videos.Videos) > 0 {
-					source.Name = videos.Videos[0].Author.Nickname
+				// 用 GetUserProfile 获取名称（比 GetUserVideos 更轻量可靠）
+				if profile, err := dyClient.GetUserProfile(result.SecUID); err == nil && profile.Nickname != "" {
+					source.Name = profile.Nickname
 				}
 				// 规范化 URL 格式
 				source.URL = "https://www.douyin.com/user/" + result.SecUID

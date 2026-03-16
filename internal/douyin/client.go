@@ -96,21 +96,18 @@ type DouyinClient struct {
 	normalClient     *http.Client          // 正常 client
 	limiter          *RateLimiter
 	fingerprint      *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
-	sessionCookie    string                // 会话级 Cookie 缓存（翻页请求复用同一 Cookie）
-	sessionMsToken   string                // 会话级 msToken（确保 Cookie 和 URL query 使用同一个值）
+	sessionMsToken   string                // 会话级 msToken（Cookie 中的 msToken 保持一致）
 }
 
-// getSessionCookie 返回会话级 Cookie（整个 client 生命周期内复用同一 Cookie）
-// 解决翻页时每次生成新 Cookie 导致抖音服务端判定会话不一致返回空列表的问题
+// getSessionCookie 返回使用会话级 msToken 的 Cookie
+// msToken 在 client 生命周期内保持一致（抖音要求翻页 msToken 一致）
+// verify_fp / s_v_web_id 每次重新生成（模拟真实浏览器行为）
 func (c *DouyinClient) getSessionCookie() string {
-	if c.sessionCookie == "" {
-		// 先确保 sessionMsToken 已生成，getCookieStringWithMsToken 会使用它
-		if c.sessionMsToken == "" {
-			c.sessionMsToken = generateMsToken()
-		}
-		c.sessionCookie = globalCookieMgr.getCookieStringWithMsToken(c.normalClient, c.sessionMsToken)
+	if c.sessionMsToken == "" {
+		c.sessionMsToken = generateMsToken()
 	}
-	return c.sessionCookie
+	// 不缓存完整 cookie，每次重新构造（verify_fp/s_v_web_id 重新随机）
+	return globalCookieMgr.getCookieStringWithMsToken(c.normalClient, c.sessionMsToken)
 }
 
 // NewClient 创建抖音客户端（使用会话级指纹，确保同一实例内请求一致性）
@@ -757,6 +754,20 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read user videos: %w", err)
+	}
+
+	// 诊断日志：记录原始响应信息，方便排查空 body 等问题
+	logger.Info("GetUserVideos response",
+		"secUID", secUID,
+		"cursor", maxCursor,
+		"statusCode", resp.StatusCode,
+		"contentLength", resp.ContentLength,
+		"contentType", resp.Header.Get("Content-Type"),
+		"bodyLen", len(body))
+
+	if len(body) == 0 {
+		return nil, fmt.Errorf("user videos API returned empty body (status=%d, contentType=%s)",
+			resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 
 	// 向限流器报告 HTTP 状态码（429/403/503 触发 penalty）
