@@ -21,21 +21,75 @@ import (
 //go:embed sign.js
 var signScript string
 
-// PC 端 UA（用于需要 X-Bogus 签名的 API）
-const pcUA = "Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD3.170816.012) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Mobile Safari/537.36 Edg/87.0.664.66"
-
 // UA 池: 移动端 UA（parse-video 用 iPhone UA 效果最好）
-var uaPool = []string{
-	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-	"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+var mobileUAPool = []string{
+	// iPhone Safari (iOS 17-18)
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1",
 	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-	"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-	"Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+	// Android Chrome (最新版本)
+	"Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36",
 }
 
-// pickUA 轮换 UA
+// PC 端 UA 池（用于需要签名的 API 请求）
+var pcUAPool = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+}
+
+// sec-ch-ua Client Hints 映射表（按 Chrome 主版本号）
+// 抖音服务端通过 Client Hints 进一步验证浏览器身份一致性
+var clientHintsMap = map[string]ClientHints{
+	"131": {SecChUA: `"Chromium";v="131", "Google Chrome";v="131", "Not_A Brand";v="24"`, SecChUAMobile: "?0", SecChUAPlatform: `"Windows"`},
+	"130": {SecChUA: `"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"`, SecChUAMobile: "?0", SecChUAPlatform: `"Windows"`},
+	"129": {SecChUA: `"Chromium";v="129", "Google Chrome";v="129", "Not=A?Brand";v="8"`, SecChUAMobile: "?0", SecChUAPlatform: `"Windows"`},
+	"128": {SecChUA: `"Chromium";v="128", "Google Chrome";v="128", "Not;A=Brand";v="99"`, SecChUAMobile: "?0", SecChUAPlatform: `"Windows"`},
+	"127": {SecChUA: `"Chromium";v="127", "Google Chrome";v="127", "Not)A;Brand";v="99"`, SecChUAMobile: "?0", SecChUAPlatform: `"Windows"`},
+}
+
+// ClientHints sec-ch-ua 相关头部
+type ClientHints struct {
+	SecChUA         string
+	SecChUAMobile   string
+	SecChUAPlatform string
+}
+
+// pickUA 随机选择移动端 UA
 func pickUA() string {
-	return uaPool[rand.Intn(len(uaPool))]
+	return mobileUAPool[rand.Intn(len(mobileUAPool))]
+}
+
+// pickPCUA 随机选择 PC 端 UA
+func pickPCUA() string {
+	return pcUAPool[rand.Intn(len(pcUAPool))]
+}
+
+// extractChromeVersion 从 UA 中提取 Chrome 主版本号
+func extractChromeVersion(ua string) string {
+	re := regexp.MustCompile(`Chrome/(\d+)`)
+	if m := re.FindStringSubmatch(ua); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+// setClientHints 为请求设置 sec-ch-ua Client Hints 头部
+func setClientHints(req *http.Request, ua string) {
+	ver := extractChromeVersion(ua)
+	if hints, ok := clientHintsMap[ver]; ok {
+		req.Header.Set("sec-ch-ua", hints.SecChUA)
+		req.Header.Set("sec-ch-ua-mobile", hints.SecChUAMobile)
+		req.Header.Set("sec-ch-ua-platform", hints.SecChUAPlatform)
+	}
 }
 
 // DouyinClient 抖音 API 客户端
@@ -213,7 +267,8 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
-	xBogus, err := signURL(parsed.RawQuery, pcUA)
+	ua := pickPCUA()
+	xBogus, err := signURL(parsed.RawQuery, ua)
 	if err != nil {
 		return nil, fmt.Errorf("sign failed: %w", err)
 	}
@@ -225,7 +280,8 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 	}
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Referer", DouyinReferer)
-	req.Header.Set("User-Agent", pcUA)
+	req.Header.Set("User-Agent", ua)
+	setClientHints(req, ua)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
@@ -544,7 +600,8 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	queryStr := params.Encode()
 
 	// X-Bogus 签名
-	xBogus, err := signURL(queryStr, pcUA)
+	ua := pickPCUA()
+	xBogus, err := signURL(queryStr, ua)
 	if err != nil {
 		return nil, fmt.Errorf("sign failed: %w", err)
 	}
@@ -557,7 +614,8 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	}
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("Referer", DouyinReferer)
-	req.Header.Set("User-Agent", pcUA)
+	req.Header.Set("User-Agent", ua)
+	setClientHints(req, ua)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
