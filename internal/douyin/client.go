@@ -327,32 +327,24 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 
 // getVideoDetailAPI 使用 douyin.com/aweme/v1/web/aweme/detail/ API 获取视频详情
 func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
-	apiURL := BuildVideoDetailURL(videoID)
-
-	parsed, err := url.Parse(apiURL)
-	if err != nil {
-		return nil, err
-	}
-
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
+	// 构建完整的 query 参数（参考 f2 BaseRequestModel + PostDetail）
+	params := c.buildBaseParams()
+	params.Set("aweme_id", videoID)
+
+	queryStr := params.Encode()
+
 	ua := c.fingerprint.UserAgent
-	sr := signURLWithABogus(parsed.RawQuery, ua)
-	if sr.ABogus != "" {
-		apiURL += "&a_bogus=" + sr.ABogus
-	}
-	if sr.XBogus != "" {
-		apiURL += "&X-Bogus=" + sr.XBogus
-	}
+	sr := signURLWithABogus(queryStr, ua)
+	apiURL := applySignResult(VideoDetailAPI, queryStr, sr)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", DouyinReferer)
-	req.Header.Set("User-Agent", ua)
-	setClientHints(req, ua)
+	c.setFullHeaders(req)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
@@ -702,8 +694,8 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 }
 
 // GetUserVideos 获取用户视频列表
-// 使用 douyin.com/aweme/v1/web/aweme/post/ API + X-Bogus 签名
-// 参考 lux 项目的实现，旧 iesdouyin.com API 已废弃（返回空 body）
+// 使用 douyin.com/aweme/v1/web/aweme/post/ API + a_bogus/X-Bogus 签名
+// 参考 f2 项目的 BaseRequestModel，发送完整的浏览器指纹参数
 // consecutiveErrors: 连续错误次数，用于指数退避限流（0=正常速率）
 func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutiveErrors ...int) (*UserVideosResult, error) {
 	errCount := 0
@@ -721,14 +713,11 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
-	// 构建 query 参数
-	params := url.Values{}
+	// 构建完整的 query 参数（参考 f2 BaseRequestModel + UserPost）
+	params := c.buildBaseParams()
 	params.Set("sec_user_id", secUID)
 	params.Set("max_cursor", fmt.Sprintf("%d", maxCursor))
 	params.Set("count", "20")
-	params.Set("cookie_enabled", "true")
-	params.Set("platform", "PC")
-	params.Set("downlink", "10")
 
 	queryStr := params.Encode()
 
@@ -742,9 +731,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 		return nil, err
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", DouyinReferer)
-	req.Header.Set("User-Agent", ua)
-	setClientHints(req, ua)
+	c.setFullHeaders(req)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
@@ -797,7 +784,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 				URLList []string `json:"url_list"`
 			} `json:"images"`
 		} `json:"aweme_list"`
-		HasMore   bool  `json:"has_more"`
+		HasMore   int   `json:"has_more"` // 抖音返回 1/0 而非 true/false
 		MaxCursor int64 `json:"max_cursor"`
 	}
 
@@ -806,7 +793,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	}
 
 	result := &UserVideosResult{
-		HasMore:   apiResp.HasMore,
+		HasMore:   apiResp.HasMore == 1,
 		MaxCursor: apiResp.MaxCursor,
 	}
 
@@ -857,11 +844,8 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
-	params := url.Values{}
+	params := c.buildBaseParams()
 	params.Set("sec_user_id", secUID)
-	params.Set("cookie_enabled", "true")
-	params.Set("platform", "PC")
-	params.Set("downlink", "10")
 
 	queryStr := params.Encode()
 
@@ -874,9 +858,7 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 		return nil, err
 	}
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", DouyinReferer)
-	req.Header.Set("User-Agent", ua)
-	setClientHints(req, ua)
+	c.setFullHeaders(req)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
