@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"video-subscribe-dl/internal/db"
@@ -56,18 +57,39 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 		result, err := client.GetUserVideos(secUID, maxCursor, consecutiveErrors)
 		if err != nil {
 			consecutiveErrors++
-			log.Printf("[douyin] GetUserVideos 失败 (连续第%d次): %v", consecutiveErrors, err)
+			errMsg := err.Error()
 
-			// 指数退避: 连续 3 次失败后放弃
-			if consecutiveErrors >= 3 {
-				log.Printf("[douyin] 连续失败 %d 次，停止检查（可能触发风控）", consecutiveErrors)
-				break
+			// 区分风控错误和普通网络错误
+			isRiskControl := strings.Contains(errMsg, "403") ||
+				strings.Contains(errMsg, "429") ||
+				strings.Contains(errMsg, "captcha") ||
+				strings.Contains(errMsg, "verify") ||
+				strings.Contains(errMsg, "blocked")
+
+			if isRiskControl {
+				log.Printf("[douyin] ⚠️ 检测到风控拦截 (连续第%d次): %v", consecutiveErrors, err)
+				if consecutiveErrors >= 2 {
+					log.Printf("[douyin] 风控连续 %d 次，立即停止本轮检查", consecutiveErrors)
+					break
+				}
+				// 风控退避: 30s + 随机 0-30s
+				backoff := time.Duration(30000+rand.Intn(30000)) * time.Millisecond
+				log.Printf("[douyin] 风控退避 %v 后重试", backoff)
+				time.Sleep(backoff)
+			} else {
+				log.Printf("[douyin] GetUserVideos 失败 (连续第%d次): %v", consecutiveErrors, err)
+				if consecutiveErrors >= 5 {
+					log.Printf("[douyin] 连续失败 %d 次，停止本轮检查", consecutiveErrors)
+					break
+				}
+				// 普通错误指数退避: 5s, 10s, 20s, 40s
+				backoff := time.Duration(5*(1<<(consecutiveErrors-1))) * time.Second
+				if backoff > 60*time.Second {
+					backoff = 60 * time.Second
+				}
+				log.Printf("[douyin] 退避等待 %v 后重试", backoff)
+				time.Sleep(backoff)
 			}
-
-			// 退避等待: 10s * 2^(errors-1)
-			backoff := time.Duration(10*(1<<(consecutiveErrors-1))) * time.Second
-			log.Printf("[douyin] 退避等待 %v 后重试", backoff)
-			time.Sleep(backoff)
 			continue
 		}
 		consecutiveErrors = 0 // 重置连续错误计数
