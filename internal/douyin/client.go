@@ -515,13 +515,23 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 	return video, nil
 }
 
-// ---- 用户视频列表 ----
-
 // GetUserVideos 获取用户视频列表
 // 使用 douyin.com/aweme/v1/web/aweme/post/ API + X-Bogus 签名
 // 参考 lux 项目的实现，旧 iesdouyin.com API 已废弃（返回空 body）
-func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideosResult, error) {
-	c.limiter.Acquire()
+// consecutiveErrors: 连续错误次数，用于指数退避限流（0=正常速率）
+func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutiveErrors ...int) (*UserVideosResult, error) {
+	errCount := 0
+	if len(consecutiveErrors) > 0 {
+		errCount = consecutiveErrors[0]
+	}
+	c.limiter.AcquireWithBackoff(errCount)
+
+
+
+
+
+
+
 
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
@@ -562,6 +572,9 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 	if err != nil {
 		return nil, fmt.Errorf("read user videos: %w", err)
 	}
+
+	// 向限流器报告 HTTP 状态码（429/403/503 触发 penalty）
+	c.limiter.ReportResult(resp.StatusCode)
 
 	if resp.StatusCode != 200 {
 		snippet := string(body)

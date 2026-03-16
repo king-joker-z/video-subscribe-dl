@@ -53,7 +53,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 	consecutiveErrors := 0
 
 	for {
-		result, err := client.GetUserVideos(secUID, maxCursor)
+		result, err := client.GetUserVideos(secUID, maxCursor, consecutiveErrors)
 		if err != nil {
 			consecutiveErrors++
 			log.Printf("[douyin] GetUserVideos 失败 (连续第%d次): %v", consecutiveErrors, err)
