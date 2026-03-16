@@ -2,10 +2,6 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [main]
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,7 +16,7 @@ jobs:
         env:
           GOPROXY: https://proxy.golang.org,direct
         run: |
-          go test -short -coverprofile=coverage.out ./...
+          go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -1
 
       - name: Go build test
