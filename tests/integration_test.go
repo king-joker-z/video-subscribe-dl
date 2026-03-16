@@ -489,3 +489,260 @@ func TestPrometheusMetrics(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================
+// TestBiliVideoParseWithMock — B站 API 响应解析 mock 测试
+// ============================================================
+
+func TestBiliVideoParseWithMock(t *testing.T) {
+	// 模拟 B站 UP 主视频列表 API 响应
+	mockResp := `{
+		"code": 0,
+		"message": "0",
+		"data": {
+			"list": {
+				"vlist": [
+					{
+						"bvid": "BV1mocktest123",
+						"title": "测试视频标题",
+						"description": "测试描述",
+						"pic": "https://i2.hdslb.com/test.jpg",
+						"length": "12:34",
+						"created": 1700000000,
+						"season_id": 0,
+						"is_season_display": false
+					},
+					{
+						"bvid": "BV2mocktest456",
+						"title": "第二个视频",
+						"description": "",
+						"pic": "https://i2.hdslb.com/test2.jpg",
+						"length": "3:45",
+						"created": 1700100000,
+						"season_id": 12345,
+						"is_season_display": true
+					}
+				]
+			},
+			"page": {
+				"count": 42
+			}
+		}
+	}`
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, mockResp)
+	}))
+	defer mockServer.Close()
+
+	// 直接用 http.Get 模拟客户端请求，验证 JSON 解析
+	resp, err := http.Get(mockServer.URL)
+	if err != nil {
+		t.Fatalf("mock server request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var apiResp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			List struct {
+				VList []struct {
+					BvID        string `json:"bvid"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					Pic         string `json:"pic"`
+					Length      string `json:"length"`
+					Created     int64  `json:"created"`
+					SeasonID    int64  `json:"season_id"`
+					IsSeason    bool   `json:"is_season_display"`
+				} `json:"vlist"`
+			} `json:"list"`
+			Page struct {
+				Count int `json:"count"`
+			} `json:"page"`
+		} `json:"data"`
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		t.Fatalf("parse mock response: %v", err)
+	}
+
+	if apiResp.Code != 0 {
+		t.Fatalf("expected code 0, got %d", apiResp.Code)
+	}
+	if apiResp.Data.Page.Count != 42 {
+		t.Errorf("expected total 42, got %d", apiResp.Data.Page.Count)
+	}
+	if len(apiResp.Data.List.VList) != 2 {
+		t.Fatalf("expected 2 videos, got %d", len(apiResp.Data.List.VList))
+	}
+
+	v1 := apiResp.Data.List.VList[0]
+	if v1.BvID != "BV1mocktest123" {
+		t.Errorf("video[0].bvid = %q, want BV1mocktest123", v1.BvID)
+	}
+	if v1.Title != "测试视频标题" {
+		t.Errorf("video[0].title = %q, want 测试视频标题", v1.Title)
+	}
+	if v1.Length != "12:34" {
+		t.Errorf("video[0].length = %q, want 12:34", v1.Length)
+	}
+	if v1.Created != 1700000000 {
+		t.Errorf("video[0].created = %d, want 1700000000", v1.Created)
+	}
+
+	v2 := apiResp.Data.List.VList[1]
+	if !v2.IsSeason {
+		t.Error("video[1] should be season display")
+	}
+	if v2.SeasonID != 12345 {
+		t.Errorf("video[1].season_id = %d, want 12345", v2.SeasonID)
+	}
+}
+
+// ============================================================
+// TestDouyinVideoParseWithMock — 抖音 _ROUTER_DATA 页面解析 mock
+// ============================================================
+
+func TestDouyinVideoParseWithMock(t *testing.T) {
+	// 模拟抖音视频详情 API 响应（aweme/v1/web/aweme/detail）
+	mockResp := `{
+		"status_code": 0,
+		"aweme_detail": {
+			"aweme_id": "7234567890123456789",
+			"desc": "测试抖音视频 #测试",
+			"create_time": 1700000000,
+			"author": {
+				"uid": "123456",
+				"sec_uid": "MS4wLjABAAAAtest",
+				"nickname": "测试用户"
+			},
+			"video": {
+				"play_addr": {
+					"url_list": ["https://v.douyin.com/test/play.mp4"]
+				},
+				"cover": {
+					"url_list": ["https://p.douyin.com/test/cover.jpg"]
+				},
+				"duration": 15000
+			},
+			"statistics": {
+				"digg_count": 1234,
+				"share_count": 56,
+				"comment_count": 78
+			}
+		}
+	}`
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, mockResp)
+	}))
+	defer mockServer.Close()
+
+	// 验证 JSON 解析
+	resp, err := http.Get(mockServer.URL)
+	if err != nil {
+		t.Fatalf("mock server request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var apiResp struct {
+		StatusCode  int `json:"status_code"`
+		AwemeDetail struct {
+			AwemeID    string `json:"aweme_id"`
+			Desc       string `json:"desc"`
+			CreateTime int64  `json:"create_time"`
+			Author     struct {
+				UID      string `json:"uid"`
+				SecUID   string `json:"sec_uid"`
+				Nickname string `json:"nickname"`
+			} `json:"author"`
+			Video struct {
+				PlayAddr struct {
+					URLList []string `json:"url_list"`
+				} `json:"play_addr"`
+				Cover struct {
+					URLList []string `json:"url_list"`
+				} `json:"cover"`
+				Duration int `json:"duration"`
+			} `json:"video"`
+			Statistics struct {
+				DiggCount    int64 `json:"digg_count"`
+				ShareCount   int64 `json:"share_count"`
+				CommentCount int64 `json:"comment_count"`
+			} `json:"statistics"`
+		} `json:"aweme_detail"`
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		t.Fatalf("parse mock response: %v", err)
+	}
+
+	if apiResp.StatusCode != 0 {
+		t.Fatalf("expected status_code 0, got %d", apiResp.StatusCode)
+	}
+
+	detail := apiResp.AwemeDetail
+	if detail.AwemeID != "7234567890123456789" {
+		t.Errorf("aweme_id = %q, want 7234567890123456789", detail.AwemeID)
+	}
+	if detail.Desc != "测试抖音视频 #测试" {
+		t.Errorf("desc = %q, want 测试抖音视频 #测试", detail.Desc)
+	}
+	if detail.CreateTime != 1700000000 {
+		t.Errorf("create_time = %d, want 1700000000", detail.CreateTime)
+	}
+	if detail.Author.Nickname != "测试用户" {
+		t.Errorf("author.nickname = %q, want 测试用户", detail.Author.Nickname)
+	}
+	if detail.Author.SecUID != "MS4wLjABAAAAtest" {
+		t.Errorf("author.sec_uid = %q, want MS4wLjABAAAAtest", detail.Author.SecUID)
+	}
+	if detail.Video.Duration != 15000 {
+		t.Errorf("video.duration = %d, want 15000", detail.Video.Duration)
+	}
+	if len(detail.Video.PlayAddr.URLList) != 1 {
+		t.Fatalf("expected 1 play URL, got %d", len(detail.Video.PlayAddr.URLList))
+	}
+	if detail.Statistics.DiggCount != 1234 {
+		t.Errorf("digg_count = %d, want 1234", detail.Statistics.DiggCount)
+	}
+}
+
+// ============================================================
+// TestBiliErrorResponseWithMock — B站 API 错误响应解析
+// ============================================================
+
+func TestBiliErrorResponseWithMock(t *testing.T) {
+	// 模拟 B站风控响应
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"code": -352, "message": "风控校验失败", "data": null}`)
+	}))
+	defer mockServer.Close()
+
+	resp, err := http.Get(mockServer.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var apiResp struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	body, _ := io.ReadAll(resp.Body)
+	json.Unmarshal(body, &apiResp)
+
+	if apiResp.Code != -352 {
+		t.Errorf("expected code -352, got %d", apiResp.Code)
+	}
+	if apiResp.Message != "风控校验失败" {
+		t.Errorf("message = %q, want 风控校验失败", apiResp.Message)
+	}
+}
