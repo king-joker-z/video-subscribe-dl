@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -14,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
 	"golang.org/x/net/html"
 )
 
@@ -103,7 +101,7 @@ type DouyinClient struct {
 // NewClient 创建抖音客户端（使用会话级指纹，确保同一实例内请求一致性）
 func NewClient() *DouyinClient {
 	fp := GetSessionFingerprint()
-	log.Printf("[douyin] client created with fingerprint: %s", fp)
+	logger.Info("client created", "fingerprint", fp)
 	return &DouyinClient{
 		noRedirectClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -121,19 +119,28 @@ func NewClient() *DouyinClient {
 
 // ---- X-Bogus 签名 ----
 
-// signURL 使用 goja 执行 sign.js 计算 X-Bogus 签名
-// 参考 lux: vm.RunString(fmt.Sprintf("sign('%s', '%s')", query.RawQuery, ua))
+// signURL 使用池化的 goja VM 执行 sign.js 计算 X-Bogus 签名
+// VM 池预编译 sign.js 为 goja.Program，复用 VM 实例，避免每次都重新创建和解析
 func signURL(queryStr, userAgent string) (string, error) {
-	vm := goja.New()
-	if _, err := vm.RunString(signScript); err != nil {
-		return "", fmt.Errorf("load sign.js: %w", err)
-	}
-	code := fmt.Sprintf("sign('%s', '%s')", queryStr, userAgent)
-	val, err := vm.RunString(code)
+	pool, err := getSignPool()
 	if err != nil {
-		return "", fmt.Errorf("execute sign(): %w", err)
+		return "", fmt.Errorf("get sign pool: %w", err)
 	}
-	return val.String(), nil
+	return pool.sign(queryStr, userAgent)
+}
+
+// signURLWithFallback 带降级的签名策略链
+// 优先级: X-Bogus 签名 → 无签名（空字符串）
+// TODO: a_bogus 签名实现后插入链中: a_bogus → X-Bogus → 无签名
+// 返回: (xBogus, signed bool, error)
+// error 仅在不可恢复错误时返回，签名失败时降级为无签名（signed=false）
+func signURLWithFallback(queryStr, userAgent string) (string, bool) {
+	xBogus, err := signURL(queryStr, userAgent)
+	if err != nil {
+		logger.Warn("X-Bogus sign failed, degrading to unsigned", "error", err)
+		return "", false
+	}
+	return xBogus, true
 }
 
 // ---- URL 解析 ----
@@ -254,7 +261,7 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	if err == nil {
 		return video, nil
 	}
-	log.Printf("[douyin] detail API failed for %s: %v, falling back to page scrape", videoID, err)
+	logger.Warn("detail API failed, falling back to page scrape", "videoID", videoID, "error", err)
 
 	// 降级: 页面解析
 	return c.getVideoDetailPage(videoID)
@@ -272,11 +279,10 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
 	ua := c.fingerprint.UserAgent
-	xBogus, err := signURL(parsed.RawQuery, ua)
-	if err != nil {
-		return nil, fmt.Errorf("sign failed: %w", err)
+	xBogus, signed := signURLWithFallback(parsed.RawQuery, ua)
+	if signed {
+		apiURL = fmt.Sprintf("%s&X-Bogus=%s", apiURL, xBogus)
 	}
-	apiURL = fmt.Sprintf("%s&X-Bogus=%s", apiURL, xBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -359,7 +365,7 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 	canonical := getCanonicalFromHTML(htmlStr)
 	if strings.Contains(canonical, "/note/") {
 		isNote = true
-		log.Printf("[douyin] note detected via canonical link: %s", canonical)
+		logger.Info("note detected via canonical link", "canonical", canonical)
 	}
 
 	// 检查 og:url meta tag（有些情况 canonical 不可靠但 og:url 正确）
@@ -367,7 +373,7 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 		ogURL := getMetaContent(htmlStr, "og:url")
 		if strings.Contains(ogURL, "/note/") {
 			isNote = true
-			log.Printf("[douyin] note detected via og:url: %s", ogURL)
+			logger.Info("note detected via og:url", "ogURL", ogURL)
 		}
 	}
 
@@ -389,10 +395,10 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 	// 跟随 302 重定向获取最终无水印地址
 	if video.VideoURL != "" {
 		if resolved, err := c.ResolveVideoURL(video.VideoURL); err == nil {
-			log.Printf("[douyin] page scrape: resolved video URL via 302, len=%d", len(resolved))
+			logger.Info("page scrape: resolved video URL via 302", "urlLen", len(resolved))
 			video.VideoURL = resolved
 		} else {
-			log.Printf("[douyin] page scrape: resolve 302 failed: %v, keeping original URL", err)
+			logger.Warn("page scrape: resolve 302 failed, keeping original URL", "error", err)
 		}
 	}
 
@@ -490,8 +496,7 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 			filterType, _ := fm["filter_type"].(float64)
 
 			// 记录所有被过滤的视频（不仅仅是当前请求的）
-			log.Printf("[douyin] filter_list detected: aweme_id=%s reason=%s type=%.0f detail=%s",
-				fmID, reason, filterType, detail)
+			logger.Warn("filter_list detected", "awemeID", fmID, "reason", reason, "filterType", filterType, "detail", detail)
 
 			if fmID == videoID || fmID == "" {
 				errMsg := fmt.Sprintf("video filtered (type=%.0f): %s", filterType, reason)
@@ -506,7 +511,7 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 	// 检查 status_code（API 级别的风控）
 	if statusCode, ok := videoInfoRes["status_code"].(float64); ok && int(statusCode) != 0 {
 		statusMsg, _ := videoInfoRes["status_msg"].(string)
-		log.Printf("[douyin] videoInfoRes status_code=%d msg=%s", int(statusCode), statusMsg)
+		logger.Warn("videoInfoRes risk control", "statusCode", int(statusCode), "statusMsg", statusMsg)
 		// 常见风控 status_code:
 		// 2053: IP 限制
 		// 2154: 请求过于频繁
@@ -523,7 +528,7 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 		for k := range videoInfoRes {
 			keys = append(keys, k)
 		}
-		log.Printf("[douyin] item_list empty, videoInfoRes keys: %v", keys)
+		logger.Warn("item_list empty", "videoInfoResKeys", keys)
 		return nil, fmt.Errorf("item_list empty or not found (keys: %v)", keys)
 	}
 
@@ -666,14 +671,15 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 
 	queryStr := params.Encode()
 
-	// X-Bogus 签名
+	// X-Bogus 签名（降级链: X-Bogus → 无签名）
 	ua := c.fingerprint.UserAgent
-	xBogus, err := signURL(queryStr, ua)
-	if err != nil {
-		return nil, fmt.Errorf("sign failed: %w", err)
+	xBogus, signed := signURLWithFallback(queryStr, ua)
+	var apiURL string
+	if signed {
+		apiURL = fmt.Sprintf("%s?%s&X-Bogus=%s", UserVideosAPI, queryStr, xBogus)
+	} else {
+		apiURL = fmt.Sprintf("%s?%s", UserVideosAPI, queryStr)
 	}
-
-	apiURL := fmt.Sprintf("%s?%s&X-Bogus=%s", UserVideosAPI, queryStr, xBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -781,8 +787,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 		result.Videos = append(result.Videos, v)
 	}
 
-	log.Printf("[douyin] GetUserVideos: secUID=%s cursor=%d got=%d hasMore=%v nextCursor=%d",
-		secUID, maxCursor, len(result.Videos), result.HasMore, result.MaxCursor)
+	logger.Info("GetUserVideos completed", "secUID", secUID, "cursor", maxCursor, "got", len(result.Videos), "hasMore", result.HasMore, "nextCursor", result.MaxCursor)
 
 	return result, nil
 }
@@ -805,12 +810,13 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 	queryStr := params.Encode()
 
 	ua := c.fingerprint.UserAgent
-	xBogus, err := signURL(queryStr, ua)
-	if err != nil {
-		return nil, fmt.Errorf("sign failed: %w", err)
+	xBogus, signed := signURLWithFallback(queryStr, ua)
+	var apiURL string
+	if signed {
+		apiURL = fmt.Sprintf("%s?%s&X-Bogus=%s", UserProfileAPI, queryStr, xBogus)
+	} else {
+		apiURL = fmt.Sprintf("%s?%s", UserProfileAPI, queryStr)
 	}
-
-	apiURL := fmt.Sprintf("%s?%s&X-Bogus=%s", UserProfileAPI, queryStr, xBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -898,8 +904,7 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 		profile.AvatarURL = u.AvatarThumb.URLList[0]
 	}
 
-	log.Printf("[douyin] GetUserProfile: %s (@%s) followers=%d videos=%d",
-		profile.Nickname, profile.UniqueID, profile.FollowerCount, profile.AwemeCount)
+	logger.Info("GetUserProfile completed", "nickname", profile.Nickname, "uniqueID", profile.UniqueID, "followers", profile.FollowerCount, "videos", profile.AwemeCount)
 
 	return profile, nil
 }
