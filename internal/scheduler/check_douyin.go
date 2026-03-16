@@ -21,7 +21,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 		return
 	}
 
-	client := douyin.NewClient()
+	client := s.newDouyinClient()
 	defer client.Close() // 确保 RateLimiter goroutine 被清理
 
 	// 抖音 Cookie 验证（每小时最多一次，和 B 站 Cookie 验证完全独立）
@@ -106,7 +106,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 				// 风控退避: 30s + 随机 0-30s
 				backoff := time.Duration(30000+rand.Intn(30000)) * time.Millisecond
 				log.Printf("[douyin] 风控退避 %v 后重试", backoff)
-				time.Sleep(backoff)
+				s.sleepFn(backoff)
 			} else {
 				log.Printf("[douyin] 获取视频列表失败 (第%d次)，可能是网络问题或账号设为私密: %v", consecutiveErrors, err)
 				if consecutiveErrors >= 5 {
@@ -119,7 +119,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 					backoff = 60 * time.Second
 				}
 				log.Printf("[douyin] 退避等待 %v 后重试", backoff)
-				time.Sleep(backoff)
+				s.sleepFn(backoff)
 			}
 			continue
 		}
@@ -193,7 +193,7 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 
 		// 翻页间隔 5-10s（抖音风控严格，宁慢勿快）
 		jitter := time.Duration(5000+rand.Intn(5000)) * time.Millisecond
-		time.Sleep(jitter)
+		s.sleepFn(jitter)
 	}
 
 	// 更新 latest_video_at
@@ -226,7 +226,7 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 		return
 	}
 
-	client := douyin.NewClient()
+	client := s.newDouyinClient()
 	defer client.Close()
 
 	secUID, err := s.resolveDouyinSecUID(client, src.URL)
@@ -278,7 +278,7 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 				}
 				backoff := time.Duration(30000+rand.Intn(30000)) * time.Millisecond
 				log.Printf("[full-scan·douyin] 风控退避 %v 后重试", backoff)
-				time.Sleep(backoff)
+				s.sleepFn(backoff)
 			} else {
 				log.Printf("[full-scan·douyin] 获取视频列表失败 (第%d次): %v", consecutiveErrors, err)
 				if consecutiveErrors >= 5 {
@@ -290,7 +290,7 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 					backoff = 60 * time.Second
 				}
 				log.Printf("[full-scan·douyin] 退避等待 %v 后重试", backoff)
-				time.Sleep(backoff)
+				s.sleepFn(backoff)
 			}
 			continue
 		}
@@ -334,7 +334,7 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 
 		// 翻页间隔 5-10s（抖音风控严格，和 checkDouyin 一致）
 		jitter := time.Duration(5000+rand.Intn(5000)) * time.Millisecond
-		time.Sleep(jitter)
+		s.sleepFn(jitter)
 	}
 
 	log.Printf("[full-scan·douyin] %s: 第一阶段完成，共拉取 %d 个视频 (翻页 %d)", uploaderName, len(allVideos), page)
@@ -397,7 +397,7 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 }
 
 // resolveDouyinSecUID 从 source URL 解析 sec_user_id
-func (s *Scheduler) resolveDouyinSecUID(client *douyin.DouyinClient, rawURL string) (string, error) {
+func (s *Scheduler) resolveDouyinSecUID(client DouyinAPI, rawURL string) (string, error) {
 	// 先尝试直接提取
 	secUID, err := douyin.ExtractSecUID(rawURL)
 	if err == nil {

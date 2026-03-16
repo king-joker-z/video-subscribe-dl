@@ -1,0 +1,661 @@
+package scheduler
+
+import (
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/douyin"
+)
+
+// --- Mock DouyinAPI ---
+
+type mockDouyinAPI struct {
+	mu              sync.Mutex
+	closed          bool
+	validateResult  bool
+	validateMsg     string
+	userVideoCalls  int
+	userVideoPages  []mockVideoPage // 按调用顺序返回
+	profileResult   *douyin.DouyinUserProfile
+	profileErr      error
+	resolveResult   *douyin.ResolveResult
+	resolveErr      error
+}
+
+type mockVideoPage struct {
+	result *douyin.UserVideosResult
+	err    error
+}
+
+func (m *mockDouyinAPI) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+}
+
+func (m *mockDouyinAPI) ValidateCookie() (bool, string) {
+	return m.validateResult, m.validateMsg
+}
+
+func (m *mockDouyinAPI) GetUserVideos(secUID string, maxCursor int64, consecutiveErrors ...int) (*douyin.UserVideosResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	idx := m.userVideoCalls
+	m.userVideoCalls++
+	if idx < len(m.userVideoPages) {
+		p := m.userVideoPages[idx]
+		return p.result, p.err
+	}
+	return &douyin.UserVideosResult{}, nil
+}
+
+func (m *mockDouyinAPI) GetUserProfile(secUID string) (*douyin.DouyinUserProfile, error) {
+	if m.profileResult != nil || m.profileErr != nil {
+		return m.profileResult, m.profileErr
+	}
+	return &douyin.DouyinUserProfile{Nickname: "TestUser"}, nil
+}
+
+func (m *mockDouyinAPI) ResolveShareURL(shareURL string) (*douyin.ResolveResult, error) {
+	if m.resolveResult != nil || m.resolveErr != nil {
+		return m.resolveResult, m.resolveErr
+	}
+	return &douyin.ResolveResult{Type: douyin.URLTypeUser, SecUID: "test_sec_uid"}, nil
+}
+
+func (m *mockDouyinAPI) isClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
+}
+
+func (m *mockDouyinAPI) getCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.userVideoCalls
+}
+
+// --- Test helpers ---
+
+// newTestScheduler 创建使用临时 SQLite 的 Scheduler（仅用于 checkDouyin/fullScanDouyin 测试）
+func newTestScheduler(t *testing.T, mock *mockDouyinAPI) *Scheduler {
+	t.Helper()
+	database, err := db.Init(t.TempDir())
+	if err != nil {
+		t.Fatalf("db.Init: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	s := &Scheduler{
+		db:              database,
+		downloadDir:     t.TempDir(),
+		stopCh:          make(chan struct{}),
+		fullScanRunning: make(map[int64]bool),
+		newDouyinClient: func() DouyinAPI { return mock },
+		sleepFn:         func(d time.Duration) {}, // 测试中跳过 sleep
+	}
+	return s
+}
+
+// createTestSource 在 DB 中创建一个抖音 Source 并返回
+func createTestSource(t *testing.T, database *db.DB, name, rawURL string) db.Source {
+	t.Helper()
+	src := &db.Source{
+		Type:    "douyin",
+		URL:     rawURL,
+		Name:    name,
+		Enabled: true,
+	}
+	id, err := database.CreateSource(src)
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	src.ID = id
+	return *src
+}
+
+// countPendingDownloads 计算 source 下 pending 状态的下载数
+func countPendingDownloads(t *testing.T, database *db.DB, sourceID int64) int {
+	t.Helper()
+	all, err := database.GetPendingDownloads()
+	if err != nil {
+		t.Fatalf("GetPendingDownloads: %v", err)
+	}
+	count := 0
+	for _, d := range all {
+		if d.SourceID == sourceID {
+			count++
+		}
+	}
+	return count
+}
+
+// getDownloadsForSource 获取 source 的所有下载记录
+func getDownloadsForSource(t *testing.T, database *db.DB, sourceID int64) []db.Download {
+	t.Helper()
+	all, err := database.GetAllDownloads()
+	if err != nil {
+		t.Fatalf("GetAllDownloads: %v", err)
+	}
+	var result []db.Download
+	for _, d := range all {
+		if d.SourceID == sourceID {
+			result = append(result, d)
+		}
+	}
+	return result
+}
+
+// ============================
+// checkDouyin 测试
+// ============================
+
+func TestCheckDouyin_SkipWhenPaused(t *testing.T) {
+	mock := &mockDouyinAPI{}
+	s := newTestScheduler(t, mock)
+
+	// 暂停抖音
+	s.douyinPaused = true
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// mock 应该完全没被调用
+	if mock.getCallCount() > 0 {
+		t.Errorf("expected 0 API calls when paused, got %d", mock.getCallCount())
+	}
+}
+
+func TestCheckDouyin_URLResolveFail(t *testing.T) {
+	mock := &mockDouyinAPI{
+		resolveErr: fmt.Errorf("invalid URL"),
+	}
+	s := newTestScheduler(t, mock)
+
+	// 使用一个无法直接提取 secUID 的短链接格式
+	src := createTestSource(t, s.db, "TestUser", "https://v.douyin.com/invalid")
+	s.checkDouyin(src)
+
+	// 不应有任何视频拉取调用
+	if mock.getCallCount() > 0 {
+		t.Errorf("expected 0 video calls on URL resolve failure, got %d", mock.getCallCount())
+	}
+}
+
+func TestCheckDouyin_FirstScan_CreatesDownloads(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_001", Desc: "视频1", CreateTime: now - 100, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "vid_002", Desc: "视频2", CreateTime: now - 200, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "vid_003", Desc: "视频3", CreateTime: now - 300, Duration: 15000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   false,
+					MaxCursor: 0,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 应创建 3 个 pending 下载
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 3 {
+		t.Errorf("expected 3 pending downloads, got %d", pending)
+	}
+
+	// latestVideoAt 应被更新为最大 CreateTime
+	latestAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
+	if latestAt != now-100 {
+		t.Errorf("expected latestVideoAt=%d, got %d", now-100, latestAt)
+	}
+}
+
+func TestCheckDouyin_IncrementalScan_StopsAtKnown(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_new1", Desc: "新视频1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "vid_new2", Desc: "新视频2", CreateTime: now - 20, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						// 这个视频时间 <= latestVideoAt，会触发 stopped
+						{AwemeID: "vid_old", Desc: "旧视频", CreateTime: now - 500, Duration: 15000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true, // 有更多，但因 stopped 不会翻页
+					MaxCursor: 100,
+				},
+			},
+			{
+				// 第二页不应被调用
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_should_not_see", Desc: "不应看到", CreateTime: now - 1000, Duration: 10000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	// 设置增量基准时间
+	s.db.UpdateSourceLatestVideoAt(src.ID, now-100)
+
+	s.checkDouyin(src)
+
+	// 只应创建 2 个新视频的下载（vid_old 的 CreateTime <= latestVideoAt）
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads, got %d", pending)
+	}
+
+	// 只应调用一次 GetUserVideos（stopped=true 不翻页）
+	if mock.getCallCount() != 1 {
+		t.Errorf("expected 1 GetUserVideos call, got %d", mock.getCallCount())
+	}
+}
+
+func TestCheckDouyin_DeduplicatesExistingVideos(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_dup", Desc: "已存在", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "vid_new", Desc: "新视频", CreateTime: now - 20, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+
+	// 预先插入一条已下载的记录
+	s.db.CreateDownload(&db.Download{
+		SourceID: src.ID,
+		VideoID:  "vid_dup",
+		Title:    "已存在",
+		Status:   "done",
+	})
+
+	s.checkDouyin(src)
+
+	// 只应创建 1 个新的 pending（vid_dup 已存在被跳过）
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download (dedup), got %d", pending)
+	}
+}
+
+func TestCheckDouyin_Pagination(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "p1_v1", Desc: "Page1 Video1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "p2_v1", Desc: "Page2 Video1", CreateTime: now - 20, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   false,
+					MaxCursor: 0,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 应翻两页，创建 2 个下载
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads across pages, got %d", pending)
+	}
+
+	if mock.getCallCount() != 2 {
+		t.Errorf("expected 2 GetUserVideos calls, got %d", mock.getCallCount())
+	}
+}
+
+func TestCheckDouyin_FirstScanPageLimit(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "p1_v1", Desc: "Page1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "p2_v1", Desc: "Page2", CreateTime: now - 20, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 200,
+				},
+			},
+			{
+				// 第3页不应被拉取
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "p3_v1", Desc: "Page3", CreateTime: now - 30, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	// 设置首次扫描页数限制为 2
+	s.db.SetSetting("first_scan_pages", "2")
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 只应拉取 2 页
+	if mock.getCallCount() != 2 {
+		t.Errorf("expected 2 GetUserVideos calls (page limit), got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads, got %d", pending)
+	}
+}
+
+func TestCheckDouyin_EmptyDesc_FallbackTitle(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_notitle", Desc: "", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	expected := "douyin_vid_notitle"
+	if downloads[0].Title != expected {
+		t.Errorf("expected fallback title %q, got %q", expected, downloads[0].Title)
+	}
+}
+
+func TestCheckDouyin_UpdatesSourceName(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "vid_001", Desc: "视频", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "RealName"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+		profileResult: &douyin.DouyinUserProfile{Nickname: "ProfileName"},
+	}
+	s := newTestScheduler(t, mock)
+
+	// 创建一个未命名的 source
+	src := createTestSource(t, s.db, "未命名", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 验证 source name 被更新（GetUserProfile 返回 ProfileName）
+	updated, _ := s.db.GetSource(src.ID)
+	if updated.Name != "ProfileName" {
+		t.Errorf("expected source name 'ProfileName', got %q", updated.Name)
+	}
+}
+
+func TestCheckDouyin_ClientIsClosed(t *testing.T) {
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos:  []douyin.DouyinVideo{},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 验证 client.Close() 被调用（defer）
+	if !mock.isClosed() {
+		t.Error("expected DouyinAPI.Close() to be called")
+	}
+}
+
+// ============================
+// fullScanDouyin 测试
+// ============================
+
+func TestFullScanDouyin_SkipWhenPaused(t *testing.T) {
+	mock := &mockDouyinAPI{}
+	s := newTestScheduler(t, mock)
+	s.douyinPaused = true
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	if mock.getCallCount() > 0 {
+		t.Errorf("expected 0 API calls when paused, got %d", mock.getCallCount())
+	}
+}
+
+func TestFullScanDouyin_URLResolveFail(t *testing.T) {
+	mock := &mockDouyinAPI{
+		resolveErr: fmt.Errorf("bad url"),
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://v.douyin.com/bad")
+	s.fullScanDouyin(src)
+
+	if mock.getCallCount() > 0 {
+		t.Errorf("expected 0 video calls on URL resolve failure, got %d", mock.getCallCount())
+	}
+}
+
+func TestFullScanDouyin_CreatesOnlyMissingDownloads(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_001", Desc: "视频1", CreateTime: now - 100, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "fs_002", Desc: "视频2", CreateTime: now - 200, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "fs_003", Desc: "视频3", CreateTime: now - 300, Duration: 15000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+
+	// 预先插入 fs_002 为已下载
+	s.db.CreateDownload(&db.Download{
+		SourceID: src.ID,
+		VideoID:  "fs_002",
+		Title:    "视频2",
+		Status:   "done",
+	})
+
+	s.fullScanDouyin(src)
+
+	// 应只创建 fs_001 和 fs_003（fs_002 已存在）
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads (missing only), got %d", pending)
+	}
+}
+
+func TestFullScanDouyin_NoMissing_EarlyReturn(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_all", Desc: "已有", CreateTime: now - 100, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+
+	// 预先插入所有视频为已下载
+	s.db.CreateDownload(&db.Download{
+		SourceID: src.ID,
+		VideoID:  "fs_all",
+		Title:    "已有",
+		Status:   "done",
+	})
+
+	s.fullScanDouyin(src)
+
+	// 不应创建新的 pending
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 0 {
+		t.Errorf("expected 0 pending downloads (all exist), got %d", pending)
+	}
+}
+
+func TestFullScanDouyin_Pagination_DeduplicatesAcrossPages(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "dup_v1", Desc: "Video1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "dup_v2", Desc: "Video2", CreateTime: now - 20, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						// 跨页重复 dup_v2
+						{AwemeID: "dup_v2", Desc: "Video2", CreateTime: now - 20, Duration: 60000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "dup_v3", Desc: "Video3", CreateTime: now - 30, Duration: 15000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	// fullScan 内部用 seenIDs 去重，应只有 3 个唯一视频
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 3 {
+		t.Errorf("expected 3 pending downloads (dedup across pages), got %d", pending)
+	}
+}
+
+func TestFullScanDouyin_UpdatesLatestVideoAt(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "lat_v1", Desc: "Latest", CreateTime: now - 50, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "lat_v2", Desc: "Older", CreateTime: now - 200, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	// 设置初始的 latestVideoAt
+	s.db.UpdateSourceLatestVideoAt(src.ID, now-300)
+
+	s.fullScanDouyin(src)
+
+	// latestVideoAt 应更新到最大的 CreateTime
+	latestAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
+	if latestAt != now-50 {
+		t.Errorf("expected latestVideoAt=%d, got %d", now-50, latestAt)
+	}
+}

@@ -74,6 +74,10 @@ type Scheduler struct {
 	douyinPauseReason string
 	douyinPausedAt    time.Time
 
+	// 可注入的依赖（测试用）
+	sleepFn func(time.Duration) // 替代 time.Sleep（测试中跳过等待）
+	newDouyinClient func() DouyinAPI // 替代 douyin.NewClient
+
 	// 抖音下载频率限制器（每分钟最多 2 条）
 	douyinDownloadLimiter *douyin.RateLimiter
 }
@@ -96,7 +100,9 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		stopCh:          make(chan struct{}),
 		hotConfig:       config.NewHotConfig(),
 		upInfoCache:     make(map[int64]*upInfoCacheEntry),
-		fullScanRunning: make(map[int64]bool),
+		fullScanRunning:   make(map[int64]bool),
+		newDouyinClient:  defaultNewDouyinClient,
+		sleepFn:          time.Sleep,
 		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 		douyinDownloadLimiter: douyin.NewRateLimiter(2, 1, 30*time.Second), // 每分钟最多 2 条抖音下载
@@ -365,6 +371,9 @@ func (s *Scheduler) CheckNow() {
 
 // ProcessAllPending 把所有 pending 记录提交到下载队列
 func (s *Scheduler) ProcessAllPending() {
+	if s.dl == nil {
+		return
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

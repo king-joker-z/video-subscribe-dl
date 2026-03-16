@@ -55,7 +55,8 @@
 - [ ] replaceEntry() 全部失败时池耗尽导致永久阻塞（加 fallback）
 
 ### P1 — 代码质量
-- [ ] 单元测试覆盖提升（当前 32.6%，目标 >50%）— checkDouyin/fullScanDouyin mock 测试
+- [x] checkDouyin/fullScanDouyin mock 测试（16 个用例，scheduler 覆盖 9.3%）
+- [ ] 单元测试覆盖提升（目标 >50%）— 下一步: processDouyin / retry 等
 - [ ] downloadDouyinFile 去重（scheduler 和 web/api 中有完全重复实现）
 - [ ] HTTP Client 复用（文件下载每次新建 Client，应使用连接池）
 
