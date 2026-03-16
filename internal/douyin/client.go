@@ -96,6 +96,7 @@ type DouyinClient struct {
 	normalClient     *http.Client          // 正常 client
 	limiter          *RateLimiter
 	fingerprint      *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
+	sessionCookie    string                // 会话级 Cookie 缓存（翻页期间复用，避免抖音检测到 cookie 不一致）
 }
 
 // NewClient 创建抖音客户端（使用会话级指纹，确保同一实例内请求一致性）
@@ -327,7 +328,7 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 
 // getVideoDetailAPI 使用 douyin.com/aweme/v1/web/aweme/detail/ API 获取视频详情
 func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
-	cookie := globalCookieMgr.getCookieString(c.normalClient)
+	cookie := c.getSessionCookie()
 
 	// 构建完整的 query 参数（参考 f2 BaseRequestModel + PostDetail）
 	params := c.buildBaseParams()
@@ -711,7 +712,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 
 
 
-	cookie := globalCookieMgr.getCookieString(c.normalClient)
+	cookie := c.getSessionCookie()
 
 	// 构建完整的 query 参数（参考 f2 BaseRequestModel + UserPost）
 	params := c.buildBaseParams()
@@ -842,7 +843,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error) {
 	c.limiter.Acquire()
 
-	cookie := globalCookieMgr.getCookieString(c.normalClient)
+	cookie := c.getSessionCookie()
 
 	params := c.buildBaseParams()
 	params.Set("sec_user_id", secUID)
@@ -1112,4 +1113,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// getSessionCookie 返回会话级 Cookie（首次调用时生成，后续复用）
+// 抖音后端会校验翻页请求的 Cookie 一致性，每次翻页都换新 Cookie 会导致返回空列表
+func (c *DouyinClient) getSessionCookie() string {
+	if c.sessionCookie == "" {
+		c.sessionCookie = globalCookieMgr.getCookieString(c.normalClient)
+	}
+	return c.sessionCookie
 }
