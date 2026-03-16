@@ -102,6 +102,61 @@ func TestGetCookieString_Fields(t *testing.T) {
 	}
 }
 
+// TestSetUserCookie_SessionCookie 验证: SetUserCookie 后 getSessionCookie 返回用户 Cookie
+func TestSetUserCookie_SessionCookie(t *testing.T) {
+	// 保存全局状态，测试完毕后还原
+	origCookie := globalCookieMgr.GetUserCookie()
+	defer globalCookieMgr.SetUserCookie(origCookie)
+
+	userCookie := "uid_tt=test123; sessionid=abc456; msToken=fake; ttwid=fake"
+
+	// 设置用户 Cookie
+	globalCookieMgr.SetUserCookie(userCookie)
+
+	// 创建 client 并获取 session cookie
+	client := NewClient()
+	defer client.Close()
+
+	got := client.getSessionCookie()
+
+	// 用户 Cookie 设置后，getSessionCookie 应原样返回用户 Cookie
+	if got != userCookie {
+		t.Errorf("getSessionCookie() = %q, want %q", got, userCookie)
+	}
+
+	// 清除用户 Cookie 后，应回退到自动生成
+	globalCookieMgr.SetUserCookie("")
+	auto := client.getSessionCookie()
+	if auto == userCookie {
+		t.Error("after clearing user cookie, getSessionCookie() should not return user cookie")
+	}
+	if auto == "" {
+		t.Error("after clearing user cookie, getSessionCookie() should return auto-generated cookie")
+	}
+	// 自动生成的 cookie 应包含 msToken
+	if !strings.Contains(auto, "msToken=") {
+		t.Errorf("auto-generated cookie missing msToken: %q", auto)
+	}
+}
+
+// TestSetGlobalUserCookie 验证全局 setter/getter
+func TestSetGlobalUserCookie(t *testing.T) {
+	origCookie := GetGlobalUserCookie()
+	defer SetGlobalUserCookie(origCookie)
+
+	SetGlobalUserCookie("  test_cookie_value  ")
+	got := GetGlobalUserCookie()
+	if got != "test_cookie_value" {
+		t.Errorf("GetGlobalUserCookie() = %q, want %q", got, "test_cookie_value")
+	}
+
+	SetGlobalUserCookie("")
+	got = GetGlobalUserCookie()
+	if got != "" {
+		t.Errorf("GetGlobalUserCookie() after clear = %q, want empty", got)
+	}
+}
+
 // TestFixedConstants 验证固定常量不为空
 func TestFixedConstants(t *testing.T) {
 	if fixedOdinTT == "" {
