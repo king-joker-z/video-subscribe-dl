@@ -59,7 +59,7 @@
 - [x] checkDouyin/fullScanDouyin 覆盖率补充测试（12 用例：profile error/author fallback/backoff progression/cap/字段验证等）
 - [x] 单元测试覆盖提升 — processDouyin/retryOneDouyinDownload/resolveDouyinSecUID/getDouyinSetting/loadDouyinUserCookie mock 测试（scheduler 21.3%→28.3%）— 7e7f260
 - [x] downloadDouyinFile 去重（scheduler 和 web/api 中有完全重复实现）
-- [ ] HTTP Client 复用（文件下载每次新建 Client，应使用连接池）
+- [x] HTTP Client 复用（web/api 包共享 HTTP Client + Transport 连接池）
 
 ### P2 — 功能增强
 - [ ] 抖音合集下载（/aweme/v1/web/mix/aweme/，API 端点已定义）

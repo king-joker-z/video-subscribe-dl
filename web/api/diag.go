@@ -229,7 +229,7 @@ func (h *DiagHandler) HandleDouyin(w http.ResponseWriter, r *http.Request) {
 	// 2. iesdouyin.com 连通性
 	start := time.Now()
 	testURL := fmt.Sprintf("https://www.iesdouyin.com/share/video/%s", "7000000000000000000")
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := sharedAPIClient
 	req, _ := http.NewRequest("GET", testURL, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
 	httpResp, err := httpClient.Do(req)

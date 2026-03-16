@@ -29,7 +29,7 @@ func (h *CredentialHandler) HandleQRCodeGenerate(w http.ResponseWriter, r *http.
 		return
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := sharedAPIClient
 	result, err := bilibili.GenerateQRCode(httpClient)
 	if err != nil {
 		log.Printf("[qrcode] Generate failed: %v", err)
@@ -55,7 +55,7 @@ func (h *CredentialHandler) HandleQRCodePoll(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := sharedAPIClient
 	result, err := bilibili.PollQRCode(httpClient, qrcodeKey)
 	if err != nil {
 		apiError(w, CodeInternal, "轮询失败: "+err.Error())
@@ -124,7 +124,7 @@ func (h *CredentialHandler) HandleStatus(w http.ResponseWriter, r *http.Request)
 		result["updated_at"] = time.Unix(cred.UpdatedAt, 0).Format("2006-01-02 15:04:05")
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := sharedAPIClient
 
 	// 检查是否需要刷新
 	needRefresh, _ := cred.NeedRefresh(httpClient)
@@ -159,7 +159,7 @@ func (h *CredentialHandler) HandleRefresh(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := sharedAPIClient
 	newCred, err := cred.Refresh(httpClient)
 	if err != nil {
 		apiError(w, CodeInternal, "刷新失败: "+err.Error())

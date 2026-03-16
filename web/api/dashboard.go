@@ -69,7 +69,7 @@ func (h *DashboardHandler) getCredentialStatus() map[string]interface{} {
 	}
 
 	// 验证用户信息
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+	httpClient := sharedAPIClient10s
 	verifyResult, err := bilibili.VerifyCredential(cred, httpClient)
 	if err != nil {
 		log.Printf("[dashboard] credential verify error: %v", err)
