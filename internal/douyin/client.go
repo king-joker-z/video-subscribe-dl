@@ -311,7 +311,17 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 	}
 
 	if apiResp.AwemeDetail == nil || string(apiResp.AwemeDetail) == "null" {
-		return nil, fmt.Errorf("aweme_detail is null (status_code=%d)", apiResp.StatusCode)
+		// status_code 诊断
+		switch apiResp.StatusCode {
+		case 2053:
+			return nil, fmt.Errorf("IP risk control (status_code=2053), aweme_detail is null")
+		case 2154:
+			return nil, fmt.Errorf("rate limited (status_code=2154), aweme_detail is null")
+		case 8:
+			return nil, fmt.Errorf("video not found (status_code=8)")
+		default:
+			return nil, fmt.Errorf("aweme_detail is null (status_code=%d)", apiResp.StatusCode)
+		}
 	}
 
 	return parseAwemeDetail(apiResp.AwemeDetail, videoID, false)
@@ -467,21 +477,54 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 		return nil, fmt.Errorf("videoInfoRes not found")
 	}
 
-	if filterList, ok := videoInfoRes["filter_list"].([]interface{}); ok {
+	// 风控检测: filter_list 包含被过滤的视频
+	if filterList, ok := videoInfoRes["filter_list"].([]interface{}); ok && len(filterList) > 0 {
 		for _, item := range filterList {
-			if fm, ok := item.(map[string]interface{}); ok {
-				if fmID, _ := fm["aweme_id"].(string); fmID == videoID {
-					reason, _ := fm["filter_reason"].(string)
-					detail, _ := fm["detail_msg"].(string)
-					return nil, fmt.Errorf("video filtered: %s - %s", reason, detail)
-				}
+			fm, ok := item.(map[string]interface{})
+			if !ok {
+				continue
 			}
+			fmID, _ := fm["aweme_id"].(string)
+			reason, _ := fm["filter_reason"].(string)
+			detail, _ := fm["detail_msg"].(string)
+			filterType, _ := fm["filter_type"].(float64)
+
+			// 记录所有被过滤的视频（不仅仅是当前请求的）
+			log.Printf("[douyin] filter_list detected: aweme_id=%s reason=%s type=%.0f detail=%s",
+				fmID, reason, filterType, detail)
+
+			if fmID == videoID || fmID == "" {
+				errMsg := fmt.Sprintf("video filtered (type=%.0f): %s", filterType, reason)
+				if detail != "" {
+					errMsg += " - " + detail
+				}
+				return nil, fmt.Errorf("%s", errMsg)
+			}
+		}
+	}
+
+	// 检查 status_code（API 级别的风控）
+	if statusCode, ok := videoInfoRes["status_code"].(float64); ok && int(statusCode) != 0 {
+		statusMsg, _ := videoInfoRes["status_msg"].(string)
+		log.Printf("[douyin] videoInfoRes status_code=%d msg=%s", int(statusCode), statusMsg)
+		// 常见风控 status_code:
+		// 2053: IP 限制
+		// 2154: 请求过于频繁
+		// 8: 视频不存在
+		if int(statusCode) == 2053 || int(statusCode) == 2154 {
+			return nil, fmt.Errorf("risk control: status_code=%d msg=%s", int(statusCode), statusMsg)
 		}
 	}
 
 	itemList, ok := videoInfoRes["item_list"].([]interface{})
 	if !ok || len(itemList) == 0 {
-		return nil, fmt.Errorf("item_list empty or not found")
+		// 额外诊断: 打印 videoInfoRes 的 key 帮助排查
+		keys := make([]string, 0)
+		for k := range videoInfoRes {
+			keys = append(keys, k)
+		}
+		log.Printf("[douyin] item_list empty, videoInfoRes keys: %v", keys)
+		return nil, fmt.Errorf("item_list empty or not found (keys: %v)", keys)
 	}
 
 	itemBytes, err := json.Marshal(itemList[0])
