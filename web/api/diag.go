@@ -199,6 +199,7 @@ func (h *DiagHandler) HandleDouyin(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Cookie 生成 (msToken + ttwid)
 	dyClient := douyin.NewClient()
+	defer dyClient.Close()
 	cookieStr := dyClient.GetCookieString()
 	hasMsToken := strings.Contains(cookieStr, "msToken=")
 	hasTTWID := strings.Contains(cookieStr, "ttwid=")

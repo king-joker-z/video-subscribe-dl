@@ -27,6 +27,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	}
 
 	client := douyin.NewClient()
+	defer client.Close()
 
 	// Step 1: 获取视频详情（带重试）
 	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")

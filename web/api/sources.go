@@ -188,6 +188,7 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	case "douyin":
 		if source.Name == "" && source.URL != "" {
 			dyClient := douyin.NewClient()
+			defer dyClient.Close()
 			result, err := dyClient.ResolveShareURL(source.URL)
 			if err == nil && result.Type == douyin.URLTypeUser {
 				// 尝试获取第一个视频来取用户名
@@ -486,6 +487,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	// 4. 抖音链接
 	if douyin.IsDouyinURL(rawURL) {
 		dyClient := douyin.NewClient()
+		defer dyClient.Close()
 		resolved, err := dyClient.ResolveShareURL(rawURL)
 		if err == nil {
 			switch resolved.Type {

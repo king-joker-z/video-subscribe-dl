@@ -117,6 +117,14 @@ func NewClient() *DouyinClient {
 	}
 }
 
+// Close 关闭客户端，停止 RateLimiter 的 refill goroutine，释放资源
+// 每次 NewClient() 都会创建新的 RateLimiter goroutine，必须在使用完毕后调用 Close()
+func (c *DouyinClient) Close() {
+	if c.limiter != nil {
+		c.limiter.Stop()
+	}
+}
+
 // ---- X-Bogus 签名 ----
 
 // signURL 使用池化的 goja VM 执行 sign.js 计算 X-Bogus 签名

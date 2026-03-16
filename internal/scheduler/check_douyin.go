@@ -16,6 +16,7 @@ import (
 // 抖音风控严格，翻页间隔 5-10s（宁慢勿快）
 func (s *Scheduler) checkDouyin(src db.Source) {
 	client := douyin.NewClient()
+	defer client.Close() // 确保 RateLimiter goroutine 被清理
 
 	// 解析 sec_user_id
 	secUID, err := s.resolveDouyinSecUID(client, src.URL)

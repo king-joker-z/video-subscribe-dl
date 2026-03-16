@@ -22,6 +22,7 @@ import (
 // handleDouyinQuickDownload 处理抖音单视频快速下载
 func (h *QuickDownloadHandler) handleDouyinQuickDownload(w http.ResponseWriter, rawURL string) {
 	client := douyin.NewClient()
+	defer client.Close()
 
 	// 解析分享链接，获取 aweme_id
 	resolved, err := client.ResolveShareURL(rawURL)
@@ -415,6 +416,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 // handleDouyinPreview 预览抖音视频信息
 func (h *QuickDownloadHandler) handleDouyinPreview(w http.ResponseWriter, rawURL string) {
 	client := douyin.NewClient()
+	defer client.Close()
 
 	resolved, err := client.ResolveShareURL(rawURL)
 	if err != nil {
