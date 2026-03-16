@@ -7,28 +7,28 @@ import (
 	"strings"
 )
 
-// StartupCleanup 启动时一次性清理：扫描非法字符目录并重置全量扫描
-// 只执行一次，通过 settings 表的 cleanup_v1_done flag 控制
+// StartupCleanup 启动时清理：扫描非法字符目录并重置全量扫描
+// 通过 cleanup_version_done 版本号控制，每次递增 currentVersion 可重新触发清理
 func (s *Scheduler) StartupCleanup() {
-	done, _ := s.db.GetSetting("cleanup_v1_done")
-	if done == "true" {
+	// 当前清理版本 — 每次新增非法字符类型时递增
+	const currentVersion = "2"
+
+	done, _ := s.db.GetSetting("cleanup_version_done")
+	if done == currentVersion {
 		return
 	}
 
-	log.Println("[startup-cleanup] Running one-time cleanup v1...")
+	log.Printf("[startup-cleanup] Running cleanup v%s...", currentVersion)
 
-	// 第一步：扫描清除非法字符文件夹
 	cleaned := s.cleanInvalidDirs()
 
-	// 第二步：如果有清理，重置所有 source 的 latest_video_at 以触发全量扫描
 	if cleaned > 0 {
 		s.db.Exec("UPDATE sources SET latest_video_at = 0")
 		log.Printf("[startup-cleanup] Reset latest_video_at for all sources (cleaned %d invalid dirs)", cleaned)
 	}
 
-	// 标记已完成
-	s.db.SetSetting("cleanup_v1_done", "true")
-	log.Printf("[startup-cleanup] Cleanup v1 completed (cleaned %d dirs)", cleaned)
+	s.db.SetSetting("cleanup_version_done", currentVersion)
+	log.Printf("[startup-cleanup] Cleanup v%s completed (cleaned %d dirs)", currentVersion, cleaned)
 }
 
 // cleanInvalidDirs 遍历 downloadDir 下所有子目录（最多 3 层），
