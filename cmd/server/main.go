@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"net/http"
+	_ "net/http/pprof"
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
+	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/logger"
@@ -121,6 +123,19 @@ func main() {
 		}
 	}
 
+	// 配置签名算法热更新（从 DB 读取远端 URL，空则使用内置版本）
+	signJSURL, _ := database.GetSetting("sign_js_url")
+	abogusJSURL, _ := database.GetSetting("abogus_js_url")
+	signUpdater := douyin.GetSignUpdater()
+	signUpdater.Configure(signJSURL, abogusJSURL)
+	if signJSURL != "" || abogusJSURL != "" {
+		if updated, err := signUpdater.CheckAndUpdate(); err != nil {
+			log.Printf("[sign-updater] 启动时检查远端签名脚本失败: %v", err)
+		} else if updated {
+			log.Println("[sign-updater] 签名脚本已从远端更新")
+		}
+	}
+
 	sched := scheduler.New(database, dl, *downloadDir, cookiePath)
 	// 如果有 Credential，立即同步给 scheduler（覆盖 New() 中的 cookie-based client）
 	if cred != nil && !cred.IsEmpty() {
@@ -153,19 +168,40 @@ func main() {
 		}
 	}()
 
+	// pprof debug server on :6060
+	go func() {
+		pprofAddr := ":6060"
+		log.Printf("pprof debug server listening on http://localhost%s/debug/pprof/", pprofAddr)
+		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+			log.Printf("pprof server error: %v", err)
+		}
+	}()
+
 	log.Println("Application started successfully")
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	log.Println("Shutting down...")
+	received := <-sig
+	log.Printf("收到退出信号 (%v)，等待进行中的下载完成...", received)
 
-	// Graceful shutdown: web server → scheduler → wait
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Graceful shutdown: scheduler → downloader → web server → DB
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Web server shutdown error: %v", err)
-	}
+
+	// 1. 停止调度器（不再提交新任务）
+	log.Println("[shutdown] 停止调度器...")
 	sched.Stop()
+
+	// 2. 停止下载器（取消进行中的下载，关闭 worker）
+	log.Println("[shutdown] 停止下载器...")
+	dl.Stop()
+
+	// 3. 关闭 HTTP 服务
+	log.Println("[shutdown] 关闭 HTTP 服务...")
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[shutdown] Web server shutdown error: %v", err)
+	}
+
+	// 4. 关闭数据库（defer 已处理，这里显式记录）
 	log.Println("Shutdown complete")
 }
