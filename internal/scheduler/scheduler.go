@@ -105,7 +105,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		sleepFn:          time.Sleep,
 		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
-		douyinDownloadLimiter: douyin.NewRateLimiter(2, 1, 30*time.Second), // 每分钟最多 2 条抖音下载
+		douyinDownloadLimiter: douyin.NewRateLimiter(4, 1, 15*time.Second), // 每分钟最多 4 条抖音下载
 	}
 }
 

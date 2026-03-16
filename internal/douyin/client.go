@@ -1046,7 +1046,7 @@ var douyinSpaceCollapser = regexp.MustCompile(`\s{2,}`)
 
 func SanitizePath(name string) string {
 	// 第一轮：替换文件系统非法字符
-	for _, c := range []string{"<", ">", ":", "\"", "/", "\\", "|", "?", "*"} {
+	for _, c := range []string{"<", ">", ":", "\"", "/", "\\", "|", "?", "*", "#", "@"} {
 		name = strings.ReplaceAll(name, c, "_")
 	}
 
@@ -1072,6 +1072,8 @@ func SanitizePath(name string) string {
 		case r >= 0xFE00 && r <= 0xFE0F: // 变体选择器
 			return -1
 		case unicode.Is(unicode.So, r): // Symbol, Other（emoji/symbols, NAS 兼容）
+			return -1
+		case r > 0xFFFF: // 非 BMP 字符（补充平面 emoji/symbols，NAS 不兼容）
 			return -1
 		case r >= 0xE0000 && r <= 0xE007F: // 标签字符
 			return -1
