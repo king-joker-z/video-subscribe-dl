@@ -246,6 +246,13 @@ func TestSanitizePath(t *testing.T) {
 		{strings.Repeat("a", 81), strings.Repeat("a", 80)},
 		{strings.Repeat("a", 80), strings.Repeat("a", 80)},   // exactly 80: no truncation
 		{strings.Repeat("a", 79), strings.Repeat("a", 79)},   // under 80: no truncation
+		// Emoji 和 Supplementary Planes（NAS 兼容性）
+		{"hello😀world", "helloworld"},          // U+1F600 grinning face emoji
+		{"hello📺世界", "hello世界"},              // emoji 在中间，中文保留
+		{"🔥火🔥", "火"},                 // 前后 emoji，中间汉字保留
+		{"混😊合👍内容", "混合内容"},      // 多个 emoji 混入中文
+		{"纯中文内容🎉", "纯中文内容"},             // 末尾 emoji
+		{"🎉纯中文内容", "纯中文内容"},             // 开头 emoji
 		// 混合场景
 		{"hello/world\u200B test\n", "hello_world test"},
 		{"\uFEFF  多余空格  \u200B", "多余空格"},
