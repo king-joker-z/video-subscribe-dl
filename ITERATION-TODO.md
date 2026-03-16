@@ -26,11 +26,15 @@
 
 ## 待做
 
-### Phase 2 — a_bogus 签名
+### Phase 2 — a_bogus 签名（下一优先级）
+> 当前状态: X-Bogus 签名已实现，签名降级链已就位（X-Bogus → 无签名）
+> a_bogus 尚未实现，需作为下一步重点迭代项
 - [ ] 研究 Python 版 ABogus 算法（TikTokDownloader/Evil0ctal），评估 Go 移植可行性
+- [ ] 获取 a_bogus JS 源码，在 goja VM 中测试可行性
 - [ ] 实现 a_bogus 签名（goja + JS 版本优先，或 Go 纯实现）
-- [ ] 签名策略链：a_bogus → X-Bogus → 无签名降级
-- [ ] 测试验证签名有效性
+- [ ] 将 a_bogus 插入签名策略链: a_bogus → X-Bogus → 无签名降级
+  - 入口: `signURLWithFallback()` in client.go
+- [ ] 测试验证签名有效性（对比有签名 vs 无签名的成功率）
 
 ### 其他
 - [ ] 抖音合集支持
