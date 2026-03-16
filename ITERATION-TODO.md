@@ -1,6 +1,6 @@
 # VSD 迭代记录
 
-> 最后更新: 2026-03-17（processDouyin mock 测试覆盖提升）
+> 最后更新: 2026-03-17（douyin 包 HTTP mock 测试覆盖提升 52.7%→69.8%）
 
 ## 已完成
 
@@ -60,6 +60,7 @@
 - [x] 单元测试覆盖提升 — processDouyin/retryOneDouyinDownload/resolveDouyinSecUID/getDouyinSetting/loadDouyinUserCookie mock 测试（scheduler 21.3%→28.3%）— 7e7f260
 - [x] downloadDouyinFile 去重（scheduler 和 web/api 中有完全重复实现）
 - [x] HTTP Client 复用（web/api 包共享 HTTP Client + Transport 连接池）— f2ac2c3
+- [x] douyin 包 HTTP mock 测试 — GetVideoDetail/GetUserVideos/GetUserProfile/ResolveVideoURL/ResolveShareURL（33 用例，覆盖 52.7%→69.8%）
 
 ### P2 — 功能增强
 - [ ] 抖音合集下载（/aweme/v1/web/mix/aweme/，API 端点已定义）
