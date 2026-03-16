@@ -39,6 +39,7 @@ type Scheduler struct {
 
 	// Cookie 定期检测
 	lastCookieCheck time.Time // 上次 Cookie 主动检测时间
+	lastDouyinCookieCheck time.Time // 上次抖音 Cookie 验证时间
 
 	// Credential 管理
 	db2 *db.DB // alias, same as db (for clarity in credential methods)

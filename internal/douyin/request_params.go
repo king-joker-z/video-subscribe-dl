@@ -71,11 +71,13 @@ func (c *DouyinClient) buildBaseParams() url.Values {
 	params.Set("effective_type", "4g")
 	params.Set("round_trip_time", "100")
 
-	// msToken: URL 参数中的 msToken 每次随机生成
-	// 注意：这和 Cookie 中的 msToken 不一致是正常的，旧代码就是这样
-	// 强制一致反而触发抖音反爬检测
-	msToken := generateMsToken()
-	params.Set("msToken", msToken)
+	// msToken: 复用会话级 token，翻页期间保持一致
+	// Cookie 中的 msToken 通过 getSessionCookie() → getCookieStringWithMsToken(sessionMsToken) 传入
+	// URL query 中的 msToken 必须和 Cookie 中保持一致，否则翻页会失败
+	if c.sessionMsToken == "" {
+		c.sessionMsToken = generateMsToken()
+	}
+	params.Set("msToken", c.sessionMsToken)
 
 	return params
 }

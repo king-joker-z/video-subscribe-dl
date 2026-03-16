@@ -18,6 +18,16 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 	client := douyin.NewClient()
 	defer client.Close() // 确保 RateLimiter goroutine 被清理
 
+	// 抖音 Cookie 验证（每小时最多一次，和 B 站 Cookie 验证完全独立）
+	if time.Since(s.lastDouyinCookieCheck) > 1*time.Hour {
+		s.lastDouyinCookieCheck = time.Now()
+		if valid, msg := client.ValidateCookie(); !valid {
+			log.Printf("[douyin] ⚠️ Cookie 验证失败: %s", msg)
+		} else {
+			log.Printf("[douyin] Cookie 验证通过: %s", msg)
+		}
+	}
+
 	// 解析 sec_user_id
 	secUID, err := s.resolveDouyinSecUID(client, src.URL)
 	if err != nil {
