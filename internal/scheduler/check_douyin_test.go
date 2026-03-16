@@ -659,3 +659,438 @@ func TestFullScanDouyin_UpdatesLatestVideoAt(t *testing.T) {
 		t.Errorf("expected latestVideoAt=%d, got %d", now-50, latestAt)
 	}
 }
+
+// ============================
+// 错误处理 & 退避 测试
+// ============================
+
+func TestCheckDouyin_RiskControlError_StopsAfter2(t *testing.T) {
+	// 模拟连续风控 403 错误，应在 2 次后停止
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{result: nil, err: fmt.Errorf("HTTP 403 forbidden")},
+			{result: nil, err: fmt.Errorf("HTTP 403 forbidden")},
+			// 第三次不应被调用
+			{
+				result: &douyin.UserVideosResult{
+					Videos:  []douyin.DouyinVideo{},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 连续 2 次风控拦截后应停止
+	if mock.getCallCount() != 2 {
+		t.Errorf("expected 2 GetUserVideos calls (risk control stop), got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 0 {
+		t.Errorf("expected 0 pending downloads after risk control, got %d", pending)
+	}
+}
+
+func TestCheckDouyin_NormalError_RetriesAndRecovers(t *testing.T) {
+	now := time.Now().Unix()
+	// 第一次普通网络错误，第二次成功
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{result: nil, err: fmt.Errorf("connection timeout")},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "retry_v1", Desc: "成功", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 第一次失败 + 重试成功 = 2 calls
+	if mock.getCallCount() != 2 {
+		t.Errorf("expected 2 GetUserVideos calls (retry), got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download after retry, got %d", pending)
+	}
+}
+
+func TestCheckDouyin_NormalError_StopsAfter5(t *testing.T) {
+	// 模拟连续 5 次普通网络错误
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{result: nil, err: fmt.Errorf("connection timeout 1")},
+			{result: nil, err: fmt.Errorf("connection timeout 2")},
+			{result: nil, err: fmt.Errorf("connection timeout 3")},
+			{result: nil, err: fmt.Errorf("connection timeout 4")},
+			{result: nil, err: fmt.Errorf("connection timeout 5")},
+			// 第 6 次不应被调用
+			{
+				result: &douyin.UserVideosResult{
+					Videos:  []douyin.DouyinVideo{},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 连续 5 次普通错误后应停止
+	if mock.getCallCount() != 5 {
+		t.Errorf("expected 5 GetUserVideos calls (normal error stop), got %d", mock.getCallCount())
+	}
+}
+
+func TestCheckDouyin_EmptyFirstPage_NoVideos(t *testing.T) {
+	// 空视频列表（可能私密账号）
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos:  []douyin.DouyinVideo{},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 只调用 1 次，0 个下载
+	if mock.getCallCount() != 1 {
+		t.Errorf("expected 1 GetUserVideos call, got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 0 {
+		t.Errorf("expected 0 pending downloads (empty list), got %d", pending)
+	}
+}
+
+func TestCheckDouyin_CookieValidationSkippedWhenRecent(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: false,
+		validateMsg:    "expired",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "cv_v1", Desc: "Video", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+	// 设置最后检查时间为 30 分钟前（< 1 小时，不触发验证）
+	s.lastDouyinCookieCheck = time.Now().Add(-30 * time.Minute)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	// 即使 cookie 验证设为失败，因为距上次检查 < 1h，不会验证，视频仍能正常拉取
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download (cookie check skipped), got %d", pending)
+	}
+}
+
+func TestCheckDouyin_RiskControlError_SingleRetryThenRecovers(t *testing.T) {
+	now := time.Now().Unix()
+	// 1 次风控错误后恢复
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{result: nil, err: fmt.Errorf("HTTP 429 too many requests")},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "rc_v1", Desc: "恢复", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	if mock.getCallCount() != 2 {
+		t.Errorf("expected 2 calls (1 risk retry + 1 success), got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download after risk recovery, got %d", pending)
+	}
+}
+
+// ============================
+// resolveDouyinSecUID 边界测试
+// ============================
+
+func TestCheckDouyin_ResolveShareURL_NonUserType(t *testing.T) {
+	// ResolveShareURL 返回 video 类型而非 user，应失败
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		resolveResult: &douyin.ResolveResult{
+			Type:    douyin.URLTypeVideo,
+			VideoID: "12345",
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://v.douyin.com/video_link")
+	s.checkDouyin(src)
+
+	if mock.getCallCount() > 0 {
+		t.Errorf("expected 0 video calls (non-user URL type), got %d", mock.getCallCount())
+	}
+}
+
+// ============================
+// fullScanDouyin 错误处理测试
+// ============================
+
+func TestFullScanDouyin_RiskControl_ContinuesWithPartialData(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_p1", Desc: "Page1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{result: nil, err: fmt.Errorf("HTTP 403 forbidden")},
+			{result: nil, err: fmt.Errorf("HTTP 403 forbidden")},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download (partial data), got %d", pending)
+	}
+}
+
+func TestFullScanDouyin_NormalError_ContinuesWithPartialAfter5(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_err_v1", Desc: "OK", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+						{AwemeID: "fs_err_v2", Desc: "OK2", CreateTime: now - 20, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{result: nil, err: fmt.Errorf("timeout 1")},
+			{result: nil, err: fmt.Errorf("timeout 2")},
+			{result: nil, err: fmt.Errorf("timeout 3")},
+			{result: nil, err: fmt.Errorf("timeout 4")},
+			{result: nil, err: fmt.Errorf("timeout 5")},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads (partial after errors), got %d", pending)
+	}
+}
+
+func TestFullScanDouyin_EmptyDescFallback(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_notitle", Desc: "", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	expected := "douyin_fs_notitle"
+	if downloads[0].Title != expected {
+		t.Errorf("expected fallback title %q, got %q", expected, downloads[0].Title)
+	}
+}
+
+func TestFullScanDouyin_EmptyAuthor_FallbackToSourceName(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "fs_noauthor", Desc: "视频", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: ""}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "MyUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.fullScanDouyin(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	if downloads[0].Uploader != "MyUser" {
+		t.Errorf("expected uploader 'MyUser', got %q", downloads[0].Uploader)
+	}
+}
+
+func TestCheckDouyin_DirectSecUID_NoResolveNeeded(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		resolveErr:     fmt.Errorf("should not be called"),
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "direct_v1", Desc: "直接URL", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 1 {
+		t.Errorf("expected 1 pending download (direct secUID), got %d", pending)
+	}
+}
+
+func TestCheckDouyin_MixedErrors_ResetsCountOnSuccess(t *testing.T) {
+	now := time.Now().Unix()
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{result: nil, err: fmt.Errorf("timeout 1")},
+			{result: nil, err: fmt.Errorf("timeout 2")},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "mix_v1", Desc: "P1", CreateTime: now - 10, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore:   true,
+					MaxCursor: 100,
+				},
+			},
+			{result: nil, err: fmt.Errorf("timeout 3")},
+			{result: nil, err: fmt.Errorf("timeout 4")},
+			{
+				result: &douyin.UserVideosResult{
+					Videos: []douyin.DouyinVideo{
+						{AwemeID: "mix_v2", Desc: "P2", CreateTime: now - 20, Duration: 30000, Author: douyin.DouyinUser{Nickname: "TestUser"}},
+					},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.checkDouyin(src)
+
+	if mock.getCallCount() != 6 {
+		t.Errorf("expected 6 GetUserVideos calls (mixed errors), got %d", mock.getCallCount())
+	}
+	pending := countPendingDownloads(t, s.db, src.ID)
+	if pending != 2 {
+		t.Errorf("expected 2 pending downloads (mixed errors recovery), got %d", pending)
+	}
+}
+
+func TestCheckDouyin_LatestVideoAt_NotUpdatedWhenNoNewVideos(t *testing.T) {
+	now := time.Now().Unix()
+	originalLatest := now - 100
+	mock := &mockDouyinAPI{
+		validateResult: true,
+		validateMsg:    "ok",
+		userVideoPages: []mockVideoPage{
+			{
+				result: &douyin.UserVideosResult{
+					Videos:  []douyin.DouyinVideo{},
+					HasMore: false,
+				},
+			},
+		},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSource(t, s.db, "TestUser", "https://www.douyin.com/user/MS4wLjABAAAAtest_sec_uid")
+	s.db.UpdateSourceLatestVideoAt(src.ID, originalLatest)
+
+	s.checkDouyin(src)
+
+	latestAt, _ := s.db.GetSourceLatestVideoAt(src.ID)
+	if latestAt != originalLatest {
+		t.Errorf("expected latestVideoAt unchanged at %d, got %d", originalLatest, latestAt)
+	}
+}
