@@ -2,6 +2,8 @@ package db
 
 import (
 	"fmt"
+	"log"
+	"os"
 )
 
 // sourceColumns 统一的 source SELECT 列（修改字段时只改这一处）
@@ -131,6 +133,42 @@ func (d *DB) DeleteSource(id int64) error {
 	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
 	_, err := d.Exec("DELETE FROM sources WHERE id = ?", id)
 	return err
+}
+
+// DeleteSourceWithFiles 删除订阅并清除本地文件
+func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
+	// 1. 查询所有 file_path
+	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ?", id)
+	if err != nil {
+		// 即使查询失败也继续删除 DB 记录
+		log.Printf("[source] Warning: failed to query file paths for source %d: %v", id, err)
+		err2 := d.DeleteSource(id)
+		return 0, err2
+	}
+	var paths []string
+	for rows.Next() {
+		var p string
+		rows.Scan(&p)
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	rows.Close()
+
+	// 2. 删除文件（用 os.RemoveAll，可以删目录）
+	deleted := 0
+	for _, p := range paths {
+		if err2 := os.RemoveAll(p); err2 != nil {
+			log.Printf("[source] Warning: failed to remove %s: %v", p, err2)
+		} else {
+			deleted++
+		}
+	}
+
+	// 3. 删 DB 记录
+	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
+	_, err = d.Exec("DELETE FROM sources WHERE id = ?", id)
+	return deleted, err
 }
 
 func (d *DB) UpdateSourceLastCheck(id int64) error {

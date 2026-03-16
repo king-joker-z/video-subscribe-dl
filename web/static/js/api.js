@@ -25,7 +25,7 @@ export const api = {
   parseSource: (url) => request('/api/sources/parse', { method: 'POST', body: JSON.stringify({ url }) }),
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteSource: (id) => request(`/api/sources/${id}`, { method: 'DELETE' }),
+  deleteSource: (id, deleteFiles) => request(`/api/sources/${id}` + (deleteFiles ? '?deleteFiles=true' : ''), { method: 'DELETE' }),
   syncSource: (id) => request(`/api/sources/${id}/sync`, { method: 'POST' }),
   fullScanSource: (id) => request(`/api/sources/${id}/fullscan`, { method: 'POST' }),
   exportSources: () => {

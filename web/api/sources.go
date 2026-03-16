@@ -371,12 +371,23 @@ func (h *SourcesHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, id
 
 // DELETE /api/sources/:id
 func (h *SourcesHandler) HandleDelete(w http.ResponseWriter, r *http.Request, id int64) {
-	if err := h.db.DeleteSource(id); err != nil {
-		apiError(w, CodeInternal, "删除失败: "+err.Error())
-		return
+	deleteFiles := r.URL.Query().Get("deleteFiles") == "true"
+	if deleteFiles {
+		deleted, err := h.db.DeleteSourceWithFiles(id)
+		if err != nil {
+			apiError(w, CodeInternal, "删除失败: "+err.Error())
+			return
+		}
+		log.Printf("[source] Deleted with files: id=%d, removedFiles=%d", id, deleted)
+		apiOK(w, map[string]interface{}{"id": id, "deletedFiles": deleted})
+	} else {
+		if err := h.db.DeleteSource(id); err != nil {
+			apiError(w, CodeInternal, "删除失败: "+err.Error())
+			return
+		}
+		log.Printf("[source] Deleted: id=%d", id)
+		apiOK(w, map[string]interface{}{"id": id})
 	}
-	log.Printf("[source] Deleted: id=%d", id)
-	apiOK(w, map[string]interface{}{"id": id})
 }
 
 // POST /api/sources/:id/sync
