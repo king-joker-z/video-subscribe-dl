@@ -94,13 +94,16 @@ func setClientHints(req *http.Request, ua string) {
 
 // DouyinClient 抖音 API 客户端
 type DouyinClient struct {
-	noRedirectClient *http.Client // 不跟随重定向
-	normalClient     *http.Client // 正常 client
+	noRedirectClient *http.Client          // 不跟随重定向
+	normalClient     *http.Client          // 正常 client
 	limiter          *RateLimiter
+	fingerprint      *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
 }
 
-// NewClient 创建抖音客户端
+// NewClient 创建抖音客户端（使用会话级指纹，确保同一实例内请求一致性）
 func NewClient() *DouyinClient {
+	fp := GetSessionFingerprint()
+	log.Printf("[douyin] client created with fingerprint: %s", fp)
 	return &DouyinClient{
 		noRedirectClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -111,7 +114,8 @@ func NewClient() *DouyinClient {
 		normalClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		limiter: DefaultRateLimiter(),
+		limiter:     DefaultRateLimiter(),
+		fingerprint: fp,
 	}
 }
 
@@ -267,7 +271,7 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
-	ua := pickPCUA()
+	ua := c.fingerprint.UserAgent
 	xBogus, err := signURL(parsed.RawQuery, ua)
 	if err != nil {
 		return nil, fmt.Errorf("sign failed: %w", err)
@@ -600,7 +604,7 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	queryStr := params.Encode()
 
 	// X-Bogus 签名
-	ua := pickPCUA()
+	ua := c.fingerprint.UserAgent
 	xBogus, err := signURL(queryStr, ua)
 	if err != nil {
 		return nil, fmt.Errorf("sign failed: %w", err)
