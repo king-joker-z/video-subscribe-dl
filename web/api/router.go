@@ -239,6 +239,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Metrics
 	mux.HandleFunc("/api/metrics", rt.metrics.HandleMetrics)
+	mux.HandleFunc("/api/metrics/prometheus", rt.metrics.HandlePrometheus)
 
 	// Sign Reload
 	mux.HandleFunc("/api/sign/reload", rt.signReload.HandleReload)

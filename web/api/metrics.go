@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"runtime"
 	"time"
@@ -77,4 +78,47 @@ func (h *MetricsHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiOK(w, result)
+}
+
+// HandlePrometheus GET /api/metrics/prometheus — Prometheus text format
+func (h *MetricsHandler) HandlePrometheus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		apiError(w, CodeMethodNotAllow, "method not allowed")
+		return
+	}
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	dlStats := h.dl.Stats()
+	uptimeSeconds := int(time.Since(h.startTime).Seconds())
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "# HELP vsd_goroutines Current number of goroutines\n")
+	fmt.Fprintf(w, "# TYPE vsd_goroutines gauge\n")
+	fmt.Fprintf(w, "vsd_goroutines %d\n", runtime.NumGoroutine())
+	fmt.Fprintf(w, "# HELP vsd_memory_bytes Allocated heap memory in bytes\n")
+	fmt.Fprintf(w, "# TYPE vsd_memory_bytes gauge\n")
+	fmt.Fprintf(w, "vsd_memory_bytes %d\n", memStats.Alloc)
+	fmt.Fprintf(w, "# HELP vsd_memory_sys_bytes Total memory obtained from OS in bytes\n")
+	fmt.Fprintf(w, "# TYPE vsd_memory_sys_bytes gauge\n")
+	fmt.Fprintf(w, "vsd_memory_sys_bytes %d\n", memStats.Sys)
+	fmt.Fprintf(w, "# HELP vsd_gc_cycles_total Total number of completed GC cycles\n")
+	fmt.Fprintf(w, "# TYPE vsd_gc_cycles_total counter\n")
+	fmt.Fprintf(w, "vsd_gc_cycles_total %d\n", memStats.NumGC)
+	fmt.Fprintf(w, "# HELP vsd_uptime_seconds Uptime in seconds\n")
+	fmt.Fprintf(w, "# TYPE vsd_uptime_seconds gauge\n")
+	fmt.Fprintf(w, "vsd_uptime_seconds %d\n", uptimeSeconds)
+	fmt.Fprintf(w, "# HELP vsd_downloader_active Currently active downloads\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloader_active gauge\n")
+	fmt.Fprintf(w, "vsd_downloader_active %d\n", dlStats.Active)
+	fmt.Fprintf(w, "# HELP vsd_downloader_queued Queued downloads\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloader_queued gauge\n")
+	fmt.Fprintf(w, "vsd_downloader_queued %d\n", dlStats.Queued)
+	fmt.Fprintf(w, "# HELP vsd_downloader_completed_total Total completed downloads\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloader_completed_total counter\n")
+	fmt.Fprintf(w, "vsd_downloader_completed_total %d\n", dlStats.Completed)
+	fmt.Fprintf(w, "# HELP vsd_downloader_failed_total Total failed downloads\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloader_failed_total counter\n")
+	fmt.Fprintf(w, "vsd_downloader_failed_total %d\n", dlStats.Failed)
 }

@@ -441,3 +441,51 @@ func TestPingEndpoint(t *testing.T) {
 		t.Errorf("ping status = %v, want pong", data["status"])
 	}
 }
+
+// ============================================================
+// TestPrometheusMetrics — /api/metrics/prometheus 返回标准格式
+// ============================================================
+
+func TestPrometheusMetrics(t *testing.T) {
+	env := setupTestEnv(t)
+
+	req := httptest.NewRequest("GET", "/api/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	env.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain", ct)
+	}
+
+	body := w.Body.String()
+
+	// 必须包含 HELP 和 TYPE 行
+	if !strings.Contains(body, "# HELP") {
+		t.Error("missing # HELP lines in prometheus output")
+	}
+	if !strings.Contains(body, "# TYPE") {
+		t.Error("missing # TYPE lines in prometheus output")
+	}
+
+	// 必须包含核心 metrics
+	for _, metric := range []string{
+		"vsd_goroutines",
+		"vsd_memory_bytes",
+		"vsd_memory_sys_bytes",
+		"vsd_gc_cycles_total",
+		"vsd_uptime_seconds",
+		"vsd_downloader_active",
+		"vsd_downloader_queued",
+		"vsd_downloader_completed_total",
+		"vsd_downloader_failed_total",
+	} {
+		if !strings.Contains(body, metric) {
+			t.Errorf("missing metric: %s", metric)
+		}
+	}
+}
