@@ -71,9 +71,11 @@ func (c *DouyinClient) buildBaseParams() url.Values {
 	params.Set("effective_type", "4g")
 	params.Set("round_trip_time", "100")
 
-	// msToken 也作为 URL 参数（参考 f2 BaseRequestModel）
-	msToken := generateMsToken()
-	params.Set("msToken", msToken)
+	// msToken: 复用会话级 token，确保和 Cookie 中的 msToken 一致
+	if c.sessionMsToken == "" {
+		c.sessionMsToken = generateMsToken()
+	}
+	params.Set("msToken", c.sessionMsToken)
 
 	return params
 }

@@ -33,8 +33,6 @@ const (
 
 	// ---- 认证/Cookie ----
 
-	// MsTokenAPI msToken 获取端点
-	MsTokenAPI = "https://mssdk.bytedance.com/web/common"
 
 	// TTWidAPI ttwid 注册端点
 	TTWidAPI = "https://ttwid.bytedance.com/ttwid/union/register/"

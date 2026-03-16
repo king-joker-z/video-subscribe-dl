@@ -59,52 +59,7 @@ func generateMsToken() string {
 	return string(b)
 }
 
-// fetchRealMsToken 从 mssdk 获取真实 msToken
-// 优先使用真实 token，失败降级为随机生成
-func fetchRealMsToken(httpClient *http.Client) string {
-	req, err := http.NewRequest("POST", MsTokenAPI, strings.NewReader("{}"))
-	if err != nil {
-		logger.Warn("msToken request build failed, using random token", "error", err)
-		return generateMsToken()
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", pickUA())
 
-	client := httpClient
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.Warn("msToken fetch failed, using random token", "error", err)
-		return generateMsToken()
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Warn("msToken read failed, using random token", "error", err)
-		return generateMsToken()
-	}
-
-	var result struct {
-		Data string `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil || result.Data == "" {
-		// 尝试直接从 body 取（有些接口直接返回 token 字符串）
-		token := strings.TrimSpace(string(body))
-		if len(token) >= 100 && len(token) <= 200 {
-			logger.Info("msToken fetched from raw body", "len", len(token))
-			return token
-		}
-		logger.Warn("msToken parse failed or empty, using random token", "body", truncate(string(body), 100))
-		return generateMsToken()
-	}
-
-	logger.Info("msToken fetched from mssdk", "len", len(result.Data))
-	return result.Data
-}
 
 // fetchTTWID 通过 bytedance ttwid API 获取 ttwid
 // 参考 lux: 从 response 的 Set-Cookie header 中提取 ttwid
@@ -159,8 +114,8 @@ func (cm *cookieManager) getCookieString(httpClient *http.Client) string {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	// msToken: 优先真实 token，失败降级随机
-	msToken := fetchRealMsToken(httpClient)
+	// msToken: 随机生成（mssdk API 永远返回 protobuf 不是 JSON，不再尝试）
+	msToken := generateMsToken()
 
 	// ttwid 缓存（有 TTL）
 	if cm.ttwid == "" || time.Since(cm.ttwidAt) > ttwidTTL {
@@ -207,5 +162,45 @@ func (cm *cookieManager) getCookieString(httpClient *http.Client) string {
 		logger.Info("cookie complete", "fields", len(fields), "len", len(cookie))
 	}
 
+	return cookie
+}
+
+// getCookieStringWithMsToken 返回使用指定 msToken 的 Cookie 字符串
+// 确保 Cookie 中的 msToken 和 URL query 参数中的 msToken 一致
+func (cm *cookieManager) getCookieStringWithMsToken(httpClient *http.Client, msToken string) string {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// ttwid 缓存（有 TTL）
+	if cm.ttwid == "" || time.Since(cm.ttwidAt) > ttwidTTL {
+		ttwid, err := fetchTTWID(httpClient)
+		if err != nil {
+			logger.Warn("fetchTTWID failed", "error", err)
+		} else if ttwid != "" {
+			cm.ttwid = ttwid
+			cm.ttwidAt = time.Now()
+			logger.Info("ttwid refreshed", "len", len(ttwid))
+		}
+	}
+
+	// verify_fp 和 s_v_web_id 每次生成（轻量操作，无需缓存）
+	verifyFp := generateVerifyFp()
+	sVWebID := generateVerifyFp() // 同格式，不同值
+
+	parts := []string{
+		fmt.Sprintf("msToken=%s", msToken),
+	}
+	if cm.ttwid != "" {
+		parts = append(parts, fmt.Sprintf("ttwid=%s", cm.ttwid))
+	}
+	parts = append(parts,
+		fmt.Sprintf("odin_tt=%s", fixedOdinTT),
+		fmt.Sprintf("bd_ticket_guard_client_data=%s", fixedBdTicketGuardClientData),
+		fmt.Sprintf("verify_fp=%s", verifyFp),
+		fmt.Sprintf("s_v_web_id=%s", sVWebID),
+	)
+
+	cookie := strings.Join(parts, "; ")
+	logger.Info("cookie complete (with session msToken)", "fields", 6, "len", len(cookie))
 	return cookie
 }
