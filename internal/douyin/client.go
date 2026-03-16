@@ -1,80 +1,73 @@
 package douyin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 )
 
-const douyinUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+// UA 池: 移动端 UA（parse-video 用 iPhone UA 效果最好）
+var uaPool = []string{
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+	"Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+	"Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+}
+
+// pickUA 轮换 UA
+func pickUA() string {
+	return uaPool[rand.Intn(len(uaPool))]
+}
 
 // DouyinClient 抖音 API 客户端
 type DouyinClient struct {
-	http    *http.Client
-	limiter *RateLimiter
+	noRedirectClient *http.Client // 不跟随重定向
+	normalClient     *http.Client // 正常 client
+	limiter          *RateLimiter
 }
 
 // NewClient 创建抖音客户端
 func NewClient() *DouyinClient {
 	return &DouyinClient{
-		http: &http.Client{
+		noRedirectClient: &http.Client{
 			Timeout: 30 * time.Second,
-			// 不自动跟随重定向（用于解析短链接）
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
+		},
+		normalClient: &http.Client{
+			Timeout: 30 * time.Second,
 		},
 		limiter: DefaultRateLimiter(),
 	}
 }
 
-// httpGet 辅助方法：自动添加 Cookie 和 UA
-func (c *DouyinClient) httpGet(rawURL string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	cookie := globalCookieMgr.getCookieString(c.http)
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", douyinUA)
-	req.Header.Set("Referer", "https://www.douyin.com/")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	return c.http.Do(req)
-}
-
-// httpGetFollowRedirect 跟随重定向的 GET 请求
-func (c *DouyinClient) httpGetFollowRedirect(rawURL string) (*http.Response, error) {
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-	req, err := http.NewRequest("GET", rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	cookie := globalCookieMgr.getCookieString(client)
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", douyinUA)
-	req.Header.Set("Referer", "https://www.douyin.com/")
-	return client.Do(req)
-}
-
 // ---- URL 解析 ----
 
 var (
-	// 短链接: v.douyin.com/xxx
+	// v.douyin.com/xxx 短链接
 	reShortURL = regexp.MustCompile(`v\.douyin\.com/([A-Za-z0-9]+)`)
-	// 视频链接: douyin.com/video/1234567890
+	// douyin.com/video/1234567890
 	reVideoURL = regexp.MustCompile(`douyin\.com/video/(\d+)`)
-	// 用户链接: douyin.com/user/MS4wLjAB... (sec_user_id)
+	// douyin.com/user/MS4wLjAB... (sec_user_id)
 	reUserURL = regexp.MustCompile(`douyin\.com/user/([A-Za-z0-9_-]+)`)
-	// iesdouyin 视频链接: iesdouyin.com/share/video/1234567890
+	// iesdouyin.com/share/video/1234567890
 	reIesVideoURL = regexp.MustCompile(`iesdouyin\.com/share/video/(\d+)`)
+	// 从路径中提取最后的数字 ID
+	rePathVideoID = regexp.MustCompile(`/(?:video|note)/(\d+)`)
+	// douyin.com/jingxuan?modal_id=xxx
+	reModalID = regexp.MustCompile(`modal_id=(\d+)`)
 )
 
 // URLType 解析结果类型
@@ -88,75 +81,123 @@ const (
 
 // ResolveResult 解析结果
 type ResolveResult struct {
-	Type     URLType
-	VideoID  string // 视频 ID（aweme_id）
-	SecUID   string // 用户 sec_user_id
+	Type    URLType
+	VideoID string
+	SecUID  string
 }
 
-// ResolveShareURL 解析抖音分享链接，支持:
-// - v.douyin.com/xxx 短链接
-// - douyin.com/video/xxx 视频链接
-// - douyin.com/user/xxx 用户主页链接
-// - iesdouyin.com/share/video/xxx 视频链接
+// ResolveShareURL 解析抖音分享链接
+// 参考 parse-video: parseShareUrl → 区分 v.douyin.com / www.douyin.com / www.iesdouyin.com
 func (c *DouyinClient) ResolveShareURL(shareURL string) (*ResolveResult, error) {
 	c.limiter.Acquire()
 
-	// 1. 直接匹配完整视频链接
-	if m := reVideoURL.FindStringSubmatch(shareURL); len(m) > 1 {
-		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
+	// 确保有协议前缀
+	if !strings.HasPrefix(shareURL, "http") {
+		shareURL = "https://" + shareURL
 	}
-	if m := reIesVideoURL.FindStringSubmatch(shareURL); len(m) > 1 {
+
+	parsed, err := url.Parse(shareURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid url: %w", err)
+	}
+
+	switch parsed.Host {
+	case "v.douyin.com":
+		return c.resolveShortURL(shareURL)
+	case "www.douyin.com", "www.iesdouyin.com":
+		return c.parseLongURL(shareURL)
+	default:
+		// 尝试通用匹配
+		return c.parseLongURL(shareURL)
+	}
+}
+
+// resolveShortURL 解析 v.douyin.com 短链接（通过 302 重定向）
+// 参考 parse-video: parseAppShareUrl
+func (c *DouyinClient) resolveShortURL(shortURL string) (*ResolveResult, error) {
+	req, err := http.NewRequest("GET", shortURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", pickUA())
+
+	resp, err := c.noRedirectClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("resolve short url: %w", err)
+	}
+	defer resp.Body.Close()
+
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return nil, fmt.Errorf("no redirect from short url")
+	}
+
+	return c.parseLongURL(location)
+}
+
+// parseLongURL 从完整 URL 中解析出视频 ID 或用户 sec_uid
+// 参考 parse-video: parsePcShareUrl + parseVideoIdFromPath
+func (c *DouyinClient) parseLongURL(rawURL string) (*ResolveResult, error) {
+	// 优先: modal_id 参数（精选页面）
+	if m := reModalID.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
 
-	// 2. 用户主页链接
-	if m := reUserURL.FindStringSubmatch(shareURL); len(m) > 1 {
+	// 用户主页
+	if m := reUserURL.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeUser, SecUID: m[1]}, nil
 	}
 
-	// 3. 短链接: 跟随重定向
-	if reShortURL.MatchString(shareURL) {
-		// 确保有协议前缀
-		if !strings.HasPrefix(shareURL, "http") {
-			shareURL = "https://" + shareURL
-		}
-		resp, err := c.httpGet(shareURL)
-		if err != nil {
-			return nil, fmt.Errorf("resolve short url: %w", err)
-		}
-		defer resp.Body.Close()
-
-		location := resp.Header.Get("Location")
-		if location == "" {
-			return nil, fmt.Errorf("no redirect from short url")
-		}
-
-		// 从重定向 URL 中解析
-		if m := reVideoURL.FindStringSubmatch(location); len(m) > 1 {
-			return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
-		}
-		if m := reUserURL.FindStringSubmatch(location); len(m) > 1 {
-			return &ResolveResult{Type: URLTypeUser, SecUID: m[1]}, nil
-		}
-
-		return nil, fmt.Errorf("unable to parse redirect url: %s", location)
+	// 视频链接
+	if m := reVideoURL.FindStringSubmatch(rawURL); len(m) > 1 {
+		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
+	}
+	if m := reIesVideoURL.FindStringSubmatch(rawURL); len(m) > 1 {
+		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
 
-	return nil, fmt.Errorf("unrecognized douyin url: %s", shareURL)
+	// /video/xxx 或 /note/xxx 路径
+	if m := rePathVideoID.FindStringSubmatch(rawURL); len(m) > 1 {
+		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
+	}
+
+	// 最后手段: URL 路径最后一段数字
+	parsed, _ := url.Parse(rawURL)
+	if parsed != nil {
+		path := strings.Trim(parsed.Path, "/")
+		parts := strings.Split(path, "/")
+		if len(parts) > 0 {
+			lastPart := parts[len(parts)-1]
+			if matched, _ := regexp.MatchString(`^\d+$`, lastPart); matched {
+				return &ResolveResult{Type: URLTypeVideo, VideoID: lastPart}, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("unrecognized douyin url: %s", rawURL)
 }
 
 // ---- 视频详情 ----
 
-// routerDataPattern 匹配 window._ROUTER_DATA 或 RENDER_DATA 中的 JSON
-var routerDataPattern = regexp.MustCompile(`(?:_ROUTER_DATA|RENDER_DATA)\s*=\s*({.+?})\s*</script>`)
+// _ROUTER_DATA 正则（参考 parse-video: 精确匹配 window._ROUTER_DATA = {...}</script>）
+var reRouterData = regexp.MustCompile(`window\._ROUTER_DATA\s*=\s*(.*?)</script>`)
 
 // GetVideoDetail 获取单个视频详情
-// 通过 https://www.iesdouyin.com/share/video/{id} 页面解析
+// 核心方案: 通过 iesdouyin.com/share/video/{id} 页面解析 _ROUTER_DATA
+// 参考 parse-video parseVideoID: 不需要 X-Bogus 签名，不需要 goja
 func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	c.limiter.Acquire()
 
 	pageURL := fmt.Sprintf("https://www.iesdouyin.com/share/video/%s", videoID)
-	resp, err := c.httpGetFollowRedirect(pageURL)
+
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	// parse-video 用 iPhone UA，实测比桌面 UA 更稳定
+	req.Header.Set("User-Agent", pickUA())
+
+	resp, err := c.normalClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch video page: %w", err)
 	}
@@ -167,91 +208,177 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 		return nil, fmt.Errorf("read video page body: %w", err)
 	}
 
-	html := string(body)
+	htmlStr := string(body)
 
-	// 尝试从 _ROUTER_DATA / RENDER_DATA 提取 JSON
-	m := routerDataPattern.FindStringSubmatch(html)
+	// Step 1: 检查是否为图集/笔记（参考 parse-video: 通过 canonical link 判断）
+	isNote := false
+	canonical := getCanonicalFromHTML(htmlStr)
+	if strings.Contains(canonical, "/note/") {
+		isNote = true
+	}
+
+	// Step 2: 图集走 slidesinfo API（参考 parse-video: 随机 web_id + 随机 a_bogus 居然能用）
+	if isNote {
+		return c.getNoteDetail(videoID)
+	}
+
+	// Step 3: 普通视频从 _ROUTER_DATA 解析
+	m := reRouterData.FindSubmatch(body)
 	if len(m) < 2 {
-		// 备选: 尝试匹配更宽松的格式
-		alt := regexp.MustCompile(`window\._ROUTER_DATA\s*=\s*({[\s\S]+?})\s*;?\s*</script>`)
-		m = alt.FindStringSubmatch(html)
-	}
-	if len(m) < 2 {
-		return nil, fmt.Errorf("_ROUTER_DATA not found in page")
+		return nil, fmt.Errorf("_ROUTER_DATA not found in page (status=%d, bodyLen=%d)", resp.StatusCode, len(body))
 	}
 
-	jsonStr := m[1]
-	// URL decode（有些版本会 encode）
-	if decoded, err := url.QueryUnescape(jsonStr); err == nil {
-		jsonStr = decoded
-	}
-
-	return parseRouterData(jsonStr, videoID)
+	jsonBytes := bytes.TrimSpace(m[1])
+	return c.parseRouterDataForVideo(jsonBytes, videoID)
 }
 
-// parseRouterData 从 _ROUTER_DATA JSON 中提取视频信息
-func parseRouterData(jsonStr string, videoID string) (*DouyinVideo, error) {
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-		return nil, fmt.Errorf("parse router data: %w", err)
+// getNoteDetail 获取图集/笔记详情
+// 参考 parse-video: iesdouyin.com/web/api/v2/aweme/slidesinfo/ + 随机 a_bogus
+func (c *DouyinClient) getNoteDetail(videoID string) (*DouyinVideo, error) {
+	webID := generateWebID()
+	aBogus := randAlphaNum(64) // parse-video 直接用随机字符串做 a_bogus
+
+	apiURL := fmt.Sprintf(
+		"https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/?reflow_source=reflow_page&web_id=%s&device_id=%s&aweme_ids=%%5B%s%%5D&request_source=200&a_bogus=%s",
+		webID, webID, videoID, aBogus,
+	)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", pickUA())
+
+	resp, err := c.normalClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch note detail: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read note detail: %w", err)
 	}
 
-	// 遍历嵌套查找 aweme_detail 或 awemeDetail
-	detail := findNestedKey(data, "aweme_detail")
-	if detail == nil {
-		detail = findNestedKey(data, "awemeDetail")
+	var apiResp struct {
+		AwemeDetails []json.RawMessage `json:"aweme_details"`
 	}
-	if detail == nil {
-		// 尝试从 loaderData 查找
-		if ld, ok := data["loaderData"]; ok {
-			if ldMap, ok := ld.(map[string]interface{}); ok {
-				for _, v := range ldMap {
-					if vMap, ok := v.(map[string]interface{}); ok {
-						detail = findNestedKey(vMap, "aweme_detail")
-						if detail == nil {
-							detail = findNestedKey(vMap, "awemeDetail")
-						}
-						if detail != nil {
-							break
-						}
-					}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("parse note api response: %w", err)
+	}
+	if len(apiResp.AwemeDetails) == 0 {
+		return nil, fmt.Errorf("note detail not found for %s", videoID)
+	}
+
+	return parseAwemeDetail(apiResp.AwemeDetails[0], videoID, true)
+}
+
+// parseRouterDataForVideo 从 _ROUTER_DATA JSON 解析视频信息
+// 参考 parse-video: gjson 路径 loaderData.video_(id)/page.videoInfoRes.item_list.0
+func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string) (*DouyinVideo, error) {
+	var data map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &data); err != nil {
+		return nil, fmt.Errorf("parse router data json: %w", err)
+	}
+
+	// 路径: loaderData -> video_(id)/page -> videoInfoRes -> item_list[0]
+	loaderData, ok := data["loaderData"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("loaderData not found")
+	}
+
+	var videoPage map[string]interface{}
+	// 尝试多个可能的 key（路由可能变化）
+	for _, key := range []string{
+		"video_(id)/page",
+		"video_(id)",
+		"note_(id)/page",
+		"note_(id)",
+	} {
+		if page, ok := loaderData[key].(map[string]interface{}); ok {
+			videoPage = page
+			break
+		}
+	}
+	if videoPage == nil {
+		// fallback: 遍历找第一个有 videoInfoRes 的
+		for _, v := range loaderData {
+			if page, ok := v.(map[string]interface{}); ok {
+				if _, has := page["videoInfoRes"]; has {
+					videoPage = page
+					break
 				}
 			}
 		}
 	}
-	if detail == nil {
-		return nil, fmt.Errorf("aweme_detail not found in router data")
+	if videoPage == nil {
+		return nil, fmt.Errorf("video page not found in loaderData")
 	}
 
-	detailMap, ok := detail.(map[string]interface{})
+	videoInfoRes, ok := videoPage["videoInfoRes"].(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("aweme_detail is not an object")
+		return nil, fmt.Errorf("videoInfoRes not found")
+	}
+
+	// 检查 filter_list（被风控拦截的情况）
+	// 参考 parse-video: 检查 filter_list 中是否有 filter_reason
+	if filterList, ok := videoInfoRes["filter_list"].([]interface{}); ok {
+		for _, item := range filterList {
+			if fm, ok := item.(map[string]interface{}); ok {
+				if fmID, _ := fm["aweme_id"].(string); fmID == videoID {
+					reason, _ := fm["filter_reason"].(string)
+					detail, _ := fm["detail_msg"].(string)
+					return nil, fmt.Errorf("video filtered: %s - %s", reason, detail)
+				}
+			}
+		}
+	}
+
+	itemList, ok := videoInfoRes["item_list"].([]interface{})
+	if !ok || len(itemList) == 0 {
+		return nil, fmt.Errorf("item_list empty or not found")
+	}
+
+	itemBytes, err := json.Marshal(itemList[0])
+	if err != nil {
+		return nil, fmt.Errorf("marshal item: %w", err)
+	}
+
+	return parseAwemeDetail(itemBytes, videoID, false)
+}
+
+// parseAwemeDetail 从 aweme_detail JSON 解析出 DouyinVideo
+func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*DouyinVideo, error) {
+	var detail map[string]interface{}
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return nil, fmt.Errorf("parse aweme detail: %w", err)
 	}
 
 	video := &DouyinVideo{
 		AwemeID: videoID,
+		IsNote:  isNote,
 	}
 
-	// 描述/标题
-	if desc, ok := detailMap["desc"].(string); ok {
+	// 描述
+	if desc, ok := detail["desc"].(string); ok {
 		video.Desc = desc
 	}
 
 	// 创建时间
-	if ct, ok := detailMap["create_time"].(float64); ok {
+	if ct, ok := detail["create_time"].(float64); ok {
 		video.CreateTime = int64(ct)
 	}
 
-	// 作者信息
-	if authorData, ok := detailMap["author"].(map[string]interface{}); ok {
-		if uid, ok := authorData["uid"].(string); ok {
-			video.Author.UID = uid
+	// 作者
+	if authorData, ok := detail["author"].(map[string]interface{}); ok {
+		if v, ok := authorData["uid"].(string); ok {
+			video.Author.UID = v
 		}
-		if secUID, ok := authorData["sec_uid"].(string); ok {
-			video.Author.SecUID = secUID
+		if v, ok := authorData["sec_uid"].(string); ok {
+			video.Author.SecUID = v
 		}
-		if nick, ok := authorData["nickname"].(string); ok {
-			video.Author.Nickname = nick
+		if v, ok := authorData["nickname"].(string); ok {
+			video.Author.Nickname = v
 		}
 		if av, ok := authorData["avatar_thumb"].(map[string]interface{}); ok {
 			if urls, ok := av["url_list"].([]interface{}); ok && len(urls) > 0 {
@@ -262,44 +389,59 @@ func parseRouterData(jsonStr string, videoID string) (*DouyinVideo, error) {
 		}
 	}
 
-	// 封面
-	if coverData, ok := detailMap["video"].(map[string]interface{}); ok {
-		if cover, ok := coverData["cover"].(map[string]interface{}); ok {
-			if urls, ok := cover["url_list"].([]interface{}); ok && len(urls) > 0 {
-				if u, ok := urls[0].(string); ok {
-					video.Cover = u
-				}
+	// 视频数据
+	if videoData, ok := detail["video"].(map[string]interface{}); ok {
+		// 封面（参考 parse-video: 优先非 webp 格式）
+		if cover, ok := videoData["cover"].(map[string]interface{}); ok {
+			if urls, ok := cover["url_list"].([]interface{}); ok {
+				video.Cover = pickNonWebpURL(urls)
 			}
 		}
-		// 动态封面备选
 		if video.Cover == "" {
-			if cover, ok := coverData["dynamic_cover"].(map[string]interface{}); ok {
-				if urls, ok := cover["url_list"].([]interface{}); ok && len(urls) > 0 {
-					if u, ok := urls[0].(string); ok {
-						video.Cover = u
-					}
+			if cover, ok := videoData["dynamic_cover"].(map[string]interface{}); ok {
+				if urls, ok := cover["url_list"].([]interface{}); ok {
+					video.Cover = pickNonWebpURL(urls)
 				}
 			}
 		}
 
 		// 时长
-		if dur, ok := coverData["duration"].(float64); ok {
+		if dur, ok := videoData["duration"].(float64); ok {
 			video.Duration = int(dur)
 		}
 
 		// 视频 URL: play_addr.url_list[0]
-		if playAddr, ok := coverData["play_addr"].(map[string]interface{}); ok {
-			if urls, ok := playAddr["url_list"].([]interface{}); ok && len(urls) > 0 {
-				if u, ok := urls[0].(string); ok {
-					// playwm -> play 获取无水印
-					video.VideoURL = strings.Replace(u, "playwm", "play", 1)
+		// 参考 parse-video: playwm → play 获取无水印
+		if !isNote {
+			if playAddr, ok := videoData["play_addr"].(map[string]interface{}); ok {
+				if urls, ok := playAddr["url_list"].([]interface{}); ok && len(urls) > 0 {
+					if u, ok := urls[0].(string); ok {
+						video.VideoURL = strings.ReplaceAll(u, "playwm", "play")
+					}
 				}
 			}
 		}
 	}
 
-	// 统计数据
-	if stats, ok := detailMap["statistics"].(map[string]interface{}); ok {
+	// 图集图片（参考 parse-video: images[].url_list 取非 webp）
+	if images, ok := detail["images"].([]interface{}); ok {
+		for _, img := range images {
+			if imgMap, ok := img.(map[string]interface{}); ok {
+				if urls, ok := imgMap["url_list"].([]interface{}); ok {
+					if imgURL := pickNonWebpURL(urls); imgURL != "" {
+						video.Images = append(video.Images, imgURL)
+					}
+				}
+			}
+		}
+		if len(video.Images) > 0 {
+			video.IsNote = true
+			video.VideoURL = "" // 图集没有视频
+		}
+	}
+
+	// 统计
+	if stats, ok := detail["statistics"].(map[string]interface{}); ok {
 		if v, ok := stats["digg_count"].(float64); ok {
 			video.DiggCount = int64(v)
 		}
@@ -317,25 +459,29 @@ func parseRouterData(jsonStr string, videoID string) (*DouyinVideo, error) {
 // ---- 用户视频列表 ----
 
 // GetUserVideos 获取用户视频列表
-// 通过 iesdouyin.com 的 web API（不需要 X-Bogus 签名）
+// 使用 iesdouyin.com 的 web API（与 slidesinfo 类似，用随机 a_bogus）
+// 这个接口比 douyin.com/aweme/v1/web/aweme/post/ 风控宽松
 func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideosResult, error) {
 	c.limiter.Acquire()
 
-	apiURL := fmt.Sprintf("https://www.iesdouyin.com/web/api/v2/aweme/post/?sec_user_id=%s&count=20&max_cursor=%d",
-		url.QueryEscape(secUID), maxCursor)
+	webID := generateWebID()
+	aBogus := randAlphaNum(64)
+
+	apiURL := fmt.Sprintf(
+		"https://www.iesdouyin.com/web/api/v2/aweme/post/?sec_user_id=%s&count=18&max_cursor=%d&aid=6383&web_id=%s&device_id=%s&a_bogus=%s",
+		url.QueryEscape(secUID), maxCursor, webID, webID, aBogus,
+	)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	cookie := globalCookieMgr.getCookieString(c.http)
+	cookie := globalCookieMgr.getCookieString(c.normalClient)
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", douyinUA)
+	req.Header.Set("User-Agent", pickUA())
 	req.Header.Set("Referer", "https://www.iesdouyin.com/")
 
-	// 用跟随重定向的 client
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.normalClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch user videos: %w", err)
 	}
@@ -343,11 +489,15 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read user videos response: %w", err)
+		return nil, fmt.Errorf("read user videos: %w", err)
 	}
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("user videos API returned %d: %s", resp.StatusCode, string(body[:min(200, len(body))]))
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("user videos API returned %d: %s", resp.StatusCode, snippet)
 	}
 
 	var apiResp struct {
@@ -375,13 +525,16 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 				ShareCount   int64 `json:"share_count"`
 				CommentCount int64 `json:"comment_count"`
 			} `json:"statistics"`
+			Images []struct {
+				URLList []string `json:"url_list"`
+			} `json:"images"`
 		} `json:"aweme_list"`
-		HasMore  bool  `json:"has_more"`
+		HasMore   bool  `json:"has_more"`
 		MaxCursor int64 `json:"max_cursor"`
 	}
 
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("parse user videos response: %w", err)
+		return nil, fmt.Errorf("parse user videos: %w (body=%s)", err, truncate(string(body), 200))
 	}
 
 	result := &UserVideosResult{
@@ -406,22 +559,33 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 		}
 		// 封面
 		if len(item.Video.Cover.URLList) > 0 {
-			v.Cover = item.Video.Cover.URLList[0]
+			v.Cover = pickNonWebpURLStr(item.Video.Cover.URLList)
 		}
-		// 无水印视频 URL
+		// 视频 URL（无水印）
 		if len(item.Video.PlayAddr.URLList) > 0 {
-			v.VideoURL = strings.Replace(item.Video.PlayAddr.URLList[0], "playwm", "play", 1)
+			v.VideoURL = strings.ReplaceAll(item.Video.PlayAddr.URLList[0], "playwm", "play")
+		}
+		// 图集
+		if len(item.Images) > 0 {
+			v.IsNote = true
+			v.VideoURL = "" // 图集没有视频
+			for _, img := range item.Images {
+				if len(img.URLList) > 0 {
+					v.Images = append(v.Images, pickNonWebpURLStr(img.URLList))
+				}
+			}
 		}
 		result.Videos = append(result.Videos, v)
 	}
 
-	log.Printf("[douyin] GetUserVideos: secUID=%s, cursor=%d, got=%d, hasMore=%v, nextCursor=%d",
+	log.Printf("[douyin] GetUserVideos: secUID=%s cursor=%d got=%d hasMore=%v nextCursor=%d",
 		secUID, maxCursor, len(result.Videos), result.HasMore, result.MaxCursor)
 
 	return result, nil
 }
 
-// ResolveVideoURL 解析视频无水印的最终下载地址（跟随 302 重定向）
+// ResolveVideoURL 跟随 302 获取无水印视频最终下载地址
+// 参考 parse-video: getRedirectUrl
 func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 	if videoURL == "" {
 		return "", fmt.Errorf("empty video url")
@@ -431,42 +595,25 @@ func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", douyinUA)
+	req.Header.Set("User-Agent", pickUA())
 
-	// 不跟随重定向，手动获取 Location
-	resp, err := c.http.Do(req)
+	resp, err := c.noRedirectClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("resolve video url: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 302 || resp.StatusCode == 301 {
-		location := resp.Header.Get("Location")
-		if location != "" {
-			return location, nil
+		loc := resp.Header.Get("Location")
+		if loc != "" {
+			return loc, nil
 		}
 	}
 
-	// 如果没有重定向，原始 URL 就是最终地址
 	return videoURL, nil
 }
 
 // ---- 辅助函数 ----
-
-// findNestedKey 递归查找 map 中指定 key 的值
-func findNestedKey(data map[string]interface{}, key string) interface{} {
-	if v, ok := data[key]; ok {
-		return v
-	}
-	for _, v := range data {
-		if m, ok := v.(map[string]interface{}); ok {
-			if result := findNestedKey(m, key); result != nil {
-				return result
-			}
-		}
-	}
-	return nil
-}
 
 // ExtractSecUID 从 URL 中提取 sec_user_id
 func ExtractSecUID(rawURL string) (string, error) {
@@ -481,7 +628,7 @@ func IsDouyinURL(rawURL string) bool {
 	return strings.Contains(rawURL, "douyin.com") || strings.Contains(rawURL, "iesdouyin.com")
 }
 
-// SanitizePath 去除文件路径中的非法字符
+// SanitizePath 文件名清理
 func SanitizePath(name string) string {
 	replacer := strings.NewReplacer(
 		"/", "_", "\\", "_", ":", "_", "*", "_",
@@ -494,4 +641,96 @@ func SanitizePath(name string) string {
 		result = "unknown"
 	}
 	return result
+}
+
+// generateWebID 生成 web_id（参考 parse-video: "75" + 15位随机数字）
+func generateWebID() string {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return fmt.Sprintf("75%015d", r.Int63n(1e15))
+}
+
+// randAlphaNum 生成指定长度的随机字母数字串
+func randAlphaNum(n int) string {
+	const letters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+// pickNonWebpURL 从 url_list 中优先选非 webp 格式的 URL（参考 parse-video: getNoWebpUrl）
+func pickNonWebpURL(urls []interface{}) string {
+	var first string
+	for _, u := range urls {
+		s, ok := u.(string)
+		if !ok || s == "" {
+			continue
+		}
+		if first == "" {
+			first = s
+		}
+		if !strings.Contains(s, ".webp") {
+			return s
+		}
+	}
+	return first
+}
+
+// pickNonWebpURLStr 字符串版
+func pickNonWebpURLStr(urls []string) string {
+	var first string
+	for _, s := range urls {
+		if s == "" {
+			continue
+		}
+		if first == "" {
+			first = s
+		}
+		if !strings.Contains(s, ".webp") {
+			return s
+		}
+	}
+	return first
+}
+
+// getCanonicalFromHTML 从 HTML 中提取 canonical link
+// 参考 parse-video: getCanonicalFromHTML
+func getCanonicalFromHTML(htmlStr string) string {
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		return ""	}
+	return findCanonical(doc)
+}
+
+// findCanonical 递归查找 canonical link（参考 parse-video: findCanonical）
+func findCanonical(n *html.Node) string {
+	if n.Type == html.ElementNode && n.Data == "link" {
+		var rel, href string
+		for _, attr := range n.Attr {
+			switch attr.Key {
+			case "rel":
+				rel = attr.Val
+			case "href":
+				href = attr.Val
+			}
+		}
+		if rel == "canonical" && href != "" {
+			return href
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if result := findCanonical(c); result != "" {
+			return result
+		}
+	}
+	return ""
+}
+
+// truncate 截断字符串
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }

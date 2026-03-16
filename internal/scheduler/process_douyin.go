@@ -15,7 +15,8 @@ import (
 	"video-subscribe-dl/internal/notify"
 )
 
-// retryOneDouyinDownload 执行单个抖音下载记录的重试/下载
+// retryOneDouyinDownload 执行单个抖音下载
+// 与 B站 DASH 不同，抖音视频是直接 MP4 下载（更简单但风控更严）
 func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
@@ -25,24 +26,36 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	client := douyin.NewClient()
 
-	// 获取视频详情
+	// Step 1: 获取视频详情（带重试）
 	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")
-	detail, err := client.GetVideoDetail(dl.VideoID)
+
+	var detail *douyin.DouyinVideo
+	for attempt := 1; attempt <= 3; attempt++ {
+		detail, err = client.GetVideoDetail(dl.VideoID)
+		if err == nil {
+			break
+		}
+		log.Printf("[douyin-dl] GetVideoDetail attempt %d failed for %s: %v", attempt, dl.VideoID, err)
+		if attempt < 3 {
+			backoff := time.Duration(5*(1<<(attempt-1))) * time.Second
+			time.Sleep(backoff)
+		}
+	}
 	if err != nil {
-		log.Printf("[douyin-dl] GetVideoDetail failed for %s: %v", dl.VideoID, err)
+		log.Printf("[douyin-dl] GetVideoDetail failed after retries for %s: %v", dl.VideoID, err)
 		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 		s.db.IncrementRetryCount(dl.ID, err.Error())
 		return
 	}
 
-	// 解析最终下载 URL
-	if detail.VideoURL == "" {
-		errMsg := "no video URL found"
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, errMsg)
-		s.db.IncrementRetryCount(dl.ID, errMsg)
+	// 图集暂时跳过（Phase 1 只处理视频）
+	if detail.IsNote || detail.VideoURL == "" {
+		log.Printf("[douyin-dl] Skipping note/image post %s (no video)", dl.VideoID)
+		s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: image/note post")
 		return
 	}
 
+	// Step 2: 解析最终下载 URL（跟随 302）
 	videoURL, err := client.ResolveVideoURL(detail.VideoURL)
 	if err != nil {
 		log.Printf("[douyin-dl] ResolveVideoURL failed: %v", err)
@@ -51,7 +64,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		return
 	}
 
-	// 构建输出目录
+	// Step 3: 构建输出路径
 	uploaderName := detail.Author.Nickname
 	if uploaderName == "" {
 		uploaderName = dl.Uploader
@@ -63,7 +76,6 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	outputDir := filepath.Join(s.downloadDir, uploaderDir)
 	os.MkdirAll(outputDir, 0755)
 
-	// 文件名
 	title := detail.Desc
 	if title == "" {
 		title = dl.Title
@@ -77,10 +89,21 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	}
 	videoFilePath := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"].mp4")
 
-	// 下载视频
-	fileSize, err := downloadDouyinFile(videoURL, videoFilePath)
+	// Step 4: 下载视频（带重试）
+	var fileSize int64
+	for attempt := 1; attempt <= 3; attempt++ {
+		fileSize, err = downloadDouyinFile(videoURL, videoFilePath)
+		if err == nil {
+			break
+		}
+		log.Printf("[douyin-dl] Download attempt %d failed: %v", attempt, err)
+		if attempt < 3 {
+			backoff := time.Duration(10*(1<<(attempt-1))) * time.Second
+			time.Sleep(backoff)
+		}
+	}
 	if err != nil {
-		log.Printf("[douyin-dl] Download video failed: %v", err)
+		log.Printf("[douyin-dl] Download failed after retries: %v", err)
 		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 		s.db.IncrementRetryCount(dl.ID, err.Error())
 		return
@@ -88,7 +111,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	log.Printf("[douyin-dl] Downloaded: %s → %s (%.1f MB)", dl.VideoID, videoFilePath, float64(fileSize)/(1024*1024))
 
-	// 下载封面
+	// Step 5: 下载封面
 	if !src.SkipPoster && detail.Cover != "" {
 		thumbPath := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
 		if err := downloadDouyinThumb(detail.Cover, thumbPath); err != nil {
@@ -96,7 +119,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		}
 	}
 
-	// 生成 NFO
+	// Step 6: 生成 NFO
 	if !src.SkipNFO {
 		meta := &nfo.VideoMeta{
 			BvID:         dl.VideoID,
@@ -116,22 +139,19 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		}
 	}
 
-	// 更新 DB
+	// Step 7: 更新 DB
 	s.db.UpdateDownloadStatus(dl.ID, "completed", videoFilePath, fileSize, "")
-	// 更新 thumbnail path
-	// Update metadata (thumbnail, duration, uploader)
 	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, detail.Duration/1000)
 
 	s.notifier.Send(notify.EventDownloadComplete, "抖音视频下载完成: "+title,
 		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(fileSize)/(1024*1024)))
 }
 
-// downloadDouyinFile 下载抖音视频 MP4 文件
+// downloadDouyinFile 下载抖音视频 MP4
 func downloadDouyinFile(videoURL, destPath string) (int64, error) {
-	// 确保目标目录存在
 	os.MkdirAll(filepath.Dir(destPath), 0755)
 
-	// 如果文件已存在且大于 0，跳过
+	// 已存在且非空则跳过
 	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
 		return info.Size(), nil
 	}
@@ -140,8 +160,9 @@ func downloadDouyinFile(videoURL, destPath string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 	req.Header.Set("Referer", "https://www.douyin.com/")
+	req.Header.Set("Accept", "*/*")
 
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Do(req)
@@ -167,6 +188,11 @@ func downloadDouyinFile(videoURL, destPath string) (int64, error) {
 		return 0, fmt.Errorf("write video: %w", err)
 	}
 
+	if written == 0 {
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("downloaded 0 bytes")
+	}
+
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		return 0, fmt.Errorf("rename tmp: %w", err)
 	}
@@ -174,17 +200,17 @@ func downloadDouyinFile(videoURL, destPath string) (int64, error) {
 	return written, nil
 }
 
-// downloadDouyinThumb 下载抖音封面图
+// downloadDouyinThumb 下载封面图
 func downloadDouyinThumb(thumbURL, destPath string) error {
 	if _, err := os.Stat(destPath); err == nil {
-		return nil // 已存在
+		return nil
 	}
 
 	req, err := http.NewRequest("GET", thumbURL, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

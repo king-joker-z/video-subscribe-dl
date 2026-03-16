@@ -14,6 +14,8 @@ type DouyinVideo struct {
 	DiggCount    int64      `json:"digg_count"`     // 点赞数
 	ShareCount   int64      `json:"share_count"`    // 分享数
 	CommentCount int64      `json:"comment_count"`  // 评论数
+	IsNote       bool       `json:"is_note"`        // 是否为图集/笔记
+	Images       []string   `json:"images"`         // 图集图片 URL 列表
 }
 
 // CreateTimeUnix 返回发布时间

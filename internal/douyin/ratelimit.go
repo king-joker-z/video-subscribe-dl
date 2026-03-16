@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// RateLimiter 令牌桶限流器（复用 bilibili 的模式）
+// RateLimiter 令牌桶限流器
+// 抖音风控比 B站更严格，默认 3s/req（宁慢勿快）
 type RateLimiter struct {
 	mu       sync.Mutex
 	tokens   int
@@ -28,13 +29,12 @@ func NewRateLimiter(max, refill int, interval time.Duration) *RateLimiter {
 	return rl
 }
 
-// DefaultRateLimiter 创建默认限流器: 每 3s 补充 1 个 token，桶容量 1
-// 抖音风控比 B站更严格
+// DefaultRateLimiter 抖音默认限流: 桶容量 1, 每 3s 补充 1 个 token
 func DefaultRateLimiter() *RateLimiter {
 	return NewRateLimiter(1, 1, 3*time.Second)
 }
 
-// Acquire 获取一个 token，阻塞直到获取成功
+// Acquire 获取一个 token，阻塞直到成功
 func (rl *RateLimiter) Acquire() {
 	for {
 		rl.mu.Lock()
@@ -44,11 +44,11 @@ func (rl *RateLimiter) Acquire() {
 			return
 		}
 		rl.mu.Unlock()
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-// Stop 停止限流器
+// Stop 停止补充循环
 func (rl *RateLimiter) Stop() {
 	close(rl.stopCh)
 }
