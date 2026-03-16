@@ -296,7 +296,22 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 	}
 
 	jsonBytes := bytes.TrimSpace(m[1])
-	return c.parseRouterDataForVideo(jsonBytes, videoID)
+	video, err := c.parseRouterDataForVideo(jsonBytes, videoID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 跟随 302 重定向获取最终无水印地址
+	if video.VideoURL != "" {
+		if resolved, err := c.ResolveVideoURL(video.VideoURL); err == nil {
+			log.Printf("[douyin] page scrape: resolved video URL via 302, len=%d", len(resolved))
+			video.VideoURL = resolved
+		} else {
+			log.Printf("[douyin] page scrape: resolve 302 failed: %v, keeping original URL", err)
+		}
+	}
+
+	return video, nil
 }
 
 func (c *DouyinClient) getNoteDetail(videoID string) (*DouyinVideo, error) {
@@ -638,12 +653,13 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 }
 
 // ResolveVideoURL 跟随 302 获取无水印视频最终下载地址
+// 使用 HEAD 请求（不下载 body），跟随 301/302 重定向获取最终无水印地址
 func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 	if videoURL == "" {
 		return "", fmt.Errorf("empty video url")
 	}
 
-	req, err := http.NewRequest("GET", videoURL, nil)
+	req, err := http.NewRequest("HEAD", videoURL, nil)
 	if err != nil {
 		return "", err
 	}

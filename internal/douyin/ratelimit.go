@@ -1,6 +1,8 @@
 package douyin
 
 import (
+	"math"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -14,6 +16,9 @@ type RateLimiter struct {
 	refill   int
 	interval time.Duration
 	stopCh   chan struct{}
+
+	// HTTP 状态码感知: 上次是否收到限流响应
+	penaltyUntil time.Time
 }
 
 // NewRateLimiter 创建令牌桶限流器
@@ -35,9 +40,17 @@ func DefaultRateLimiter() *RateLimiter {
 }
 
 // Acquire 获取一个 token，阻塞直到成功
+// 向后兼容: 行为与原始实现一致
 func (rl *RateLimiter) Acquire() {
 	for {
 		rl.mu.Lock()
+		// 检查是否在 penalty 期间
+		if !rl.penaltyUntil.IsZero() && time.Now().Before(rl.penaltyUntil) {
+			remaining := time.Until(rl.penaltyUntil)
+			rl.mu.Unlock()
+			time.Sleep(remaining)
+			continue
+		}
 		if rl.tokens > 0 {
 			rl.tokens--
 			rl.mu.Unlock()
@@ -45,6 +58,43 @@ func (rl *RateLimiter) Acquire() {
 		}
 		rl.mu.Unlock()
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// AcquireWithBackoff 带指数退避的 token 获取
+// consecutiveErrors: 连续错误次数（0 = 无退避，等同于 Acquire）
+// 退避策略: 首次 3s, 第二次 6s, 第三次 12s, 最大 60s，±20% 随机抖动
+func (rl *RateLimiter) AcquireWithBackoff(consecutiveErrors int) {
+	if consecutiveErrors > 0 {
+		baseDelay := 3.0 * math.Pow(2.0, float64(consecutiveErrors-1)) // 3s, 6s, 12s, 24s...
+		if baseDelay > 60.0 {
+			baseDelay = 60.0
+		}
+
+		// ±20% 随机抖动
+		jitter := baseDelay * 0.2 * (2*rand.Float64() - 1) // [-20%, +20%]
+		delay := time.Duration((baseDelay + jitter) * float64(time.Second))
+		time.Sleep(delay)
+	}
+
+	// 然后正常获取 token
+	rl.Acquire()
+}
+
+// ReportResult 报告 HTTP 请求结果，用于状态码感知限流
+// 429/403/503: 标记为限流响应，下次 acquire 额外等待 10s
+// 200: 正常，清除 penalty
+func (rl *RateLimiter) ReportResult(statusCode int) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	switch statusCode {
+	case 429, 403, 503:
+		// 收到限流/封禁响应，设置 penalty 等待 10s
+		rl.penaltyUntil = time.Now().Add(10 * time.Second)
+	case 200:
+		// 正常响应，清除 penalty
+		rl.penaltyUntil = time.Time{}
 	}
 }
 
