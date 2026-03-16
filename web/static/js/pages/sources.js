@@ -314,13 +314,29 @@ export function SourcesPage({ onNavigate }) {
     check_interval: 1800,
   });
 
+  const [douyinPaused, setDouyinPaused] = useState(null);
+
   const load = useCallback(async () => {
     try { const res = await api.getSources(); setSources(res.data || []); }
     catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadDouyinStatus = useCallback(async () => {
+    try { const res = await api.getDouyinStatus(); setDouyinPaused(res.data || null); }
+    catch (e) { /* ignore */ }
+  }, []);
+
+  const handleDouyinResume = async () => {
+    try {
+      await api.resumeDouyin();
+      toast.success('抖音下载已恢复');
+      setDouyinPaused(null);
+      loadDouyinStatus();
+    } catch (e) { toast.error('恢复失败: ' + e.message); }
+  };
+
+  useEffect(() => { load(); loadDouyinStatus(); }, [load, loadDouyinStatus]);
 
   const handleParse = async () => {
     if (!newURL.trim()) return;
@@ -465,6 +481,18 @@ export function SourcesPage({ onNavigate }) {
           h(Button, { onClick: () => setShowImportResult(null), size: 'md' }, '确定')
         )
       )
+    ),
+    // 抖音风控暂停警告
+    douyinPaused && douyinPaused.paused && h('div', { className: 'flex items-center justify-between gap-3 px-4 py-3 bg-amber-900/30 border border-amber-700/50 rounded-lg' },
+      h('div', { className: 'flex items-center gap-2 min-w-0' },
+        h(Icon, { name: 'alert-triangle', size: 16, className: 'text-amber-400 shrink-0' }),
+        h('div', { className: 'text-sm' },
+          h('span', { className: 'font-medium text-amber-300' }, '抖音下载已暂停'),
+          h('span', { className: 'text-amber-400/80 ml-2' }, douyinPaused.reason || '风控触发'),
+          douyinPaused.paused_duration && h('span', { className: 'text-amber-500/60 ml-2 text-xs' }, '已暂停 ' + douyinPaused.paused_duration)
+        )
+      ),
+      h(Button, { onClick: handleDouyinResume, size: 'sm', variant: 'outline', className: 'shrink-0 border-amber-600 text-amber-300 hover:bg-amber-800/30' }, '恢复下载')
     ),
     // 顶栏
     h('div', { className: 'flex items-center justify-between' },

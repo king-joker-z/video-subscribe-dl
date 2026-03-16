@@ -1,14 +1,15 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
-	"math/rand"
-	"strings"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"video-subscribe-dl/internal/db"
@@ -20,6 +21,12 @@ import (
 // retryOneDouyinDownload 执行单个抖音下载
 // 与 B站 DASH 不同，抖音视频是直接 MP4 下载（更简单但风控更严）
 func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
+	// 检查抖音是否被暂停（风控触发后需手动恢复）
+	if s.IsDouyinPaused() {
+		log.Printf("[douyin-dl] 抖音下载已暂停，跳过 %s", dl.VideoID)
+		return
+	}
+
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
 		log.Printf("[douyin-dl] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
@@ -45,6 +52,16 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		}
 	}
 	if err != nil {
+		// 风控检测: 如果是风控错误，暂停抖音下载
+		if errors.Is(err, douyin.ErrDouyinRiskControl) {
+			reason := fmt.Sprintf("风控触发: %v", err)
+			s.PauseDouyin(reason)
+			s.notifier.Send(notify.EventRateLimited, "抖音风控触发",
+				"抖音下载已暂停，请在 Web UI 手动恢复\n错误: "+err.Error())
+			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+			s.db.IncrementRetryCount(dl.ID, err.Error())
+			return
+		}
 		log.Printf("[douyin-dl] GetVideoDetail failed after retries for %s: %v", dl.VideoID, err)
 		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 		s.db.IncrementRetryCount(dl.ID, err.Error())

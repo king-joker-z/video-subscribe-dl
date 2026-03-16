@@ -163,6 +163,8 @@ func main() {
 	server.SetBiliClientFunc(sched.GetBiliClient)
 	server.SetConfigReloadFunc(sched.ReloadConfig)
 	server.SetDouyinCookieUpdateFunc(sched.RefreshDouyinUserCookie)
+	server.SetDouyinPauseStatusFunc(sched.GetDouyinPauseStatus)
+	server.SetDouyinResumeFunc(sched.ResumeDouyin)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

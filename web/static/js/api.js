@@ -127,6 +127,8 @@ export const api = {
   // Douyin Cookie
   validateDouyinCookie: (cookie) => request('/api/douyin/cookie/validate', { method: 'POST', body: JSON.stringify({ cookie }) }),
   getDouyinCookieStatus: () => request('/api/douyin/cookie/status'),
+  getDouyinStatus: () => request('/api/douyin/status'),
+  resumeDouyin: () => request('/api/douyin/resume', { method: 'POST' }),
   getNotifyStatus: () => request("/api/notify/status"),
 
   globalSearch: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

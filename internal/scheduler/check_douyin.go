@@ -15,6 +15,12 @@ import (
 // checkDouyin 检查抖音用户的新视频
 // 抖音风控严格，翻页间隔 5-10s（宁慢勿快）
 func (s *Scheduler) checkDouyin(src db.Source) {
+	// 检查抖音是否被暂停（风控触发后需手动恢复）
+	if s.IsDouyinPaused() {
+		log.Printf("[douyin] 抖音已暂停，跳过检查 %s", src.Name)
+		return
+	}
+
 	client := douyin.NewClient()
 	defer client.Close() // 确保 RateLimiter goroutine 被清理
 
@@ -214,6 +220,12 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 
 // fullScanDouyin 全量补漏扫描抖音用户（忽略增量基准，扫描所有视频，跳过已下载的）
 func (s *Scheduler) fullScanDouyin(src db.Source) {
+	// 检查抖音是否被暂停
+	if s.IsDouyinPaused() {
+		log.Printf("[full-scan·douyin] 抖音已暂停，跳过全量扫描 %s", src.Name)
+		return
+	}
+
 	client := douyin.NewClient()
 	defer client.Close()
 

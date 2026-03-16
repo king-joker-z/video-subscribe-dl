@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -16,6 +17,9 @@ import (
 
 	"golang.org/x/net/html"
 )
+
+// ErrDouyinRiskControl 抖音风控错误（API 返回空/截断响应或页面被验证码拦截）
+var ErrDouyinRiskControl = errors.New("douyin risk control detected")
 
 //go:embed sign.js
 var signScript string
@@ -379,6 +383,9 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 		AwemeDetail json.RawMessage `json:"aweme_detail"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil {
+		if len(body) < 100 {
+			return nil, fmt.Errorf("%w: API returned truncated response (bodyLen=%d)", ErrDouyinRiskControl, len(body))
+		}
 		return nil, fmt.Errorf("parse detail API: %w", err)
 	}
 
@@ -386,9 +393,9 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 		// status_code 诊断
 		switch apiResp.StatusCode {
 		case 2053:
-			return nil, fmt.Errorf("IP risk control (status_code=2053), aweme_detail is null")
+			return nil, fmt.Errorf("%w: IP risk control (status_code=2053), aweme_detail is null", ErrDouyinRiskControl)
 		case 2154:
-			return nil, fmt.Errorf("rate limited (status_code=2154), aweme_detail is null")
+			return nil, fmt.Errorf("%w: rate limited (status_code=2154), aweme_detail is null", ErrDouyinRiskControl)
 		case 8:
 			return nil, fmt.Errorf("video not found (status_code=8)")
 		default:
@@ -445,6 +452,11 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 
 	if isNote {
 		return c.getNoteDetail(videoID)
+	}
+
+	// 风控检测: 小 body 通常是验证码/captcha 页面
+	if len(body) < 5000 {
+		return nil, fmt.Errorf("%w: page too small (bodyLen=%d), likely captcha/verification", ErrDouyinRiskControl, len(body))
 	}
 
 	m := reRouterData.FindSubmatch(body)

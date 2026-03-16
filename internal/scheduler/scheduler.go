@@ -66,6 +66,13 @@ type Scheduler struct {
 	// 风控断点续检：被中断的 source 列表
 	pendingSourcesMu sync.Mutex
 	pendingSources   []db.Source
+
+	// 抖音风控暂停（手动恢复）
+	douyinPausedMu    sync.RWMutex
+	douyinPaused      bool
+	douyinPauseReason string
+	douyinPausedAt    time.Time
+
 }
 
 type upInfoCacheEntry struct {
@@ -87,8 +94,8 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		hotConfig:       config.NewHotConfig(),
 		upInfoCache:     make(map[int64]*upInfoCacheEntry),
 		fullScanRunning: make(map[int64]bool),
-		videoSema:       bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
-		pageSema:        bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
+		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
+		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 	}
 }
 
@@ -290,6 +297,47 @@ func (s *Scheduler) triggerDouyinCooldown() {
 	// 抖音不走 Downloader 队列，不调 s.dl.Pause()
 	log.Printf("[WARN] 触发抖音风控，暂停抖音检查 %v（恢复时间: %s）",
 		config.CooldownDuration, s.douyinCooldownUntil.Format("15:04:05"))
+}
+
+// PauseDouyin 暂停抖音下载（风控触发，需手动恢复）
+func (s *Scheduler) PauseDouyin(reason string) {
+	s.douyinPausedMu.Lock()
+	defer s.douyinPausedMu.Unlock()
+	if s.douyinPaused {
+		return // 已暂停，不重复
+	}
+	s.douyinPaused = true
+	s.douyinPauseReason = reason
+	s.douyinPausedAt = time.Now()
+	log.Printf("[douyin] ⚠️ 抖音下载已暂停: %s", reason)
+}
+
+// ResumeDouyin 手动恢复抖音下载
+func (s *Scheduler) ResumeDouyin() {
+	s.douyinPausedMu.Lock()
+	defer s.douyinPausedMu.Unlock()
+	if !s.douyinPaused {
+		return
+	}
+	s.douyinPaused = false
+	log.Printf("[douyin] ✅ 抖音下载已恢复（暂停原因: %s，暂停时长: %v）",
+		s.douyinPauseReason, time.Since(s.douyinPausedAt).Round(time.Second))
+	s.douyinPauseReason = ""
+	s.douyinPausedAt = time.Time{}
+}
+
+// IsDouyinPaused 检查抖音是否被暂停
+func (s *Scheduler) IsDouyinPaused() bool {
+	s.douyinPausedMu.RLock()
+	defer s.douyinPausedMu.RUnlock()
+	return s.douyinPaused
+}
+
+// GetDouyinPauseStatus 返回抖音暂停状态详情（供 API 使用）
+func (s *Scheduler) GetDouyinPauseStatus() (paused bool, reason string, pausedAt time.Time) {
+	s.douyinPausedMu.RLock()
+	defer s.douyinPausedMu.RUnlock()
+	return s.douyinPaused, s.douyinPauseReason, s.douyinPausedAt
 }
 
 func (s *Scheduler) Stop() {

@@ -28,8 +28,9 @@ type Router struct {
 	diag       *DiagHandler
 	metrics    *MetricsHandler
 	signReload   *SignReloadHandler
-	douyinCookie *DouyinCookieHandler
-	onSyncAll    func()
+	douyinCookie  *DouyinCookieHandler
+	douyinStatus  *DouyinStatusHandler
+	onSyncAll     func()
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {
@@ -49,7 +50,8 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		stream:     NewStreamHandler(database, downloadDir),
 		search:     NewSearchHandler(database),
 		diag:         NewDiagHandler(database),
-		douyinCookie: NewDouyinCookieHandler(database),
+		douyinCookie:  NewDouyinCookieHandler(database),
+		douyinStatus:  NewDouyinStatusHandler(),
 	}
 }
 
@@ -105,6 +107,16 @@ func (rt *Router) SetConfigReloadFunc(fn func()) {
 // SetDouyinCookieUpdateFunc 设置抖音 Cookie 更新回调
 func (rt *Router) SetDouyinCookieUpdateFunc(fn func(string)) {
 	rt.settings.SetDouyinCookieUpdateFunc(fn)
+}
+
+// SetDouyinStatusFunc 设置抖音暂停状态查询回调
+func (rt *Router) SetDouyinStatusFunc(fn func() (bool, string, time.Time)) {
+	rt.douyinStatus.SetStatusFunc(fn)
+}
+
+// SetDouyinResumeFunc 设置抖音恢复回调
+func (rt *Router) SetDouyinResumeFunc(fn func()) {
+	rt.douyinStatus.SetResumeFunc(fn)
 }
 
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
@@ -254,6 +266,10 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	// Douyin Cookie Management
 	mux.HandleFunc("/api/douyin/cookie/validate", rt.douyinCookie.HandleValidate)
 	mux.HandleFunc("/api/douyin/cookie/status", rt.douyinCookie.HandleStatus)
+
+	// Douyin Status (pause/resume)
+	mux.HandleFunc("/api/douyin/status", rt.douyinStatus.HandleStatus)
+	mux.HandleFunc("/api/douyin/resume", rt.douyinStatus.HandleResume)
 
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)
