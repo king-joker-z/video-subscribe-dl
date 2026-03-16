@@ -2,6 +2,7 @@ package douyin
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +14,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dop251/goja"
 	"golang.org/x/net/html"
 )
+
+//go:embed sign.js
+var signScript string
+
+// PC 端 UA（用于需要 X-Bogus 签名的 API）
+const pcUA = "Mozilla/5.0 (Linux; Android 8.0; Pixel 2 Build/OPD3.170816.012) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Mobile Safari/537.36 Edg/87.0.664.66"
 
 // UA 池: 移动端 UA（parse-video 用 iPhone UA 效果最好）
 var uaPool = []string{
@@ -53,21 +61,32 @@ func NewClient() *DouyinClient {
 	}
 }
 
+// ---- X-Bogus 签名 ----
+
+// signURL 使用 goja 执行 sign.js 计算 X-Bogus 签名
+// 参考 lux: vm.RunString(fmt.Sprintf("sign('%s', '%s')", query.RawQuery, ua))
+func signURL(queryStr, userAgent string) (string, error) {
+	vm := goja.New()
+	if _, err := vm.RunString(signScript); err != nil {
+		return "", fmt.Errorf("load sign.js: %w", err)
+	}
+	code := fmt.Sprintf("sign('%s', '%s')", queryStr, userAgent)
+	val, err := vm.RunString(code)
+	if err != nil {
+		return "", fmt.Errorf("execute sign(): %w", err)
+	}
+	return val.String(), nil
+}
+
 // ---- URL 解析 ----
 
 var (
-	// v.douyin.com/xxx 短链接
-	reShortURL = regexp.MustCompile(`v\.douyin\.com/([A-Za-z0-9]+)`)
-	// douyin.com/video/1234567890
-	reVideoURL = regexp.MustCompile(`douyin\.com/video/(\d+)`)
-	// douyin.com/user/MS4wLjAB... (sec_user_id)
-	reUserURL = regexp.MustCompile(`douyin\.com/user/([A-Za-z0-9_-]+)`)
-	// iesdouyin.com/share/video/1234567890
+	reShortURL    = regexp.MustCompile(`v\.douyin\.com/([A-Za-z0-9]+)`)
+	reVideoURL    = regexp.MustCompile(`douyin\.com/video/(\d+)`)
+	reUserURL     = regexp.MustCompile(`douyin\.com/user/([A-Za-z0-9_-]+)`)
 	reIesVideoURL = regexp.MustCompile(`iesdouyin\.com/share/video/(\d+)`)
-	// 从路径中提取最后的数字 ID
 	rePathVideoID = regexp.MustCompile(`/(?:video|note)/(\d+)`)
-	// douyin.com/jingxuan?modal_id=xxx
-	reModalID = regexp.MustCompile(`modal_id=(\d+)`)
+	reModalID     = regexp.MustCompile(`modal_id=(\d+)`)
 )
 
 // URLType 解析结果类型
@@ -87,11 +106,9 @@ type ResolveResult struct {
 }
 
 // ResolveShareURL 解析抖音分享链接
-// 参考 parse-video: parseShareUrl → 区分 v.douyin.com / www.douyin.com / www.iesdouyin.com
 func (c *DouyinClient) ResolveShareURL(shareURL string) (*ResolveResult, error) {
 	c.limiter.Acquire()
 
-	// 确保有协议前缀
 	if !strings.HasPrefix(shareURL, "http") {
 		shareURL = "https://" + shareURL
 	}
@@ -107,13 +124,10 @@ func (c *DouyinClient) ResolveShareURL(shareURL string) (*ResolveResult, error) 
 	case "www.douyin.com", "www.iesdouyin.com":
 		return c.parseLongURL(shareURL)
 	default:
-		// 尝试通用匹配
 		return c.parseLongURL(shareURL)
 	}
 }
 
-// resolveShortURL 解析 v.douyin.com 短链接（通过 302 重定向）
-// 参考 parse-video: parseAppShareUrl
 func (c *DouyinClient) resolveShortURL(shortURL string) (*ResolveResult, error) {
 	req, err := http.NewRequest("GET", shortURL, nil)
 	if err != nil {
@@ -135,33 +149,23 @@ func (c *DouyinClient) resolveShortURL(shortURL string) (*ResolveResult, error) 
 	return c.parseLongURL(location)
 }
 
-// parseLongURL 从完整 URL 中解析出视频 ID 或用户 sec_uid
-// 参考 parse-video: parsePcShareUrl + parseVideoIdFromPath
 func (c *DouyinClient) parseLongURL(rawURL string) (*ResolveResult, error) {
-	// 优先: modal_id 参数（精选页面）
 	if m := reModalID.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
-
-	// 用户主页
 	if m := reUserURL.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeUser, SecUID: m[1]}, nil
 	}
-
-	// 视频链接
 	if m := reVideoURL.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
 	if m := reIesVideoURL.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
-
-	// /video/xxx 或 /note/xxx 路径
 	if m := rePathVideoID.FindStringSubmatch(rawURL); len(m) > 1 {
 		return &ResolveResult{Type: URLTypeVideo, VideoID: m[1]}, nil
 	}
 
-	// 最后手段: URL 路径最后一段数字
 	parsed, _ := url.Parse(rawURL)
 	if parsed != nil {
 		path := strings.Trim(parsed.Path, "/")
@@ -179,22 +183,88 @@ func (c *DouyinClient) parseLongURL(rawURL string) (*ResolveResult, error) {
 
 // ---- 视频详情 ----
 
-// _ROUTER_DATA 正则（参考 parse-video: 精确匹配 window._ROUTER_DATA = {...}</script>）
 var reRouterData = regexp.MustCompile(`window\._ROUTER_DATA\s*=\s*(.*?)</script>`)
 
 // GetVideoDetail 获取单个视频详情
-// 核心方案: 通过 iesdouyin.com/share/video/{id} 页面解析 _ROUTER_DATA
-// 参考 parse-video parseVideoID: 不需要 X-Bogus 签名，不需要 goja
+// 优先使用 douyin.com/aweme/v1/web/aweme/detail/ API（带 X-Bogus 签名，更可靠）
+// 备选: iesdouyin.com/share/video/{id} 页面解析 _ROUTER_DATA
 func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	c.limiter.Acquire()
 
+	// 尝试通过正式 API 获取（更可靠）
+	video, err := c.getVideoDetailAPI(videoID)
+	if err == nil {
+		return video, nil
+	}
+	log.Printf("[douyin] detail API failed for %s: %v, falling back to page scrape", videoID, err)
+
+	// 降级: 页面解析
+	return c.getVideoDetailPage(videoID)
+}
+
+// getVideoDetailAPI 使用 douyin.com/aweme/v1/web/aweme/detail/ API 获取视频详情
+func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
+	apiURL := "https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=" + videoID
+
+	parsed, err := url.Parse(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	cookie := globalCookieMgr.getCookieString(c.normalClient)
+
+	xBogus, err := signURL(parsed.RawQuery, pcUA)
+	if err != nil {
+		return nil, fmt.Errorf("sign failed: %w", err)
+	}
+	apiURL = fmt.Sprintf("%s&X-Bogus=%s", apiURL, xBogus)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("Referer", "https://www.douyin.com/")
+	req.Header.Set("User-Agent", pcUA)
+
+	resp, err := c.normalClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch detail API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read detail API: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("detail API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var apiResp struct {
+		StatusCode  int             `json:"status_code"`
+		AwemeDetail json.RawMessage `json:"aweme_detail"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("parse detail API: %w", err)
+	}
+
+	if apiResp.AwemeDetail == nil || string(apiResp.AwemeDetail) == "null" {
+		return nil, fmt.Errorf("aweme_detail is null (status_code=%d)", apiResp.StatusCode)
+	}
+
+	return parseAwemeDetail(apiResp.AwemeDetail, videoID, false)
+}
+
+// getVideoDetailPage 通过 iesdouyin.com 页面解析 _ROUTER_DATA（降级方案）
+func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) {
 	pageURL := fmt.Sprintf("https://www.iesdouyin.com/share/video/%s", videoID)
 
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	// parse-video 用 iPhone UA，实测比桌面 UA 更稳定
 	req.Header.Set("User-Agent", pickUA())
 
 	resp, err := c.normalClient.Do(req)
@@ -210,19 +280,16 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 
 	htmlStr := string(body)
 
-	// Step 1: 检查是否为图集/笔记（参考 parse-video: 通过 canonical link 判断）
 	isNote := false
 	canonical := getCanonicalFromHTML(htmlStr)
 	if strings.Contains(canonical, "/note/") {
 		isNote = true
 	}
 
-	// Step 2: 图集走 slidesinfo API（参考 parse-video: 随机 web_id + 随机 a_bogus 居然能用）
 	if isNote {
 		return c.getNoteDetail(videoID)
 	}
 
-	// Step 3: 普通视频从 _ROUTER_DATA 解析
 	m := reRouterData.FindSubmatch(body)
 	if len(m) < 2 {
 		return nil, fmt.Errorf("_ROUTER_DATA not found in page (status=%d, bodyLen=%d)", resp.StatusCode, len(body))
@@ -232,11 +299,9 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	return c.parseRouterDataForVideo(jsonBytes, videoID)
 }
 
-// getNoteDetail 获取图集/笔记详情
-// 参考 parse-video: iesdouyin.com/web/api/v2/aweme/slidesinfo/ + 随机 a_bogus
 func (c *DouyinClient) getNoteDetail(videoID string) (*DouyinVideo, error) {
 	webID := generateWebID()
-	aBogus := randAlphaNum(64) // parse-video 直接用随机字符串做 a_bogus
+	aBogus := randAlphaNum(64)
 
 	apiURL := fmt.Sprintf(
 		"https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/?reflow_source=reflow_page&web_id=%s&device_id=%s&aweme_ids=%%5B%s%%5D&request_source=200&a_bogus=%s",
@@ -273,22 +338,18 @@ func (c *DouyinClient) getNoteDetail(videoID string) (*DouyinVideo, error) {
 	return parseAwemeDetail(apiResp.AwemeDetails[0], videoID, true)
 }
 
-// parseRouterDataForVideo 从 _ROUTER_DATA JSON 解析视频信息
-// 参考 parse-video: gjson 路径 loaderData.video_(id)/page.videoInfoRes.item_list.0
 func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string) (*DouyinVideo, error) {
 	var data map[string]interface{}
 	if err := json.Unmarshal(jsonBytes, &data); err != nil {
 		return nil, fmt.Errorf("parse router data json: %w", err)
 	}
 
-	// 路径: loaderData -> video_(id)/page -> videoInfoRes -> item_list[0]
 	loaderData, ok := data["loaderData"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("loaderData not found")
 	}
 
 	var videoPage map[string]interface{}
-	// 尝试多个可能的 key（路由可能变化）
 	for _, key := range []string{
 		"video_(id)/page",
 		"video_(id)",
@@ -301,7 +362,6 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 		}
 	}
 	if videoPage == nil {
-		// fallback: 遍历找第一个有 videoInfoRes 的
 		for _, v := range loaderData {
 			if page, ok := v.(map[string]interface{}); ok {
 				if _, has := page["videoInfoRes"]; has {
@@ -320,8 +380,6 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 		return nil, fmt.Errorf("videoInfoRes not found")
 	}
 
-	// 检查 filter_list（被风控拦截的情况）
-	// 参考 parse-video: 检查 filter_list 中是否有 filter_reason
 	if filterList, ok := videoInfoRes["filter_list"].([]interface{}); ok {
 		for _, item := range filterList {
 			if fm, ok := item.(map[string]interface{}); ok {
@@ -347,7 +405,6 @@ func (c *DouyinClient) parseRouterDataForVideo(jsonBytes []byte, videoID string)
 	return parseAwemeDetail(itemBytes, videoID, false)
 }
 
-// parseAwemeDetail 从 aweme_detail JSON 解析出 DouyinVideo
 func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*DouyinVideo, error) {
 	var detail map[string]interface{}
 	if err := json.Unmarshal(raw, &detail); err != nil {
@@ -359,17 +416,13 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 		IsNote:  isNote,
 	}
 
-	// 描述
 	if desc, ok := detail["desc"].(string); ok {
 		video.Desc = desc
 	}
-
-	// 创建时间
 	if ct, ok := detail["create_time"].(float64); ok {
 		video.CreateTime = int64(ct)
 	}
 
-	// 作者
 	if authorData, ok := detail["author"].(map[string]interface{}); ok {
 		if v, ok := authorData["uid"].(string); ok {
 			video.Author.UID = v
@@ -389,9 +442,7 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 		}
 	}
 
-	// 视频数据
 	if videoData, ok := detail["video"].(map[string]interface{}); ok {
-		// 封面（参考 parse-video: 优先非 webp 格式）
 		if cover, ok := videoData["cover"].(map[string]interface{}); ok {
 			if urls, ok := cover["url_list"].([]interface{}); ok {
 				video.Cover = pickNonWebpURL(urls)
@@ -404,14 +455,9 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 				}
 			}
 		}
-
-		// 时长
 		if dur, ok := videoData["duration"].(float64); ok {
 			video.Duration = int(dur)
 		}
-
-		// 视频 URL: play_addr.url_list[0]
-		// 参考 parse-video: playwm → play 获取无水印
 		if !isNote {
 			if playAddr, ok := videoData["play_addr"].(map[string]interface{}); ok {
 				if urls, ok := playAddr["url_list"].([]interface{}); ok && len(urls) > 0 {
@@ -423,7 +469,6 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 		}
 	}
 
-	// 图集图片（参考 parse-video: images[].url_list 取非 webp）
 	if images, ok := detail["images"].([]interface{}); ok {
 		for _, img := range images {
 			if imgMap, ok := img.(map[string]interface{}); ok {
@@ -436,11 +481,10 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 		}
 		if len(video.Images) > 0 {
 			video.IsNote = true
-			video.VideoURL = "" // 图集没有视频
+			video.VideoURL = ""
 		}
 	}
 
-	// 统计
 	if stats, ok := detail["statistics"].(map[string]interface{}); ok {
 		if v, ok := stats["digg_count"].(float64); ok {
 			video.DiggCount = int64(v)
@@ -459,27 +503,39 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 // ---- 用户视频列表 ----
 
 // GetUserVideos 获取用户视频列表
-// 使用 iesdouyin.com 的 web API（与 slidesinfo 类似，用随机 a_bogus）
-// 这个接口比 douyin.com/aweme/v1/web/aweme/post/ 风控宽松
+// 使用 douyin.com/aweme/v1/web/aweme/post/ API + X-Bogus 签名
+// 参考 lux 项目的实现，旧 iesdouyin.com API 已废弃（返回空 body）
 func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideosResult, error) {
 	c.limiter.Acquire()
 
-	webID := generateWebID()
-	aBogus := randAlphaNum(64)
+	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
-	apiURL := fmt.Sprintf(
-		"https://www.iesdouyin.com/web/api/v2/aweme/post/?sec_user_id=%s&count=18&max_cursor=%d&aid=6383&web_id=%s&device_id=%s&a_bogus=%s",
-		url.QueryEscape(secUID), maxCursor, webID, webID, aBogus,
-	)
+	// 构建 query 参数
+	params := url.Values{}
+	params.Set("sec_user_id", secUID)
+	params.Set("max_cursor", fmt.Sprintf("%d", maxCursor))
+	params.Set("count", "20")
+	params.Set("cookie_enabled", "true")
+	params.Set("platform", "PC")
+	params.Set("downlink", "10")
+
+	queryStr := params.Encode()
+
+	// X-Bogus 签名
+	xBogus, err := signURL(queryStr, pcUA)
+	if err != nil {
+		return nil, fmt.Errorf("sign failed: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("https://www.douyin.com/aweme/v1/web/aweme/post/?%s&X-Bogus=%s", queryStr, xBogus)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	cookie := globalCookieMgr.getCookieString(c.normalClient)
 	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", pickUA())
-	req.Header.Set("Referer", "https://www.iesdouyin.com/")
+	req.Header.Set("Referer", "https://www.douyin.com/")
+	req.Header.Set("User-Agent", pcUA)
 
 	resp, err := c.normalClient.Do(req)
 	if err != nil {
@@ -557,18 +613,15 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 				Nickname: item.Author.Nickname,
 			},
 		}
-		// 封面
 		if len(item.Video.Cover.URLList) > 0 {
 			v.Cover = pickNonWebpURLStr(item.Video.Cover.URLList)
 		}
-		// 视频 URL（无水印）
 		if len(item.Video.PlayAddr.URLList) > 0 {
 			v.VideoURL = strings.ReplaceAll(item.Video.PlayAddr.URLList[0], "playwm", "play")
 		}
-		// 图集
 		if len(item.Images) > 0 {
 			v.IsNote = true
-			v.VideoURL = "" // 图集没有视频
+			v.VideoURL = ""
 			for _, img := range item.Images {
 				if len(img.URLList) > 0 {
 					v.Images = append(v.Images, pickNonWebpURLStr(img.URLList))
@@ -585,7 +638,6 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64) (*UserVideo
 }
 
 // ResolveVideoURL 跟随 302 获取无水印视频最终下载地址
-// 参考 parse-video: getRedirectUrl
 func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 	if videoURL == "" {
 		return "", fmt.Errorf("empty video url")
@@ -615,7 +667,6 @@ func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 
 // ---- 辅助函数 ----
 
-// ExtractSecUID 从 URL 中提取 sec_user_id
 func ExtractSecUID(rawURL string) (string, error) {
 	if m := reUserURL.FindStringSubmatch(rawURL); len(m) > 1 {
 		return m[1], nil
@@ -623,12 +674,10 @@ func ExtractSecUID(rawURL string) (string, error) {
 	return "", fmt.Errorf("unable to extract sec_user_id from: %s", rawURL)
 }
 
-// IsDouyinURL 判断是否为抖音链接
 func IsDouyinURL(rawURL string) bool {
 	return strings.Contains(rawURL, "douyin.com") || strings.Contains(rawURL, "iesdouyin.com")
 }
 
-// SanitizePath 文件名清理
 func SanitizePath(name string) string {
 	replacer := strings.NewReplacer(
 		"/", "_", "\\", "_", ":", "_", "*", "_",
@@ -643,13 +692,11 @@ func SanitizePath(name string) string {
 	return result
 }
 
-// generateWebID 生成 web_id（参考 parse-video: "75" + 15位随机数字）
 func generateWebID() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	return fmt.Sprintf("75%015d", r.Int63n(1e15))
 }
 
-// randAlphaNum 生成指定长度的随机字母数字串
 func randAlphaNum(n int) string {
 	const letters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, n)
@@ -659,7 +706,6 @@ func randAlphaNum(n int) string {
 	return string(b)
 }
 
-// pickNonWebpURL 从 url_list 中优先选非 webp 格式的 URL（参考 parse-video: getNoWebpUrl）
 func pickNonWebpURL(urls []interface{}) string {
 	var first string
 	for _, u := range urls {
@@ -677,12 +723,10 @@ func pickNonWebpURL(urls []interface{}) string {
 	return first
 }
 
-// pickNonWebpURLStr 字符串版
 func pickNonWebpURLStr(urls []string) string {
 	var first string
 	for _, s := range urls {
-		if s == "" {
-			continue
+		if s == "" {			continue
 		}
 		if first == "" {
 			first = s
@@ -694,16 +738,14 @@ func pickNonWebpURLStr(urls []string) string {
 	return first
 }
 
-// getCanonicalFromHTML 从 HTML 中提取 canonical link
-// 参考 parse-video: getCanonicalFromHTML
 func getCanonicalFromHTML(htmlStr string) string {
 	doc, err := html.Parse(strings.NewReader(htmlStr))
 	if err != nil {
-		return ""	}
+		return ""
+	}
 	return findCanonical(doc)
 }
 
-// findCanonical 递归查找 canonical link（参考 parse-video: findCanonical）
 func findCanonical(n *html.Node) string {
 	if n.Type == html.ElementNode && n.Data == "link" {
 		var rel, href string
@@ -727,7 +769,6 @@ func findCanonical(n *html.Node) string {
 	return ""
 }
 
-// truncate 截断字符串
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

@@ -329,7 +329,13 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 			s.fullScanRunningMu.Unlock()
 		}()
 		log.Printf("[full-scan] 开始全量补漏扫描: %s (id=%d)", src.Name, src.ID)
-		s.fullScanUP(*src)
+		switch src.Type {
+		case "douyin":
+			// 抖音全量扫描: 复用 checkDouyin（已支持全量/增量）
+			s.checkDouyin(*src)
+		default:
+			s.fullScanUP(*src)
+		}
 		log.Printf("[full-scan] 全量补漏扫描完成: %s (id=%d)", src.Name, src.ID)
 	}()
 }
