@@ -3,8 +3,8 @@ import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
-const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列' };
-const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default' };
+const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音' };
+const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning' };
 
 const qualityOptions = [
   { value: 'best', label: '最高画质' },
@@ -489,10 +489,10 @@ export function SourcesPage({ onNavigate }) {
         addTab === 'url' && h('div', { className: 'space-y-4' },
           // URL 输入 + 解析按钮
           h('div', null,
-            h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站链接（必填）'),
+            h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站 / 抖音链接（必填）'),
             h('div', { className: 'flex gap-2' },
               h('input', {
-                type: 'text', value: newURL, placeholder: 'https://space.bilibili.com/xxx',
+                type: 'text', value: newURL, placeholder: 'B站/抖音链接: bilibili.com/xxx 或 douyin.com/user/xxx',
                 onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
                 onKeyDown: (e) => e.key === 'Enter' && handleParse(),
                 className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'

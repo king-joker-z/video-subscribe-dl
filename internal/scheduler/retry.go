@@ -36,6 +36,12 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// 抖音类型使用独立的下载路径
+	if src.Type == "douyin" {
+		s.retryOneDouyinDownload(dl)
+		return
+	}
+
 	actualBvID := dl.VideoID
 	var targetPageNum int
 	if parts := strings.SplitN(dl.VideoID, "_P", 2); len(parts) == 2 {

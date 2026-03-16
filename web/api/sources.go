@@ -11,6 +11,7 @@ import (
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/douyin"
 )
 
 // SourcesHandler 订阅源 API
@@ -106,7 +107,10 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		source.Type = "up"
 	}
 
-	// 自动识别 URL 类型
+	// 自动识别 URL 类型: 先检测抖音
+	if douyin.IsDouyinURL(source.URL) {
+		source.Type = "douyin"
+	}
 	if source.Type == "up" && source.URL != "" {
 		if strings.Contains(source.URL, "favlist") {
 			source.Type = "favorite"
@@ -181,6 +185,20 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 				source.Name = "稍后再看"
 			}
 		}
+	case "douyin":
+		if source.Name == "" && source.URL != "" {
+			dyClient := douyin.NewClient()
+			result, err := dyClient.ResolveShareURL(source.URL)
+			if err == nil && result.Type == douyin.URLTypeUser {
+				// 尝试获取第一个视频来取用户名
+				videos, err := dyClient.GetUserVideos(result.SecUID, 0)
+				if err == nil && len(videos.Videos) > 0 {
+					source.Name = videos.Videos[0].Author.Nickname
+				}
+				// 规范化 URL 格式
+				source.URL = "https://www.douyin.com/user/" + result.SecUID
+			}
+		}
 	default:
 		if source.Name == "" && source.URL != "" {
 			if mid, err := bilibili.ExtractMID(source.URL); err == nil {
@@ -191,8 +209,8 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 关联全局 Cookie
-	if source.CookiesFile == "" {
+	// 关联全局 Cookie（抖音不需要）
+	if source.Type != "douyin" && source.CookiesFile == "" {
 		if cookiePath, err := h.db.GetSetting("cookie_path"); err == nil && cookiePath != "" {
 			source.CookiesFile = cookiePath
 		}
@@ -465,7 +483,38 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. UP 主主页: space.bilibili.com/xxx
+	// 4. 抖音链接
+	if douyin.IsDouyinURL(rawURL) {
+		dyClient := douyin.NewClient()
+		resolved, err := dyClient.ResolveShareURL(rawURL)
+		if err == nil {
+			switch resolved.Type {
+			case douyin.URLTypeUser:
+				result["type"] = "douyin"
+				result["sec_uid"] = resolved.SecUID
+				// 尝试获取用户名
+				videos, err := dyClient.GetUserVideos(resolved.SecUID, 0)
+				if err == nil && len(videos.Videos) > 0 {
+					result["name"] = videos.Videos[0].Author.Nickname
+					result["uploader"] = videos.Videos[0].Author.Nickname
+				}
+				apiOK(w, result)
+				return
+			case douyin.URLTypeVideo:
+				detail, err := dyClient.GetVideoDetail(resolved.VideoID)
+				if err == nil {
+					result["type"] = "douyin"
+					result["video_id"] = resolved.VideoID
+					result["name"] = detail.Author.Nickname
+					result["uploader"] = detail.Author.Nickname
+					apiOK(w, result)
+					return
+				}
+			}
+		}
+	}
+
+	// 5. UP 主主页: space.bilibili.com/xxx
 	mid, err := bilibili.ExtractMID(rawURL)
 	if err == nil && mid > 0 {
 		result["type"] = "up"
@@ -478,7 +527,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站链接")
+	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站或抖音链接")
 }
 
 // HandleByID 路由分发 /api/sources/:id

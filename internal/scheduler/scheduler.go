@@ -451,6 +451,9 @@ func (s *Scheduler) checkSource(src db.Source) {
 		s.checkSeries(src)
 	case "favorite":
 		s.checkFavorite(src)
+	case "douyin":
+		s.checkDouyin(src)
+		return
 	case "watchlater":
 		s.checkWatchLater(src)
 	case "up", "channel", "":
