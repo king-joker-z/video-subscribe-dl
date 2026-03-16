@@ -253,6 +253,19 @@ func TestSanitizePath(t *testing.T) {
 		{"混😊合👍内容", "混合内容"},      // 多个 emoji 混入中文
 		{"纯中文内容🎉", "纯中文内容"},             // 末尾 emoji
 		{"🎉纯中文内容", "纯中文内容"},             // 开头 emoji
+		// BMP 内 Symbol Other（❄☃⛄✨⭐ 等，NAS 兼容性）
+		{"❄️", "unknown"},                         // U+2744 snowflake + variation selector → empty → unknown
+		{"☃", "unknown"},                               // U+2603 snowman
+		{"⛄", "unknown"},                               // U+26C4 snowman without snow
+		{"✨", "unknown"},                               // U+2728 sparkles
+		{"⭐", "unknown"},                               // U+2B50 star
+		{"#宅家才是冬❄️", "#宅家才是冬"},           // hashtag 中 emoji 被过滤
+		{"阿彪 #美的全屋智能 #宅家才是冬❄️", "阿彪 #美的全屋智能 #宅家才是冬"}, // 实际场景
+		// 中文标点不被误杀
+		{"【我的主人有点疯5】", "【我的主人有点疯5】"},
+		{"《红楼梦》", "《红楼梦》"},
+		{"「你好」世界", "「你好」世界"},
+		{"（括号）测试", "（括号）测试"},
 		// 混合场景
 		{"hello/world\u200B test\n", "hello_world test"},
 		{"\uFEFF  多余空格  \u200B", "多余空格"},

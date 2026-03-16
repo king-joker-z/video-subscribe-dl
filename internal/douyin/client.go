@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/net/html"
 )
@@ -1057,7 +1058,7 @@ func SanitizePath(name string) string {
 			return -1
 		case r >= 0xFE00 && r <= 0xFE0F: // 变体选择器
 			return -1
-		case r >= 0x1F000 && r <= 0x1FFFF: // Emoji 及 Misc Symbols（NAS 文件系统兼容性）
+		case unicode.Is(unicode.So, r): // Symbol, Other（emoji/symbols, NAS 兼容）
 			return -1
 		case r >= 0xE0000 && r <= 0xE007F: // 标签字符
 			return -1
