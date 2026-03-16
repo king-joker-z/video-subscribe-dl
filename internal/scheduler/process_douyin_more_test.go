@@ -323,7 +323,7 @@ func TestDownloadDouyinFile_OverwritesEmptyFile(t *testing.T) {
 	// 创建空文件
 	os.WriteFile(destPath, []byte{}, 0644)
 
-	size, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	size, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}

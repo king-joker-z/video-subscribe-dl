@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/douyin"
 )
 
 // ============================
@@ -24,7 +25,7 @@ func TestDownloadDouyinFile_Success(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "video.mp4")
-	size, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	size, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinFile failed: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestDownloadDouyinFile_SkipsExistingNonEmpty(t *testing.T) {
 	existingContent := "already downloaded"
 	os.WriteFile(destPath, []byte(existingContent), 0644)
 
-	size, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	size, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinFile failed: %v", err)
 	}
@@ -70,7 +71,7 @@ func TestDownloadDouyinFile_Non200Status(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "video.mp4")
-	_, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	_, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
@@ -84,7 +85,7 @@ func TestDownloadDouyinFile_EmptyBody(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "video.mp4")
-	_, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	_, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err == nil {
 		t.Fatal("expected error for 0 bytes download")
 	}
@@ -99,7 +100,7 @@ func TestDownloadDouyinFile_CreatesMissingDirs(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "nested", "dirs", "video.mp4")
-	size, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	size, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinFile failed: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestDownloadDouyinFile_CreatesMissingDirs(t *testing.T) {
 
 func TestDownloadDouyinFile_InvalidURL(t *testing.T) {
 	destPath := filepath.Join(t.TempDir(), "video.mp4")
-	_, err := downloadDouyinFile("http://127.0.0.1:1/nonexistent", destPath)
+	_, err := douyin.DownloadFile("http://127.0.0.1:1/nonexistent", destPath)
 	if err == nil {
 		t.Fatal("expected error for invalid URL/unreachable server")
 	}
@@ -129,7 +130,7 @@ func TestDownloadDouyinFile_ConcurrentDifferentFiles(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		go func(idx int) {
 			destPath := filepath.Join(dir, fmt.Sprintf("video_%d.mp4", idx))
-			_, err := downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+			_, err := douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 			errs <- err
 		}(i)
 	}
@@ -153,7 +154,7 @@ func TestDownloadDouyinFile_TmpFileCleanedOnError(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "video.mp4")
-	_, _ = downloadDouyinFile(ts.URL+"/video.mp4", destPath)
+	_, _ = douyin.DownloadFile(ts.URL+"/video.mp4", destPath)
 
 	// tmp file should not remain regardless of outcome
 	tmpPath := destPath + ".tmp"
@@ -175,7 +176,7 @@ func TestDownloadDouyinThumb_Success(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "thumb.jpg")
-	err := downloadDouyinThumb(ts.URL+"/thumb.jpg", destPath)
+	err := douyin.DownloadThumb(ts.URL+"/thumb.jpg", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinThumb failed: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestDownloadDouyinThumb_SkipsExisting(t *testing.T) {
 	destPath := filepath.Join(t.TempDir(), "thumb.jpg")
 	os.WriteFile(destPath, []byte("existing"), 0644)
 
-	err := downloadDouyinThumb(ts.URL+"/thumb.jpg", destPath)
+	err := douyin.DownloadThumb(ts.URL+"/thumb.jpg", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinThumb failed: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestDownloadDouyinThumb_Non200Status(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "thumb.jpg")
-	err := downloadDouyinThumb(ts.URL+"/thumb.jpg", destPath)
+	err := douyin.DownloadThumb(ts.URL+"/thumb.jpg", destPath)
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
@@ -221,7 +222,7 @@ func TestDownloadDouyinThumb_Non200Status(t *testing.T) {
 
 func TestDownloadDouyinThumb_InvalidURL(t *testing.T) {
 	destPath := filepath.Join(t.TempDir(), "thumb.jpg")
-	err := downloadDouyinThumb("http://127.0.0.1:1/nonexistent", destPath)
+	err := douyin.DownloadThumb("http://127.0.0.1:1/nonexistent", destPath)
 	if err == nil {
 		t.Fatal("expected error for unreachable server")
 	}
@@ -239,7 +240,7 @@ func TestDownloadDouyinThumb_LargeImage(t *testing.T) {
 	defer ts.Close()
 
 	destPath := filepath.Join(t.TempDir(), "large_thumb.jpg")
-	err := downloadDouyinThumb(ts.URL+"/thumb.jpg", destPath)
+	err := douyin.DownloadThumb(ts.URL+"/thumb.jpg", destPath)
 	if err != nil {
 		t.Fatalf("downloadDouyinThumb failed for large image: %v", err)
 	}

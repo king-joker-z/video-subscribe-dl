@@ -3,10 +3,8 @@ package scheduler
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,7 +121,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	// Step 4: 下载视频（带重试）
 	var fileSize int64
 	for attempt := 1; attempt <= 3; attempt++ {
-		fileSize, err = downloadDouyinFile(videoURL, videoFilePath)
+		fileSize, err = douyin.DownloadFile(videoURL, videoFilePath)
 		if err == nil {
 			break
 		}
@@ -145,7 +143,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	// Step 5: 下载封面
 	if !src.SkipPoster && detail.Cover != "" {
 		thumbPath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
-		if err := downloadDouyinThumb(detail.Cover, thumbPath); err != nil {
+		if err := douyin.DownloadThumb(detail.Cover, thumbPath); err != nil {
 			log.Printf("[douyin-dl] Download cover failed for %s: %v", dl.VideoID, err)
 		}
 	}
@@ -177,92 +175,6 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	s.notifier.Send(notify.EventDownloadComplete, "抖音视频下载完成: "+title,
 		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(fileSize)/(1024*1024)))
-}
-
-// downloadDouyinFile 下载抖音视频 MP4
-func downloadDouyinFile(videoURL, destPath string) (int64, error) {
-	os.MkdirAll(filepath.Dir(destPath), 0755)
-
-	// 已存在且非空则跳过
-	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
-		return info.Size(), nil
-	}
-
-	req, err := http.NewRequest("GET", videoURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-	req.Header.Set("Referer", "https://www.douyin.com/")
-	req.Header.Set("Accept", "*/*")
-
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("http get video: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("video download returned %d", resp.StatusCode)
-	}
-
-	tmpPath := destPath + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return 0, fmt.Errorf("create tmp file: %w", err)
-	}
-
-	written, err := io.Copy(f, resp.Body)
-	f.Close()
-	if err != nil {
-		os.Remove(tmpPath)
-		return 0, fmt.Errorf("write video: %w", err)
-	}
-
-	if written == 0 {
-		os.Remove(tmpPath)
-		return 0, fmt.Errorf("downloaded 0 bytes")
-	}
-
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		return 0, fmt.Errorf("rename tmp: %w", err)
-	}
-
-	return written, nil
-}
-
-// downloadDouyinThumb 下载封面图
-func downloadDouyinThumb(thumbURL, destPath string) error {
-	if _, err := os.Stat(destPath); err == nil {
-		return nil
-	}
-
-	req, err := http.NewRequest("GET", thumbURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("thumb download returned %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, resp.Body)
-	return err
 }
 
 // downloadDouyinNote 下载抖音图集（笔记）
@@ -314,7 +226,7 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 		var fileSize int64
 		var err error
 		for attempt := 1; attempt <= 3; attempt++ {
-			fileSize, err = downloadDouyinFile(imgURL, imgPath)
+			fileSize, err = douyin.DownloadFile(imgURL, imgPath)
 			if err == nil {
 				break
 			}
@@ -351,7 +263,7 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 	// 下载封面（使用第一张图作为封面）
 	if !src.SkipPoster && detail.Cover != "" {
 		coverPath := filepath.Join(noteDir, "cover.jpg")
-		if err := downloadDouyinThumb(detail.Cover, coverPath); err != nil {
+		if err := douyin.DownloadThumb(detail.Cover, coverPath); err != nil {
 			log.Printf("[douyin-note] Download cover failed: %v", err)
 		}
 	}

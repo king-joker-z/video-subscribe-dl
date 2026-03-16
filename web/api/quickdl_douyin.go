@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -192,7 +191,7 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 	// 下载视频（带重试）
 	var fileSize int64
 	for attempt := 1; attempt <= 3; attempt++ {
-		fileSize, err = quickDownloadDouyinFile(videoURL, videoFilePath)
+		fileSize, err = douyin.DownloadFile(videoURL, videoFilePath)
 		if err == nil {
 			break
 		}
@@ -225,7 +224,7 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 	skipPoster := skipPosterStr == "true"
 	if !skipPoster && detail.Cover != "" {
 		thumbPath := filepath.Join(outputDir, safeTitle+" ["+awemeID+"]-poster.jpg")
-		if err := quickDownloadDouyinThumb(detail.Cover, thumbPath); err != nil {
+		if err := douyin.DownloadThumb(detail.Cover, thumbPath); err != nil {
 			log.Printf("[quickdl·douyin] Download cover failed: %v", err)
 		} else {
 			h.db.UpdateThumbPath(dlID, thumbPath)
@@ -341,7 +340,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 		var fileSize int64
 		var err error
 		for attempt := 1; attempt <= 3; attempt++ {
-			fileSize, err = quickDownloadDouyinFile(imgURL, imgPath)
+			fileSize, err = douyin.DownloadFile(imgURL, imgPath)
 			if err == nil {
 				break
 			}
@@ -376,7 +375,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 	skipPosterStr, _ := h.db.GetSetting("skip_poster")
 	if skipPosterStr != "true" && detail.Cover != "" {
 		coverPath := filepath.Join(noteDir, "cover.jpg")
-		quickDownloadDouyinThumb(detail.Cover, coverPath)
+		douyin.DownloadThumb(detail.Cover, coverPath)
 	}
 
 	// 生成 NFO
@@ -479,93 +478,5 @@ func (h *QuickDownloadHandler) handleDouyinPreview(w http.ResponseWriter, rawURL
 	}
 
 	apiOK(w, result)
-}
-
-
-// quickDownloadDouyinFile 下载抖音视频 MP4
-func quickDownloadDouyinFile(videoURL, destPath string) (int64, error) {
-	os.MkdirAll(filepath.Dir(destPath), 0755)
-
-	// 已存在且非空则跳过
-	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
-		return info.Size(), nil
-	}
-
-	req, err := http.NewRequest("GET", videoURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-	req.Header.Set("Referer", "https://www.douyin.com/")
-	req.Header.Set("Accept", "*/*")
-
-	httpClient := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("http get video: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return 0, fmt.Errorf("video download returned %d", resp.StatusCode)
-	}
-
-	tmpPath := destPath + ".tmp"
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return 0, fmt.Errorf("create tmp file: %w", err)
-	}
-
-	written, err := io.Copy(f, resp.Body)
-	f.Close()
-	if err != nil {
-		os.Remove(tmpPath)
-		return 0, fmt.Errorf("write video: %w", err)
-	}
-
-	if written == 0 {
-		os.Remove(tmpPath)
-		return 0, fmt.Errorf("downloaded 0 bytes")
-	}
-
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		return 0, fmt.Errorf("rename tmp: %w", err)
-	}
-
-	return written, nil
-}
-
-
-// quickDownloadDouyinThumb 下载封面图
-func quickDownloadDouyinThumb(thumbURL, destPath string) error {
-	if _, err := os.Stat(destPath); err == nil {
-		return nil
-	}
-
-	req, err := http.NewRequest("GET", thumbURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
-
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("thumb download returned %d", resp.StatusCode)
-	}
-
-	f, err := os.Create(destPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, resp.Body)
-	return err
 }
 
