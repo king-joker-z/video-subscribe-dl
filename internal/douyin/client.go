@@ -129,11 +129,24 @@ func signURL(queryStr, userAgent string) (string, error) {
 	return pool.sign(queryStr, userAgent)
 }
 
-// signURLWithFallback 带降级的签名策略链
-// 优先级: X-Bogus 签名 → 无签名（空字符串）
-// TODO: a_bogus 签名实现后插入链中: a_bogus → X-Bogus → 无签名
-// 返回: (xBogus, signed bool, error)
-// error 仅在不可恢复错误时返回，签名失败时降级为无签名（signed=false）
+// signABogusURL 使用池化的 goja VM 执行 a_bogus.js 计算 a_bogus 签名
+func signABogusURL(queryStr, userAgent string) (string, error) {
+	pool, err := getABogusPool()
+	if err != nil {
+		return "", fmt.Errorf("get a_bogus pool: %w", err)
+	}
+	return pool.sign(queryStr, userAgent)
+}
+
+// SignResult 签名结果
+type SignResult struct {
+	ABogus string // a_bogus 签名值（非空表示成功）
+	XBogus string // X-Bogus 签名值（非空表示成功）
+}
+
+// signURLWithFallback 带降级的三级签名策略链
+// 优先级: a_bogus → X-Bogus → 无签名
+// 返回: (xBogus, signed bool) — 保持向后兼容，X-Bogus 仍作为 fallback
 func signURLWithFallback(queryStr, userAgent string) (string, bool) {
 	xBogus, err := signURL(queryStr, userAgent)
 	if err != nil {
@@ -141,6 +154,43 @@ func signURLWithFallback(queryStr, userAgent string) (string, bool) {
 		return "", false
 	}
 	return xBogus, true
+}
+
+// signURLWithABogus 三级签名降级链
+// 优先级: a_bogus → X-Bogus → 无签名
+// 返回 SignResult，调用方根据结果决定如何拼接 URL
+func signURLWithABogus(queryStr, userAgent string) SignResult {
+	// 第一级: a_bogus
+	aBogus, err := signABogusURL(queryStr, userAgent)
+	if err == nil && aBogus != "" {
+		// a_bogus 成功，同时也获取 X-Bogus（部分 API 需要）
+		xBogus, _ := signURL(queryStr, userAgent)
+		return SignResult{ABogus: aBogus, XBogus: xBogus}
+	}
+	logger.Warn("a_bogus sign failed, degrading to X-Bogus", "error", err)
+
+	// 第二级: X-Bogus
+	xBogus, err := signURL(queryStr, userAgent)
+	if err == nil && xBogus != "" {
+		return SignResult{XBogus: xBogus}
+	}
+	logger.Warn("X-Bogus sign failed, degrading to unsigned", "error", err)
+
+	// 第三级: 无签名
+	return SignResult{}
+}
+
+// applySignResult 将签名结果应用到 URL query string
+// 返回最终的完整 API URL
+func applySignResult(baseURL, queryStr string, sr SignResult) string {
+	url := fmt.Sprintf("%s?%s", baseURL, queryStr)
+	if sr.ABogus != "" {
+		url += "&a_bogus=" + sr.ABogus
+	}
+	if sr.XBogus != "" {
+		url += "&X-Bogus=" + sr.XBogus
+	}
+	return url
 }
 
 // ---- URL 解析 ----
@@ -279,9 +329,12 @@ func (c *DouyinClient) getVideoDetailAPI(videoID string) (*DouyinVideo, error) {
 	cookie := globalCookieMgr.getCookieString(c.normalClient)
 
 	ua := c.fingerprint.UserAgent
-	xBogus, signed := signURLWithFallback(parsed.RawQuery, ua)
-	if signed {
-		apiURL = fmt.Sprintf("%s&X-Bogus=%s", apiURL, xBogus)
+	sr := signURLWithABogus(parsed.RawQuery, ua)
+	if sr.ABogus != "" {
+		apiURL += "&a_bogus=" + sr.ABogus
+	}
+	if sr.XBogus != "" {
+		apiURL += "&X-Bogus=" + sr.XBogus
 	}
 
 	req, err := http.NewRequest("GET", apiURL, nil)
@@ -671,15 +724,10 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 
 	queryStr := params.Encode()
 
-	// X-Bogus 签名（降级链: X-Bogus → 无签名）
+	// 三级签名降级链: a_bogus → X-Bogus → 无签名
 	ua := c.fingerprint.UserAgent
-	xBogus, signed := signURLWithFallback(queryStr, ua)
-	var apiURL string
-	if signed {
-		apiURL = fmt.Sprintf("%s?%s&X-Bogus=%s", UserVideosAPI, queryStr, xBogus)
-	} else {
-		apiURL = fmt.Sprintf("%s?%s", UserVideosAPI, queryStr)
-	}
+	sr := signURLWithABogus(queryStr, ua)
+	apiURL := applySignResult(UserVideosAPI, queryStr, sr)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -810,13 +858,8 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 	queryStr := params.Encode()
 
 	ua := c.fingerprint.UserAgent
-	xBogus, signed := signURLWithFallback(queryStr, ua)
-	var apiURL string
-	if signed {
-		apiURL = fmt.Sprintf("%s?%s&X-Bogus=%s", UserProfileAPI, queryStr, xBogus)
-	} else {
-		apiURL = fmt.Sprintf("%s?%s", UserProfileAPI, queryStr)
-	}
+	sr := signURLWithABogus(queryStr, ua)
+	apiURL := applySignResult(UserProfileAPI, queryStr, sr)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
