@@ -340,10 +340,25 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 
 	htmlStr := string(body)
 
+	// 图集检测（多信号）:
+	// 1. canonical link 包含 /note/
+	// 2. 页面 URL 本身包含 /note/
+	// 3. og:type 或 og:url 包含 note 信息
+	// 4. _ROUTER_DATA 中的 aweme_type == 68
 	isNote := false
 	canonical := getCanonicalFromHTML(htmlStr)
 	if strings.Contains(canonical, "/note/") {
 		isNote = true
+		log.Printf("[douyin] note detected via canonical link: %s", canonical)
+	}
+
+	// 检查 og:url meta tag（有些情况 canonical 不可靠但 og:url 正确）
+	if !isNote {
+		ogURL := getMetaContent(htmlStr, "og:url")
+		if strings.Contains(ogURL, "/note/") {
+			isNote = true
+			log.Printf("[douyin] note detected via og:url: %s", ogURL)
+		}
 	}
 
 	if isNote {
@@ -539,6 +554,11 @@ func parseAwemeDetail(raw json.RawMessage, videoID string, isNote bool) (*Douyin
 				}
 			}
 		}
+	}
+
+	// 检测图集类型（aweme_type == 68 表示图集）
+	if awemeType, ok := detail["aweme_type"].(float64); ok && int(awemeType) == 68 {
+		video.IsNote = true
 	}
 
 	if images, ok := detail["images"].([]interface{}); ok {
@@ -949,6 +969,38 @@ func getCanonicalFromHTML(htmlStr string) string {
 		return ""
 	}
 	return findCanonical(doc)
+}
+
+// getMetaContent 从 HTML 中提取指定 meta tag 的 content 值
+func getMetaContent(htmlStr string, property string) string {
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		return ""
+	}
+	return findMetaContent(doc, property)
+}
+
+func findMetaContent(n *html.Node, property string) string {
+	if n.Type == html.ElementNode && n.Data == "meta" {
+		var prop, content string
+		for _, attr := range n.Attr {
+			switch attr.Key {
+			case "property", "name":
+				prop = attr.Val
+			case "content":
+				content = attr.Val
+			}
+		}
+		if prop == property && content != "" {
+			return content
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if result := findMetaContent(c, property); result != "" {
+			return result
+		}
+	}
+	return ""
 }
 
 func findCanonical(n *html.Node) string {
