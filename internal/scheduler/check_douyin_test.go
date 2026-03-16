@@ -8,6 +8,7 @@ import (
 
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/douyin"
+	"video-subscribe-dl/internal/notify"
 )
 
 // --- Mock DouyinAPI ---
@@ -23,6 +24,13 @@ type mockDouyinAPI struct {
 	profileErr      error
 	resolveResult   *douyin.ResolveResult
 	resolveErr      error
+	// GetVideoDetail mock
+	videoDetailResult *douyin.DouyinVideo
+	videoDetailErr    error
+	videoDetailCalls  int
+	// ResolveVideoURL mock
+	resolveVideoResult string
+	resolveVideoErr    error
 }
 
 type mockVideoPage struct {
@@ -66,6 +74,35 @@ func (m *mockDouyinAPI) ResolveShareURL(shareURL string) (*douyin.ResolveResult,
 	return &douyin.ResolveResult{Type: douyin.URLTypeUser, SecUID: "test_sec_uid"}, nil
 }
 
+func (m *mockDouyinAPI) GetVideoDetail(videoID string) (*douyin.DouyinVideo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.videoDetailCalls++
+	if m.videoDetailErr != nil {
+		return nil, m.videoDetailErr
+	}
+	if m.videoDetailResult != nil {
+		return m.videoDetailResult, nil
+	}
+	return &douyin.DouyinVideo{
+		AwemeID:  videoID,
+		Desc:     "Test Video",
+		VideoURL: "https://example.com/video.mp4",
+		Duration: 30000,
+		Author:   douyin.DouyinUser{Nickname: "TestUser"},
+	}, nil
+}
+
+func (m *mockDouyinAPI) ResolveVideoURL(videoURL string) (string, error) {
+	if m.resolveVideoErr != nil {
+		return "", m.resolveVideoErr
+	}
+	if m.resolveVideoResult != "" {
+		return m.resolveVideoResult, nil
+	}
+	return videoURL, nil
+}
+
 func (m *mockDouyinAPI) isClosed() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,6 +133,7 @@ func newTestScheduler(t *testing.T, mock *mockDouyinAPI) *Scheduler {
 		fullScanRunning: make(map[int64]bool),
 		newDouyinClient: func() DouyinAPI { return mock },
 		sleepFn:         func(d time.Duration) {}, // 测试中跳过 sleep
+		notifier:        notify.New(database),
 		douyinDownloadLimiter: douyin.NewRateLimiter(100, 100, time.Millisecond), // 测试中不限流
 	}
 	t.Cleanup(func() { s.douyinDownloadLimiter.Stop() })
