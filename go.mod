@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/glebarez/sqlite v1.10.0
 	github.com/robfig/cron/v3 v3.0.1
+	golang.org/x/net v0.52.0
 )
 
 require (
@@ -15,7 +16,6 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	gorm.io/gorm v1.25.5 // indirect
 	modernc.org/libc v1.22.5 // indirect
