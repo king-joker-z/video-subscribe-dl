@@ -83,7 +83,6 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	}
 	uploaderDir := douyin.SanitizePath(uploaderName)
 	outputDir := filepath.Join(s.downloadDir, uploaderDir)
-	os.MkdirAll(outputDir, 0755)
 
 	title := detail.Desc
 	if title == "" {
@@ -96,7 +95,10 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	if len(safeTitle) > 100 {
 		safeTitle = safeTitle[:100]
 	}
-	videoFilePath := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"].mp4")
+	// 每个视频一个独立文件夹（和 B 站保持一致）
+	videoDir := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"]")
+	os.MkdirAll(videoDir, 0755)
+	videoFilePath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"].mp4")
 
 	// Step 4: 下载视频（带重试）
 	var fileSize int64
@@ -122,7 +124,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	// Step 5: 下载封面
 	if !src.SkipPoster && detail.Cover != "" {
-		thumbPath := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
+		thumbPath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
 		if err := downloadDouyinThumb(detail.Cover, thumbPath); err != nil {
 			log.Printf("[douyin-dl] Download cover failed for %s: %v", dl.VideoID, err)
 		}
@@ -131,6 +133,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	// Step 6: 生成 NFO
 	if !src.SkipNFO {
 		meta := &nfo.VideoMeta{
+			Platform:     "douyin",
 			BvID:         dl.VideoID,
 			Title:        title,
 			Description:  detail.Desc,
@@ -336,6 +339,7 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 	// 生成 NFO
 	if !src.SkipNFO {
 		meta := &nfo.VideoMeta{
+			Platform:     "douyin",
 			BvID:         dl.VideoID,
 			Title:        title,
 			Description:  detail.Desc,

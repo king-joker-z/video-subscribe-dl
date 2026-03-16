@@ -475,6 +475,7 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 				tags, _ = h.getBiliClient().GetVideoTags(actualBvID)
 			}
 			meta := &nfo.VideoMeta{
+				Platform: "bilibili",
 				BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
 				UploaderName: uploaderName, UploaderFace: detail.Owner.Face,
 				UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,

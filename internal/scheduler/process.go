@@ -580,6 +580,7 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 			uploaderFace = detail.Owner.Face
 		}
 		meta := &nfo.VideoMeta{
+			Platform: "bilibili",
 			BvID: actualBvID, Title: detail.Title, Description: detail.Desc,
 			UploaderName: uploaderName, UploaderFace: uploaderFace,
 			UploadDate: time.Unix(detail.PubDate, 0), Duration: detail.Duration,

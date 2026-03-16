@@ -13,6 +13,7 @@ import (
 // === 输入结构 ===
 
 type VideoMeta struct {
+	Platform      string    // "bilibili" 或 "douyin"，用于区分平台相关字段
 	BvID          string
 	Title         string
 	Description   string
@@ -35,6 +36,7 @@ type VideoMeta struct {
 }
 
 type TVShowMeta struct {
+	Platform     string // 可选，默认 "bilibili"
 	Title        string
 	Plot         string
 	UploaderName string
@@ -276,11 +278,21 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 		}
 	}
 
+	// Platform fallback: 默认 bilibili 以兼容旧代码
+	platform := meta.Platform
+	if platform == "" {
+		platform = "bilibili"
+	}
+
 	var actors []actor
 	if meta.UploaderName != "" {
+		role := "UP主"
+		if platform == "douyin" {
+			role = "作者"
+		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,
-			Role:  "UP主",
+			Role:  role,
 			Thumb: meta.UploaderFace,
 		})
 	}
@@ -333,7 +345,7 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 		ratingEntries = &ratings{
 			Rating: []ratingEntry{
 				{
-					Name:    "bilibili",
+					Name:    platform,
 					Max:     10,
 					Default: "true",
 					Value:   float64(int(rating*10)) / 10, // 保留 1 位小数
@@ -351,7 +363,7 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 		Premiered: premiered,
 		Studio:    meta.UploaderName,
 		Runtime:   runtime,
-		UniqueID:  uniqueID{Type: "bilibili", Default: "true", Value: meta.BvID},
+		UniqueID:  uniqueID{Type: platform, Default: "true", Value: meta.BvID},
 		Ratings:   ratingEntries,
 		Genres:    genres,
 		Tags:      tags,
@@ -372,11 +384,21 @@ func GenerateVideoNFO(meta *VideoMeta, videoFilePath string) error {
 // GenerateTVShowNFO 在目录下生成 tvshow.nfo
 func GenerateTVShowNFO(meta *TVShowMeta, dir string) error {
 	os.MkdirAll(dir, 0755)
+
+	platform := meta.Platform
+	if platform == "" {
+		platform = "bilibili"
+	}
+
 	var actors []actor
 	if meta.UploaderName != "" {
+		role := "UP主"
+		if platform == "douyin" {
+			role = "作者"
+		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,
-			Role:  "UP主",
+			Role:  role,
 			Thumb: meta.UploaderFace,
 		})
 	}
@@ -469,7 +491,7 @@ func GenerateEpisodeNFO(meta *EpisodeMeta, nfoPath string) error {
 		Episode:  meta.Episode,
 		Aired:    aired,
 		Runtime:  runtime,
-		UniqueID: uniqueID{Type: "bilibili", Default: "true", Value: meta.BvID},
+		UniqueID: uniqueID{Type: "bilibili", Default: "true", Value: meta.BvID}, // Episode NFO 目前只有 B站用
 		Studio:   meta.UploaderName,
 	}
 	return writeXML(nfoPath, nfo)

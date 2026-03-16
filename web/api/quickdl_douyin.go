@@ -237,6 +237,7 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 	skipNFO := skipNFOStr == "true"
 	if !skipNFO {
 		meta := &nfo.VideoMeta{
+			Platform:     "douyin",
 			BvID:         awemeID,
 			Title:        title,
 			Description:  detail.Desc,
@@ -382,6 +383,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 	skipNFOStr, _ := h.db.GetSetting("skip_nfo")
 	if skipNFOStr != "true" {
 		meta := &nfo.VideoMeta{
+			Platform: "douyin",
 			BvID: awemeID, Title: title, Description: detail.Desc,
 			UploaderName: uploaderName, UploadDate: detail.CreateTimeUnix(),
 			Thumbnail: detail.Cover,
