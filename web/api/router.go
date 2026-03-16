@@ -25,6 +25,7 @@ type Router struct {
 	stream     *StreamHandler
 	search     *SearchHandler
 	notify     *NotifyHandler
+	diag       *DiagHandler
 	onSyncAll  func()
 }
 
@@ -42,6 +43,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		quickdl:    NewQuickDownloadHandler(database, dl, downloadDir),
 		stream:     NewStreamHandler(database, downloadDir),
 		search:     NewSearchHandler(database),
+		diag:       NewDiagHandler(database),
 	}
 }
 
@@ -87,6 +89,7 @@ func (rt *Router) SetFullScanSourceFunc(fn func(int64)) {
 func (rt *Router) SetBiliClientFunc(fn func() *bilibili.Client) {
 	rt.me.SetBiliClientFunc(fn)
 	rt.quickdl.SetBiliClientFunc(fn)
+	rt.diag.SetBiliClientFunc(fn)
 }
 
 func (rt *Router) SetConfigReloadFunc(fn func()) {
@@ -218,4 +221,13 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		mux.HandleFunc("/api/notify/test", rt.notify.HandleTest)
 		mux.HandleFunc("/api/notify/status", rt.notify.HandleStatus)
 	}
+
+	// Ping (health check for API layer)
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		apiOK(w, map[string]string{"status": "pong"})
+	})
+
+	// Diagnostics
+	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)
+	mux.HandleFunc("/api/diag/douyin", rt.diag.HandleDouyin)
 }
