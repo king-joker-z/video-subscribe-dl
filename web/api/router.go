@@ -26,12 +26,16 @@ type Router struct {
 	search     *SearchHandler
 	notify     *NotifyHandler
 	diag       *DiagHandler
+	metrics    *MetricsHandler
+	signReload *SignReloadHandler
 	onSyncAll  func()
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {
 	return &Router{
 		dashboard:  NewDashboardHandler(database, dl, downloadDir),
+		metrics:    NewMetricsHandler(dl),
+		signReload: &SignReloadHandler{},
 		sources:    NewSourcesHandler(database),
 		videos:     NewVideosHandler(database, downloadDir),
 		uploaders:  NewUploadersHandler(database, downloadDir),
@@ -96,10 +100,16 @@ func (rt *Router) SetConfigReloadFunc(fn func()) {
 	rt.settings.SetConfigReloadFunc(fn)
 }
 
-func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) { rt.dashboard.SetCooldownInfoFunc(fn) }
+func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
+	rt.dashboard.SetCooldownInfoFunc(fn)
+	rt.metrics.SetCooldownInfoFunc(fn)
+}
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
 func (rt *Router) SetBuildTime(t string)        { rt.task.SetBuildTime(t) }
-func (rt *Router) SetStartTime(t time.Time)     { rt.task.SetStartTime(t) }
+func (rt *Router) SetStartTime(t time.Time) {
+	rt.task.SetStartTime(t)
+	rt.metrics.SetStartTime(t)
+}
 
 // SetNotifier 设置通知处理器
 func (rt *Router) SetNotifier(n *notify.Notifier) {
@@ -226,6 +236,12 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		apiOK(w, map[string]string{"status": "pong"})
 	})
+
+	// Metrics
+	mux.HandleFunc("/api/metrics", rt.metrics.HandleMetrics)
+
+	// Sign Reload
+	mux.HandleFunc("/api/sign/reload", rt.signReload.HandleReload)
 
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)

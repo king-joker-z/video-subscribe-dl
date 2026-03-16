@@ -68,6 +68,10 @@ type Downloader struct {
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 
+	// 统计计数
+	totalCompleted int64
+	totalFailed    int64
+
 	// 进度追踪
 	progressMu sync.RWMutex
 	progress   map[string]*ProgressInfo // key = bvid
@@ -166,6 +170,7 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 
 	// 广播下载事件给 SSE 订阅者
 	if result.Success {
+		atomic.AddInt64(&d.totalCompleted, 1)
 		d.emitEvent(DownloadEvent{
 			Type:     "completed",
 			BvID:     job.BvID,
@@ -173,6 +178,7 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 			FileSize: result.FileSize,
 		})
 	} else if result.Error != nil {
+		atomic.AddInt64(&d.totalFailed, 1)
 		d.emitEvent(DownloadEvent{
 			Type:  "failed",
 			BvID:  job.BvID,
