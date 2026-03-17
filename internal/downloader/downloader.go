@@ -339,6 +339,21 @@ func (d *Downloader) removeProgress(bvid string) {
 	delete(d.progress, bvid)
 }
 
+// SetExternalProgress 允许外部模块（如抖音下载器）写入进度（线程安全）
+// key 建议使用 "douyin:<download_id>" 格式以避免与 bvid 冲突
+func (d *Downloader) SetExternalProgress(key string, info *ProgressInfo) {
+	d.progressMu.Lock()
+	defer d.progressMu.Unlock()
+	d.progress[key] = info
+}
+
+// RemoveExternalProgress 移除外部进度记录
+func (d *Downloader) RemoveExternalProgress(key string) {
+	d.progressMu.Lock()
+	defer d.progressMu.Unlock()
+	delete(d.progress, key)
+}
+
 // isRetryableError checks if the error is retryable (network errors yes, 403/404 no)
 func isRetryableError(err error) bool {
 	if err == nil {

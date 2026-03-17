@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/douyin"
+	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/nfo"
 	"video-subscribe-dl/internal/notify"
 )
@@ -118,14 +120,36 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 	os.MkdirAll(videoDir, 0755)
 	videoFilePath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"].mp4")
 
-	// Step 4: 下载视频（带重试）
+	// Step 4: 下载视频（带重试 + SSE 进度追踪）
 	var fileSize int64
+	progressKey := fmt.Sprintf("douyin:%d", dl.ID)
+	var progressCb douyinProgressCallback
+	if s.dl != nil {
+		progressCb = func(info downloader.ProgressInfo) {
+			if info.Status == "done" {
+				s.dl.RemoveExternalProgress(progressKey)
+				// 推送 download_event: completed
+				s.dl.EmitEvent(downloader.DownloadEvent{
+					Type:     "completed",
+					BvID:     dl.VideoID,
+					Title:    title,
+					FileSize: info.Downloaded,
+				})
+			} else {
+				s.dl.SetExternalProgress(progressKey, &info)
+			}
+		}
+	}
 	for attempt := 1; attempt <= 3; attempt++ {
-		fileSize, err = douyin.DownloadFile(videoURL, videoFilePath)
+		ctx := context.Background()
+		fileSize, err = downloadDouyinFileWithProgress(ctx, videoURL, videoFilePath, int64(dl.ID), title, progressCb)
 		if err == nil {
 			break
 		}
 		log.Printf("[douyin-dl] Download attempt %d failed: %v", attempt, err)
+		if s.dl != nil {
+			s.dl.RemoveExternalProgress(progressKey)
+		}
 		if attempt < 3 {
 			backoff := time.Duration(10*(1<<(attempt-1))) * time.Second
 			time.Sleep(backoff)
