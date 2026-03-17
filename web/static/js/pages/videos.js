@@ -70,6 +70,34 @@ export function VideosPage({ params = {} } = {}) {
     return () => window.removeEventListener('vsd:download-event', handler);
   }, [load]);
 
+  // 定时自动刷新（15s），页面不可见时暂停，切回来立即刷一次
+  useEffect(() => {
+    const INTERVAL = 15000;
+    let timer = null;
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (!document.hidden) {
+          load();
+        }
+        schedule();
+      }, INTERVAL);
+    };
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        load();
+      }
+    };
+
+    schedule();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [load]);
+
   const handleSearch = (value) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => { setSearch(value); setPage(1); }, 300);

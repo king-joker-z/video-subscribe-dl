@@ -50,6 +50,34 @@ export function UploadersPage({ onNavigate }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // 定时自动刷新（60s），页面不可见时暂停，切回来立即刷一次
+  useEffect(() => {
+    const INTERVAL = 60000;
+    let timer = null;
+
+    const schedule = () => {
+      timer = setTimeout(() => {
+        if (!document.hidden) {
+          load();
+        }
+        schedule();
+      }, INTERVAL);
+    };
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        load();
+      }
+    };
+
+    schedule();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [load]);
+
   const handleDownloadPending = async (uploaderName, e) => {
     e.stopPropagation();
     try {
