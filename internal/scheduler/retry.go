@@ -42,6 +42,9 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// B站下载频率限制
+	s.biliDownloadLimiter.Acquire()
+
 	actualBvID := dl.VideoID
 	var targetPageNum int
 	if parts := strings.SplitN(dl.VideoID, "_P", 2); len(parts) == 2 {

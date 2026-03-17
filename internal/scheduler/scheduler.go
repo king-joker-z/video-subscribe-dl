@@ -80,6 +80,9 @@ type Scheduler struct {
 
 	// 抖音下载频率限制器（每分钟最多 2 条）
 	douyinDownloadLimiter *douyin.RateLimiter
+
+	// B站下载频率限制器（每分钟最多 4 条）
+	biliDownloadLimiter   *bilibili.RateLimiter
 }
 
 type upInfoCacheEntry struct {
@@ -106,6 +109,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
 		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
 		douyinDownloadLimiter: douyin.NewRateLimiter(4, 1, 15*time.Second), // 每分钟最多 4 条抖音下载
+		biliDownloadLimiter:   bilibili.NewRateLimiter(4, 1, 15*time.Second), // 每分钟最多 4 条 B站下载
 	}
 }
 
@@ -356,6 +360,9 @@ func (s *Scheduler) Stop() {
 	}
 	if s.douyinDownloadLimiter != nil {
 		s.douyinDownloadLimiter.Stop()
+	}
+	if s.biliDownloadLimiter != nil {
+		s.biliDownloadLimiter.Stop()
 	}
 	close(s.stopCh)
 	s.wg.Wait()
