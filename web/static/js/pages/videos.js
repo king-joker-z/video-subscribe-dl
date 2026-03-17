@@ -283,7 +283,15 @@ export function VideosPage({ params = {} } = {}) {
       h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading, title: '删除' },
         h(Icon, { name: 'trash', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删除')
       ),
-      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto', disabled: batchLoading }, isMobile ? h(Icon, { name: 'x-circle', size: 14 }) : '清除选择')
+      h('button', {
+        onClick: toggleAll,
+        className: 'text-xs text-blue-400/70 hover:text-blue-300 ml-auto mr-2',
+        disabled: batchLoading,
+        title: selected.size === videos.length ? '取消全选' : '全选当页'
+      },
+        selected.size === videos.length ? h(Icon, { name: 'check-square', size: 14 }) : h(Icon, { name: 'square', size: 14 })
+      ),
+      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300', disabled: batchLoading }, isMobile ? h(Icon, { name: 'x-circle', size: 14 }) : '清除选择')
     ),
     // 内容
     loading
@@ -391,6 +399,8 @@ export function VideosPage({ params = {} } = {}) {
                 key: v.id, video: v,
                 progress: getProgress(v.id, v.video_id),
                 isMobile,
+                selected: selected.has(v.id),
+                onSelect: toggleSelect,
                 onClick: () => setDetailVideo(v),
                 onAction: load
               }))
@@ -422,7 +432,7 @@ function DouyinLogo({ size = 40 }) {
 }
 
 // 视频卡片组件（带封面图）
-function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction }) {
+function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction, selected = false, onSelect }) {
   const [imgError, setImgError] = useState(false);
   const thumbSrc = `/api/thumb/${v.id}`;
   const isDownloading = v.status === 'downloading';
@@ -447,11 +457,22 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
 
   return h(Card, {
     hover: true,
-    className: cn('group overflow-hidden', isDownloading && 'border-l-4 border-blue-500'),
+    className: cn('group overflow-hidden', selected ? 'ring-2 ring-blue-500 ring-inset' : (isDownloading ? 'border-l-4 border-blue-500' : '')),
     onClick
   },
     // 封面图区域
     h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-900 overflow-hidden' },
+      // 选择 checkbox（左上角覆盖层）
+      onSelect && h('div', {
+        className: 'absolute top-2 left-2 z-10',
+        onClick: (e) => { e.stopPropagation(); onSelect(v.id); }
+      },
+        h('div', {
+          className: 'w-6 h-6 rounded-md flex items-center justify-center transition-all ' + (selected ? 'bg-blue-500 shadow-md' : 'bg-black/50 border-2 border-white/60 hover:border-white'),
+        },
+          selected && h(Icon, { name: 'check', size: 12, className: 'text-white' })
+        )
+      ),
       !imgError
         ? h('img', {
             src: thumbSrc,

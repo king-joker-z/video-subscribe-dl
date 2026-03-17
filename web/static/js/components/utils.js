@@ -123,6 +123,8 @@ const ICON_PATHS = {
   'file-x': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9.5 12.5l5 5M14.5 12.5l-5 5',
   'alert-circle': 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 8v4M12 16h.01',
   'undo': 'M3 7v6h6M3 13a9 9 0 1 0 2.5-6.3L3 7',
+  'square': 'M3 3h18v18H3V3z',
+  'check-square': 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
 };
 
 export function Icon({ name, size = 18, className = '' }) {

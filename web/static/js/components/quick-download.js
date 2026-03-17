@@ -319,7 +319,7 @@ export function QuickDownloadFAB({ onClick }) {
   return h('button', {
     onClick,
     title: '快速下载视频 (Ctrl+D)',
-    className: 'fixed bottom-6 right-6 w-14 h-14 rounded-full bg-blue-500 hover:bg-blue-400 text-white shadow-lg shadow-blue-500/25 flex items-center justify-center transition-all hover:scale-105 active:scale-95 z-40'
+    className: 'fixed bottom-20 lg:bottom-6 right-4 lg:right-6 w-12 h-12 lg:w-14 lg:h-14 rounded-full bg-blue-500 hover:bg-blue-400 text-white shadow-lg shadow-blue-500/25 flex items-center justify-center transition-all hover:scale-105 active:scale-95 z-40'
   },
     h(Icon, { name: 'download', size: 24 })
   );
