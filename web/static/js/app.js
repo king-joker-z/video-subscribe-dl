@@ -108,11 +108,55 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
     dashboard: '仪表盘', sources: '订阅源', videos: '视频列表',
     uploaders: 'UP 主', settings: '设置', logs: '实时日志',
   };
+  // 底部 tab 页面不需要顶部汉堡菜单（tab bar 直接导航）
+  const tabPages = ['dashboard', 'sources', 'videos', 'uploaders', 'settings'];
+  const isTabPage = tabPages.includes(currentPage);
   return h('header', { className: 'lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-900/95 backdrop-blur border-b border-slate-700/50 z-30 flex items-center px-4 gap-3' },
-    h('button', { onClick: onToggleSidebar, className: 'p-2 -ml-2 rounded-lg hover:bg-slate-800 text-slate-400' },
-      h(Icon, { name: 'menu', size: 20 })
-    ),
+    // 非 tab 页面（logs）显示汉堡菜单，tab 页面显示占位
+    !isTabPage
+      ? h('button', { onClick: onToggleSidebar, className: 'p-2 -ml-2 rounded-lg hover:bg-slate-800 text-slate-400' },
+          h(Icon, { name: 'menu', size: 20 })
+        )
+      : h('div', { className: 'w-8' }),
     h('span', { className: 'font-medium text-sm' }, labels[currentPage] || '')
+  );
+}
+
+// ==================== 移动端底部 Tab 导航栏 ====================
+function MobileTabBar({ currentPage, onNavigate }) {
+  const tabs = [
+    { id: 'dashboard', icon: 'layout-dashboard', label: '仪表盘' },
+    { id: 'sources',   icon: 'rss',              label: '订阅源' },
+    { id: 'videos',    icon: 'video',             label: '视频'   },
+    { id: 'uploaders', icon: 'users',             label: 'UP主'   },
+    { id: 'settings',  icon: 'settings',          label: '设置'   },
+  ];
+
+  return h('nav', {
+    className: 'lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-slate-900/95 backdrop-blur border-t border-slate-700/50 z-30 flex items-stretch'
+  },
+    tabs.map(tab =>
+      h('button', {
+        key: tab.id,
+        onClick: () => onNavigate(tab.id),
+        className: cn(
+          'flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors',
+          currentPage === tab.id
+            ? 'text-blue-400'
+            : 'text-slate-500 hover:text-slate-300'
+        )
+      },
+        h('div', {
+          className: cn(
+            'flex items-center justify-center w-8 h-6 rounded-lg transition-colors',
+            currentPage === tab.id ? 'bg-blue-500/15' : ''
+          )
+        },
+          h(Icon, { name: tab.icon, size: 18 })
+        ),
+        h('span', null, tab.label)
+      )
+    )
   );
 }
 
@@ -318,8 +362,10 @@ function App() {
     mobileSidebar && h('div', { className: 'lg:hidden' },
       h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: false, onToggle: () => setMobileSidebar(false), onSearchClick: () => setCmdPaletteOpen(true) })
     ),
-    // 移动端头部
+    // 移动端头部（仅日志页等非 tab 页面使用汉堡菜单）
     h(MobileHeader, { currentPage: page, onToggleSidebar: () => setMobileSidebar(s => !s) }),
+    // 移动端底部 tab 导航栏
+    h(MobileTabBar, { currentPage: page, onNavigate: navigate }),
     // 主内容
     h('main', {
       className: cn(
@@ -327,7 +373,7 @@ function App() {
         sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-56'
       )
     },
-      h('div', { className: 'p-4 lg:p-6 max-w-7xl' }, renderPage())
+      h('div', { className: 'p-4 lg:p-6 max-w-7xl pb-16 lg:pb-0' }, renderPage())
     )
   );
 }
