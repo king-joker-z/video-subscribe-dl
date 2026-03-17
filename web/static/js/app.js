@@ -186,9 +186,121 @@ function formatBytesCompact(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
 }
 
+function formatSpeed(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return '';
+  return formatBytesCompact(bytesPerSec) + '/s';
+}
+
 function truncate(str, max) {
   if (!str) return '';
   return str.length > max ? str.slice(0, max) + '…' : str;
+}
+
+// ==================== 全局下载进度浮动条 ====================
+function GlobalDownloadBar({ sidebarCollapsed }) {
+  const [progressList, setProgressList] = useState([]); // ProgressInfo[]
+  const [visible, setVisible] = useState(false);
+  const hideTimer = useRef(null);
+
+  useEffect(() => {
+    let es;
+    try {
+      es = new EventSource('/api/events');
+      es.addEventListener('progress', (e) => {
+        try {
+          const list = JSON.parse(e.data); // ProgressInfo[]
+          const active = (list || []).filter(p => p.status !== 'done' && p.status !== 'error');
+          setProgressList(active);
+          if (active.length > 0) {
+            setVisible(true);
+            if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+          } else {
+            if (!hideTimer.current) {
+              hideTimer.current = setTimeout(() => {
+                setVisible(false);
+                setProgressList([]);
+                hideTimer.current = null;
+              }, 2500);
+            }
+          }
+        } catch {}
+      });
+    } catch {}
+    return () => {
+      if (es) es.close();
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  if (!visible || progressList.length === 0) return null;
+
+  const primary = progressList[0];
+  const count = progressList.length;
+  const avgPercent = progressList.reduce((s, p) => s + (p.percent || 0), 0) / count;
+  const totalSpeed = progressList.reduce((s, p) => s + (p.speed || 0), 0);
+
+  const phaseLabel = ({
+    downloading_video: '视频流',
+    downloading_audio: '音频流',
+    merging: '合并中',
+    video: '视频流',
+    audio: '音频流',
+    merge: '合并中',
+  })[primary.phase || primary.status] || '下载中';
+
+  // 侧边栏宽度偏移（仅桌面端）
+  const mlStyle = sidebarCollapsed ? '4rem' : '14rem';
+
+  // 手机端 top: 3.5rem（header 下方），桌面端 top: 0（无 header，侧边栏偏移）
+  return h('div', {
+    className: 'fixed z-20 left-0 right-0 pointer-events-none lg:top-0 top-14'
+  },
+    h('div', {
+      className: 'pointer-events-auto transition-all duration-200',
+      style: { marginLeft: `var(--global-dl-ml, 0)` }
+    },
+      // 设置 CSS 变量（通过 style 注入，仅桌面端生效）
+      h('style', null, `@media (min-width: 1024px) { :root { --global-dl-ml: ${mlStyle}; } } @media (max-width: 1023px) { :root { --global-dl-ml: 0px; } }`),
+      h('div', {
+        className: 'relative bg-slate-800/95 backdrop-blur border-b border-blue-500/30 px-4 py-1.5 flex items-center gap-3 text-xs shadow-lg'
+      },
+        // 旋转动画图标
+        h('div', { className: 'flex-shrink-0 w-3.5 h-3.5 text-blue-400 animate-spin' },
+          h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2.5' },
+            h('path', { d: 'M21 12a9 9 0 11-6.219-8.56', strokeLinecap: 'round' })
+          )
+        ),
+        // 计数 badge
+        count > 1 && h('span', {
+          className: 'flex-shrink-0 bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium'
+        }, `${count} 个`),
+        // 标题
+        h('span', { className: 'flex-1 min-w-0 text-slate-300 truncate' },
+          count > 1 ? `${count} 个视频下载中 · ${truncate(primary.title, 24)}` : truncate(primary.title, 40)
+        ),
+        // 进度 + 速度
+        h('div', { className: 'flex-shrink-0 flex items-center gap-2' },
+          totalSpeed > 0 && h('span', { className: 'text-slate-500 hidden sm:inline' }, formatSpeed(totalSpeed)),
+          h('span', { className: 'text-slate-400 tabular-nums w-10 text-right' }, `${avgPercent.toFixed(1)}%`),
+          h('span', { className: 'text-slate-500 hidden sm:inline text-[10px]' }, phaseLabel)
+        ),
+        // 关闭按钮
+        h('button', {
+          onClick: () => { setVisible(false); },
+          className: 'flex-shrink-0 ml-1 p-0.5 rounded hover:bg-slate-700 text-slate-600 hover:text-slate-300 transition-colors'
+        }, h(Icon, { name: 'x', size: 12 })),
+        // 进度条（绝对定位在底部）
+        h('div', {
+          className: 'absolute bottom-0 left-0 right-0 h-0.5 bg-slate-700/50'
+        },
+          h('div', {
+            className: 'h-full bg-blue-500 transition-all duration-700',
+            style: { width: `${Math.min(100, Math.max(0, avgPercent))}%` }
+          })
+        )
+      )
+    )
+  );
 }
 
 // ==================== 主应用 ====================
@@ -380,6 +492,8 @@ function App() {
     mobileSidebar && h('div', { className: 'lg:hidden' },
       h(Sidebar, { currentPage: page, onNavigate: navigate, collapsed: false, onToggle: () => setMobileSidebar(false), onSearchClick: () => setCmdPaletteOpen(true) })
     ),
+    // 全局下载进度浮动条（有活跃下载时显示在顶部）
+    h(GlobalDownloadBar, { sidebarCollapsed }),
     // 移动端头部（仅日志页等非 tab 页面使用汉堡菜单）
     h(MobileHeader, { currentPage: page, onToggleSidebar: () => setMobileSidebar(s => !s) }),
     // 移动端底部 tab 导航栏
