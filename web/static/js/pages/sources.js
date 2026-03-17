@@ -315,6 +315,7 @@ export function SourcesPage({ onNavigate }) {
   });
 
   const [douyinPaused, setDouyinPaused] = useState(null);
+  const [checkingIds, setCheckingIds] = useState(new Set());
 
   const load = useCallback(async () => {
     try { const res = await api.getSources(); setSources(res.data || []); }
@@ -421,8 +422,17 @@ export function SourcesPage({ onNavigate }) {
   };
 
   const handleSync = async (id) => {
-    try { await api.syncSource(id); toast.success('同步已触发'); }
-    catch (e) { toast.error(e.message); }
+    setCheckingIds(prev => new Set([...prev, id]));
+    try {
+      await api.syncSource(id);
+      toast.success('已触发检查，稍后刷新查看结果');
+      // 延迟 2s 后刷新，给后端一点时间处理
+      setTimeout(() => load(), 2000);
+    } catch (e) {
+      toast.error('触发失败: ' + e.message);
+    } finally {
+      setCheckingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
+    }
   };
 
   const handleFullScan = async (id) => {
@@ -678,6 +688,17 @@ export function SourcesPage({ onNavigate }) {
                   '从未检查'
                 ),
                 h('div', { className: 'flex-1' }),
+                h('button', {
+                  onClick: () => handleSync(s.id),
+                  disabled: checkingIds.has(s.id),
+                  className: 'flex items-center gap-1 text-xs text-slate-400 hover:text-emerald-400 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed',
+                  title: '立即触发检查'
+                },
+                  checkingIds.has(s.id)
+                    ? h('span', { className: 'inline-block w-3 h-3 border border-slate-500 border-t-emerald-400 rounded-full animate-spin' })
+                    : h(Icon, { name: 'refresh', size: 12 }),
+                  checkingIds.has(s.id) ? '检查中' : '立即检查'
+                ),
                 h('button', {
                   onClick: () => onNavigate('videos', { source_id: String(s.id), source_name: s.name || '' }),
                   className: 'flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors flex-shrink-0'
