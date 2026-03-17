@@ -1044,8 +1044,15 @@ func IsDouyinURL(rawURL string) bool {
 // douyinSpaceCollapser 用于合并连续空格
 var douyinSpaceCollapser = regexp.MustCompile(`\s{2,}`)
 
+// douyinHashtagRemover 用于去除抖音标题中的 hashtag（#话题 或 # 话题）
+// 匹配 # 后跟非空白字符的词，直到空白或字符串结尾
+var douyinHashtagRemover = regexp.MustCompile(`#\S+`)
+
 func SanitizePath(name string) string {
-	// 第一轮：替换文件系统非法字符
+	// 第零轮：去除 hashtag（#话题 类），抖音标题常用，保留在文件名里是噪音
+	name = douyinHashtagRemover.ReplaceAllString(name, "")
+
+	// 第一轮：替换文件系统非法字符（# 已在上一步清除，保留此步处理其他字符）
 	for _, c := range []string{"<", ">", ":", "\"", "/", "\\", "|", "?", "*", "#", "@"} {
 		name = strings.ReplaceAll(name, c, "_")
 	}

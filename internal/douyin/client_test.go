@@ -259,8 +259,8 @@ func TestSanitizePath(t *testing.T) {
 		{"⛄", "unknown"},                               // U+26C4 snowman without snow
 		{"✨", "unknown"},                               // U+2728 sparkles
 		{"⭐", "unknown"},                               // U+2B50 star
-		{"#宅家才是冬❄️", "_宅家才是冬"},           // hashtag + emoji 被过滤
-		{"阿彪 #美的全屋智能 #宅家才是冬❄️", "阿彪 _美的全屋智能 _宅家才是冬"}, // # 替换为 _ + emoji 过滤
+		{"#宅家才是冬❄️", "unknown"},               // hashtag 整体移除 + emoji 过滤 → 空 → unknown
+		{"阿彪 #美的全屋智能 #宅家才是冬❄️", "阿彪"}, // hashtag 整体移除，只保留正文
 		{"@骆驼牌户外鞋服", "_骆驼牌户外鞋服"},   // @ 替换为 _
 		// 中文标点不被误杀
 		{"【我的主人有点疯5】", "【我的主人有点疯5】"},
