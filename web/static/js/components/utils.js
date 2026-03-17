@@ -144,19 +144,25 @@ export function Badge({ children, variant = 'default', className = '' }) {
 
 export function StatusBadge({ status }) {
   const map = {
-    completed: { label: '已完成', variant: 'success' },
-    relocated: { label: '已迁移', variant: 'success' },
-    downloading: { label: '下载中', variant: 'default' },
-    pending: { label: '待处理', variant: 'warning' },
-    failed: { label: '失败', variant: 'error' },
-    permanent_failed: { label: '永久失败', variant: 'error' },
-    cancelled: { label: '已取消', variant: 'outline' },
-    skipped: { label: '已跳过', variant: 'outline' },
-    charge_blocked: { label: '充电专属', variant: 'warning' },
-    deleted: { label: '已删除', variant: 'outline' },
+    completed:        { label: '已完成',   variant: 'success',  tip: '下载完成' },
+    relocated:        { label: '已迁移',   variant: 'success',  tip: '文件已迁移' },
+    downloading:      { label: '下载中',   variant: 'default',  tip: '下载中' },
+    pending:          { label: '待处理',   variant: 'warning',  tip: '等待下载' },
+    failed:           { label: '失败',     variant: 'error',    tip: '下载失败，点击重试' },
+    permanent_failed: { label: '永久失败', variant: 'error',    tip: '下载失败，点击重试' },
+    cancelled:        { label: '已取消',   variant: 'outline',  tip: '已取消下载' },
+    skipped:          { label: '已跳过',   variant: 'outline',  tip: '已跳过' },
+    charge_blocked:   { label: '充电专属', variant: 'warning',  tip: '充电专属视频，暂不支持下载' },
+    deleted:          { label: '已删除',   variant: 'outline',  tip: '已从列表删除' },
   };
-  const s = map[status] || { label: status || '未知', variant: 'outline' };
-  return h(Badge, { variant: s.variant }, s.label);
+  const s = map[status] || { label: status || '未知', variant: 'outline', tip: '' };
+  // 纯 CSS tooltip：桌面端 hover 显示，移动端（sm 以下）隐藏
+  return h('span', { className: 'relative group/badge inline-flex' },
+    h(Badge, { variant: s.variant }, s.label),
+    s.tip && h('span', {
+      className: 'pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap rounded-md bg-slate-900 border border-slate-700 text-slate-200 text-[11px] px-2 py-1 shadow-lg opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 z-50 hidden sm:block'
+    }, s.tip)
+  );
 }
 
 export function Card({ children, className = '', hover = false, onClick }) {

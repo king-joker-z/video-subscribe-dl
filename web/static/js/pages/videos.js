@@ -399,12 +399,57 @@ export function VideosPage({ params = {} } = {}) {
   );
 }
 
+// 判断视频平台（根据 video_id 特征）
+function detectPlatform(videoId) {
+  if (!videoId) return 'unknown';
+  if (/^BV[0-9A-Za-z]{10}$/.test(videoId) || /^av\d+$/i.test(videoId)) return 'bilibili';
+  if (/^\d{15,20}$/.test(videoId)) return 'douyin';
+  return 'unknown';
+}
+
+// B 站 logo SVG（内联）
+function BilibiliLogo({ size = 40 }) {
+  return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'white', xmlns: 'http://www.w3.org/2000/svg' },
+    h('path', { d: 'M17.813 4.653h.854c1.51.054 2.769.578 3.773 1.574 1.004.995 1.524 2.249 1.56 3.76v7.36c-.036 1.51-.556 2.769-1.56 3.773s-2.262 1.524-3.773 1.56H5.333c-1.51-.036-2.769-.556-3.773-1.56S.036 18.858 0 17.347v-7.36c.036-1.511.556-2.765 1.56-3.76 1.004-.996 2.262-1.52 3.773-1.574h.774l-1.174-1.12a1.234 1.234 0 0 1 0-1.733 1.234 1.234 0 0 1 1.706 0l2.134 2.107 2.08-2.08a1.234 1.234 0 0 1 1.706 0 1.234 1.234 0 0 1 0 1.733L11.4 4.707h6.413zm.613 3.199H5.574a.96.96 0 0 0-.96.96v7.893a.96.96 0 0 0 .96.96h12.853a.96.96 0 0 0 .96-.96V8.812a.96.96 0 0 0-.96-.96zm-9.6 1.92a.96.96 0 0 1 .96.96v3.84a.96.96 0 0 1-1.92 0v-3.84a.96.96 0 0 1 .96-.96zm6.4 0a.96.96 0 0 1 .96.96v3.84a.96.96 0 0 1-1.92 0v-3.84a.96.96 0 0 1 .96-.96z' })
+  );
+}
+
+// 抖音 logo SVG（内联）
+function DouyinLogo({ size = 40 }) {
+  return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'white', xmlns: 'http://www.w3.org/2000/svg' },
+    h('path', { d: 'M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.27 8.27 0 0 0 4.83 1.56V6.79a4.85 4.85 0 0 1-1.06-.1z' })
+  );
+}
+
 // 视频卡片组件（带封面图）
 function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction }) {
   const [imgError, setImgError] = useState(false);
   const thumbSrc = `/api/thumb/${v.id}`;
+  const isDownloading = v.status === 'downloading';
+  const platform = detectPlatform(v.video_id);
 
-  return h(Card, { hover: true, className: 'group overflow-hidden', onClick },
+  // 缩略图加载失败时显示对应平台 logo
+  const renderThumbFallback = () => {
+    if (platform === 'bilibili') {
+      return h('div', { className: 'w-full h-full flex items-center justify-center', style: { background: '#00AEEC' } },
+        h(BilibiliLogo, { size: 48 })
+      );
+    }
+    if (platform === 'douyin') {
+      return h('div', { className: 'w-full h-full flex items-center justify-center', style: { background: '#010101' } },
+        h(DouyinLogo, { size: 48 })
+      );
+    }
+    return h('div', { className: 'w-full h-full flex items-center justify-center text-slate-700' },
+      h(Icon, { name: 'video', size: 32 })
+    );
+  };
+
+  return h(Card, {
+    hover: true,
+    className: cn('group overflow-hidden', isDownloading && 'border-l-4 border-blue-500'),
+    onClick
+  },
     // 封面图区域
     h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-900 overflow-hidden' },
       !imgError
@@ -415,22 +460,28 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
             loading: 'lazy',
             onError: () => setImgError(true)
           })
-        : h('div', { className: 'w-full h-full flex items-center justify-center text-slate-700' },
-            h(Icon, { name: 'video', size: 32 })
-          ),
+        : renderThumbFallback(),
       // 时长标签
       v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/75 text-white text-xs px-1.5 py-0.5 rounded' },
         formatDurationShort(v.duration)
       ),
-      // 进度条 + 速度信息
+      // 进度条 + 速度信息（下载中状态加强视觉）
       prog && h('div', { className: 'absolute bottom-0 left-0 right-0' },
-        prog.speed > 0 && h('div', { className: 'flex items-center justify-between px-2 py-0.5 bg-black/60 text-[10px]' },
-          h('span', { className: 'text-blue-300 font-medium' }, formatSpeed(prog.speed)),
-          h('span', { className: 'text-slate-300' }, (prog.percent || 0).toFixed(1) + '%'),
-          formatETA(prog.downloaded, prog.total, prog.speed) && h('span', { className: 'text-slate-400' }, formatETA(prog.downloaded, prog.total, prog.speed))
+        prog.speed > 0 && h('div', { className: 'flex items-center justify-between px-2 py-0.5 bg-black/70 text-[10px]' },
+          h('span', { className: 'text-blue-300 font-semibold' }, formatSpeed(prog.speed)),
+          h('span', { className: 'text-white font-medium' }, (prog.percent || 0).toFixed(1) + '%'),
+          formatETA(prog.downloaded, prog.total, prog.speed) && h('span', { className: 'text-slate-300' }, formatETA(prog.downloaded, prog.total, prog.speed))
         ),
-        h('div', { className: 'h-1 bg-black/30' },
-          h('div', { className: 'bg-blue-500 h-1 progress-bar', style: { width: (prog.percent || 0) + '%' } })
+        h('div', { className: 'h-1.5 bg-black/40' },
+          h('div', {
+            className: 'h-1.5 progress-bar',
+            style: {
+              width: (prog.percent || 0) + '%',
+              background: prog.total > 0
+                ? 'linear-gradient(90deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%)'
+                : '#3b82f6'
+            }
+          })
         )
       )
     ),
