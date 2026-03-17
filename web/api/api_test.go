@@ -337,3 +337,84 @@ func itoa(n int64) string {
 	}
 	return string(buf)
 }
+
+// TestVideoSearchByUploader verifies that search query matches uploader field.
+func TestVideoSearchByUploader(t *testing.T) {
+	mux, database := setupTestRouter(t)
+
+	// Register videos handler for this test
+	videosH := NewVideosHandler(database, "/tmp/test-downloads")
+	mux.HandleFunc("/api/videos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			videosH.HandleList(w, r)
+		} else {
+			apiError(w, CodeMethodNotAllow, "method not allowed")
+		}
+	})
+
+	// Insert a source first
+	_, err := database.Exec(`INSERT INTO sources (type, url, name) VALUES ('up', 'https://space.bilibili.com/1', 'Test Source')`)
+	if err != nil {
+		t.Fatalf("insert source: %v", err)
+	}
+	var srcID int64
+	database.QueryRow(`SELECT id FROM sources ORDER BY id DESC LIMIT 1`).Scan(&srcID)
+
+	// Insert two download records with different uploaders
+	_, err = database.Exec(`INSERT INTO downloads (source_id, video_id, title, uploader, status) VALUES (?, 'vid001', 'Some Video Title', 'NarumiUploader', 'completed')`, srcID)
+	if err != nil {
+		t.Fatalf("insert download 1: %v", err)
+	}
+	_, err = database.Exec(`INSERT INTO downloads (source_id, video_id, title, uploader, status) VALUES (?, 'vid002', 'Another Video', 'OtherUploader', 'completed')`, srcID)
+	if err != nil {
+		t.Fatalf("insert download 2: %v", err)
+	}
+
+	// Search by uploader name — should find only the first record
+	req := httptest.NewRequest("GET", "/api/videos?search=NarumiUploader", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", rec.Code, rec.Body.String())
+	}
+
+	resp := parseResponse(t, rec)
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d; msg: %s", resp.Code, resp.Message)
+	}
+
+	// The response data is paginated: { items: [...], total: N }
+	dataMap, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected data map, got %T", resp.Data)
+	}
+	total, _ := dataMap["total"].(float64)
+	if int(total) != 1 {
+		t.Errorf("expected 1 result when searching by uploader 'NarumiUploader', got %v", total)
+	}
+
+	// Search by partial uploader name (case-insensitive LIKE)
+	req = httptest.NewRequest("GET", "/api/videos?search=narumi", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	resp = parseResponse(t, rec)
+	dataMap, _ = resp.Data.(map[string]interface{})
+	total, _ = dataMap["total"].(float64)
+	if int(total) != 1 {
+		t.Errorf("expected 1 result for partial uploader search 'narumi', got %v", total)
+	}
+
+	// Search by title should still work
+	req = httptest.NewRequest("GET", "/api/videos?search=Another", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	resp = parseResponse(t, rec)
+	dataMap, _ = resp.Data.(map[string]interface{})
+	total, _ = dataMap["total"].(float64)
+	if int(total) != 1 {
+		t.Errorf("expected 1 result for title search 'Another', got %v", total)
+	}
+}
