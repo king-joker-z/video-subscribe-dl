@@ -29,8 +29,10 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 		s.lastDouyinCookieCheck = time.Now()
 		if valid, msg := client.ValidateCookie(); !valid {
 			log.Printf("[douyin] ⚠️ Cookie 验证失败: %s", msg)
+			SetDouyinCookieInvalid(msg)
 		} else {
 			log.Printf("[douyin] Cookie 验证通过: %s", msg)
+			SetDouyinCookieValid()
 		}
 	}
 

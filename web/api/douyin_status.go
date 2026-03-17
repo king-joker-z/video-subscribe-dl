@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"time"
+
+	"video-subscribe-dl/internal/scheduler"
 )
 
 // DouyinStatusHandler 抖音暂停状态 API
@@ -23,23 +25,30 @@ func (h *DouyinStatusHandler) SetResumeFunc(fn func()) {
 	h.resumeFunc = fn
 }
 
-// HandleStatus GET /api/douyin/status — 返回抖音暂停状态
+// HandleStatus GET /api/douyin/status — 返回抖音暂停状态 + Cookie 有效性
 func (h *DouyinStatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		apiError(w, CodeMethodNotAllow, "method not allowed")
 		return
 	}
 
+	// Cookie 有效性状态（来自 scheduler 全局状态）
+	cookieValid, cookieMsg := scheduler.GetDouyinCookieStatus()
+
 	if h.getStatus == nil {
 		apiOK(w, map[string]interface{}{
-			"paused": false,
+			"paused":       false,
+			"cookie_valid": cookieValid,
+			"cookie_msg":   cookieMsg,
 		})
 		return
 	}
 
 	paused, reason, pausedAt := h.getStatus()
 	resp := map[string]interface{}{
-		"paused": paused,
+		"paused":       paused,
+		"cookie_valid": cookieValid,
+		"cookie_msg":   cookieMsg,
 	}
 	if paused {
 		resp["reason"] = reason

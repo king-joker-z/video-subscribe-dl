@@ -12,12 +12,18 @@ export function DashboardPage({ onNavigate }) {
   const cooldownRef = useRef(null);
   const [refreshingCred, setRefreshingCred] = useState(false);
   const [activeProgress, setActiveProgress] = useState([]);
+  const [douyinCookieValid, setDouyinCookieValid] = useState(true);
+  const [douyinCookieMsg, setDouyinCookieMsg] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [dash, taskRes] = await Promise.all([api.getDashboard(), api.getTaskStatus()]);
+      const [dash, taskRes, douyinStatus] = await Promise.all([api.getDashboard(), api.getTaskStatus(), api.getDouyinStatus().catch(() => null)]);
       setData(dash.data);
       setTask(taskRes.data);
+      if (douyinStatus?.data) {
+        setDouyinCookieValid(douyinStatus.data.cookie_valid !== false);
+        setDouyinCookieMsg(douyinStatus.data.cookie_msg || '');
+      }
       // 同步风控冷却倒计时
       if (dash.data?.cooldown?.active) {
         setCooldownSec(dash.data.cooldown.remaining_sec || 0);
@@ -135,6 +141,15 @@ export function DashboardPage({ onNavigate }) {
   const credStyle = getCredStatusStyle();
 
   return h('div', { className: 'page-enter space-y-6' },
+    // 抖音 Cookie 失效横幅
+    !douyinCookieValid && h('div', { className: 'bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center gap-3' },
+      h('div', { className: 'text-red-400 text-xl' }, '⚠️'),
+      h('div', { className: 'flex-1' },
+        h('div', { className: 'text-red-300 font-medium' }, '抖音 Cookie 已失效，视频无法下载'),
+        douyinCookieMsg && h('div', { className: 'text-red-400/70 text-sm mt-0.5' }, douyinCookieMsg)
+      ),
+      h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
+    ),
     // 风控冷却横幅
     cooldownSec > 0 && h('div', { className: 'bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center gap-3' },
       h('div', { className: 'text-orange-400 text-xl' }, '⚠️'),
