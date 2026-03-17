@@ -117,8 +117,6 @@ type Download struct {
 	FileSize     int64      `json:"file_size"`
 	Uploader     string     `json:"uploader"`
 	Description  string     `json:"description"`
-	Thumbnail    string     `json:"thumbnail"`
-	ThumbPath    string     `json:"thumb_path"`
 	Duration     int        `json:"duration"`
 	DownloadedAt *time.Time `json:"downloaded_at"`
 	ErrorMessage string     `json:"error_message"`

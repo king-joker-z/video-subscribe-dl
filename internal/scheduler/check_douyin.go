@@ -166,7 +166,6 @@ func (s *Scheduler) checkDouyin(src db.Source) {
 					VideoID:   v.AwemeID,
 					Title:     title,
 					Uploader:  uploaderName,
-					Thumbnail: v.Cover,
 					Status:    "pending",
 					Duration:  v.Duration / 1000,
 				}
@@ -371,7 +370,6 @@ func (s *Scheduler) fullScanDouyin(src db.Source) {
 			VideoID:   v.AwemeID,
 			Title:     v.Title,
 			Uploader:  v.Author,
-			Thumbnail: v.Cover,
 			Status:    "pending",
 			Duration:  v.Duration / 1000,
 		}
@@ -485,7 +483,6 @@ func (s *Scheduler) checkDouyinMix(src db.Source) {
 			VideoID:   v.AwemeID,
 			Title:     title,
 			Uploader:  uploaderName,
-			Thumbnail: v.Cover,
 			Status:    "pending",
 			Duration:  v.Duration / 1000,
 		}

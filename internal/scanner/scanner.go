@@ -82,7 +82,6 @@ func (s *Scanner) ScanAndSync() (int, int, error) {
 			if _, err := os.Stat(nfoPath); os.IsNotExist(err) {
 				desc := getString(vi, "description")
 				uploadDate := getString(vi, "upload_date")
-				thumbnail := getString(vi, "thumbnail")
 
 				pubTime := time.Now()
 				if len(uploadDate) == 8 {
@@ -106,7 +105,6 @@ func (s *Scanner) ScanAndSync() (int, int, error) {
 					Description:  desc,
 					UploaderName: uploader,
 					UploadDate:   pubTime,
-					Thumbnail:    thumbnail,
 					Tags:         tags,
 					WebpageURL:   getString(vi, "webpage_url"),
 				}

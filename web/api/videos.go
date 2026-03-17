@@ -112,7 +112,7 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT d.id, d.source_id, d.video_id, COALESCE(d.title,''), COALESCE(d.filename,''), d.status,
 		       COALESCE(d.file_path,''), d.file_size, COALESCE(d.uploader,''), COALESCE(d.description,''),
-		       COALESCE(d.thumbnail,''), COALESCE(d.thumb_path,''), d.duration,
+		       d.duration,
 		       d.downloaded_at, COALESCE(d.error_message,''),
 		       COALESCE(d.retry_count,0), COALESCE(d.last_error,''),
 		       COALESCE(d.detail_status,0), d.created_at
@@ -134,7 +134,7 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		var dl db.Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
-			&dl.Thumbnail, &dl.ThumbPath, &dl.Duration, &dl.DownloadedAt,
+			&dl.Duration, &dl.DownloadedAt,
 			&dl.ErrorMessage, &dl.RetryCount, &dl.LastError,
 			&dl.DetailStatus, &dl.CreatedAt); err != nil {
 			apiError(w, CodeInternal, "解析数据失败")
@@ -211,7 +211,7 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 	h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 	h.db.ResetRetryCount(id)
 	// 清空旧的 file_path 和 thumb_path
-	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
+	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, downloaded_at = NULL WHERE id = ?", id)
 
 	// 直接提交到下载队列（不依赖 sync 增量拉取）
 	if h.onRedownload != nil {
@@ -233,7 +233,7 @@ func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request
 	}
 
 	// 软删除：标记状态为 deleted，清空文件信息
-	h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+	h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0 WHERE id = ?", id)
 	log.Printf("[video] Soft-deleted record %d", id)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
 }
@@ -281,7 +281,7 @@ func (h *VideosHandler) HandleDeleteFiles(w http.ResponseWriter, r *http.Request
 	util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 
 	// 清空文件路径和大小，但不改状态
-	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0 WHERE id = ?", id)
 
 	log.Printf("[video] Deleted files for %d (%s): %s", id, dl.Title, dl.FilePath)
 	apiOK(w, map[string]interface{}{"id": id, "message": "本地文件已删除"})
@@ -374,7 +374,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 				}
 				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 				h.db.ResetRetryCount(id)
-				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '', downloaded_at = NULL WHERE id = ?", id)
+				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, downloaded_at = NULL WHERE id = ?", id)
 				redownloadIDs = append(redownloadIDs, id)
 				affected++
 			}
@@ -386,7 +386,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			if dl != nil && dl.FilePath != "" {
 				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
 			}
-			h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+			h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0 WHERE id = ?", id)
 			affected++
 		case "restore":
 			dl, _ := h.db.GetDownload(id)
@@ -400,7 +400,7 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
 				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
-				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0 WHERE id = ?", id)
 				affected++
 			}
 		default:
@@ -590,47 +590,5 @@ func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// HandleThumb GET /api/thumb/:id — 封面图
-func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
-	if !MethodGuard("GET", w, r) {
-		return
-	}
-
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/thumb/")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		apiError(w, CodeInvalidParam, "无效的 ID")
-		return
-	}
-
-	dl, err := h.db.GetDownload(id)
-	if err != nil {
-		apiError(w, CodeVideoNotFound, "视频不存在")
-		return
-	}
-
-	// 先尝试本地缩略图
-	if dl.ThumbPath != "" {
-		if _, err := os.Stat(dl.ThumbPath); err == nil {
-			http.ServeFile(w, r, dl.ThumbPath)
-			return
-		}
-	}
-	// 从 file_path 推算
-	if dl.FilePath != "" {
-		ext := filepath.Ext(dl.FilePath)
-		thumbPath := strings.TrimSuffix(dl.FilePath, ext) + "-thumb.jpg"
-		if _, err := os.Stat(thumbPath); err == nil {
-			http.ServeFile(w, r, thumbPath)
-			return
-		}
-	}
-	// 302 到 CDN
-	if dl.Thumbnail != "" {
-		http.Redirect(w, r, dl.Thumbnail, http.StatusFound)
-		return
-	}
-	apiError(w, CodeNotFound, "无封面图")
-}
 
 

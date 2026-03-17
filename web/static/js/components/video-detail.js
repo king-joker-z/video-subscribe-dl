@@ -40,14 +40,12 @@ function extractBVID(videoID) {
 export function VideoDetailModal({ video, onClose, onAction }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [imgError, setImgError] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [progress, setProgress] = useState(null); // SSE 实时进度
   const videoRef = React.useRef(null);
 
   useEffect(() => {
     if (!video) return;
-    setImgError(false);
     setShowPlayer(false);
     setProgress(null);
     setLoading(true);
@@ -94,7 +92,6 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const streamURL = `/api/stream/${v.id}`;
   const canPlay = v.file_path && (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0;
   const isNativePlayable = canPlay && /\.(mp4|m4v|webm|mov)$/i.test(v.file_path);
-  const thumbSrc = `/api/thumb/${v.id}`;
 
   const handleRetry = async () => {
     try { await api.retryVideo(v.id); toast.success('已重试'); if (onAction) onAction(); }
@@ -163,25 +160,6 @@ export function VideoDetailModal({ video, onClose, onAction }) {
           }, h(Icon, { name: 'x', size: 16 }))
         ),
         h('div', { className: 'flex gap-4' },
-          // Thumbnail (hidden when player is shown)
-          !showPlayer && !imgError && h('div', { className: 'flex-shrink-0 w-40 sm:w-48 rounded-lg overflow-hidden bg-slate-900 relative group cursor-pointer',
-            onClick: canPlay ? () => setShowPlayer(true) : undefined
-          },
-            h('img', {
-              src: thumbSrc,
-              className: 'w-full h-auto object-cover rounded-lg',
-              referrerPolicy: 'no-referrer',
-              loading: 'lazy',
-              onError: () => setImgError(true),
-              style: { aspectRatio: '16/10' }
-            }),
-            // Play overlay on thumbnail
-            canPlay && h('div', { className: 'absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors' },
-              h('div', { className: 'w-10 h-10 rounded-full bg-white/90 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg' },
-                h(Icon, { name: 'play', size: 18, className: 'text-slate-900 ml-0.5' })
-              )
-            )
-          ),
           // Title & meta
           h('div', { className: 'flex-1 min-w-0 space-y-2' },
             h('h4', { className: 'text-base font-medium text-slate-100 leading-snug' }, v.title || v.video_id),

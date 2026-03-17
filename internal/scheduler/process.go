@@ -205,7 +205,7 @@ func (s *Scheduler) submitDownloadFlat(src db.Source, videoID string, cid int64,
 	} else {
 		dl := &db.Download{
 			SourceID: src.ID, VideoID: videoID, Title: title,
-			Uploader: uploaderName, Thumbnail: pic, Status: "pending",
+			Uploader: uploaderName, Status: "pending",
 		}
 		dlID, _ = s.db.CreateDownload(dl)
 	}
@@ -259,7 +259,7 @@ func (s *Scheduler) submitDownload(src db.Source, videoID string, cid int64, tit
 	} else {
 		dl := &db.Download{
 			SourceID: src.ID, VideoID: videoID, Title: title,
-			Uploader: uploaderName, Thumbnail: pic, Status: "pending",
+			Uploader: uploaderName, Status: "pending",
 		}
 		dlID, _ = s.db.CreateDownload(dl)
 	}
@@ -356,7 +356,7 @@ func (s *Scheduler) processOneVideo(src db.Source, client *bilibili.Client, bvid
 		if !exists {
 			dl := &db.Download{
 				SourceID: src.ID, VideoID: bvid, Title: title,
-				Uploader: uploaderName, Thumbnail: pic, Status: "charge_blocked",
+				Uploader: uploaderName, Status: "charge_blocked",
 			}
 			s.db.CreateDownload(dl)
 		}
@@ -552,9 +552,9 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		uploaderName = detail.Owner.Name
 	}
 	if detail != nil {
-		s.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Pic, detail.Duration)
+		s.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Duration)
 	} else {
-		s.db.UpdateDownloadMeta(dlID, uploaderName, "", "", 0)
+		s.db.UpdateDownloadMeta(dlID, uploaderName, "", 0)
 	}
 
 	// 从 videoID 中提取真实 BV 号（多P格式为 BVxxx_P2）
@@ -595,7 +595,6 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 			CoinCount: detail.Stat.Coin, DanmakuCount: detail.Stat.Danmaku,
 			ReplyCount: detail.Stat.Reply, FavoriteCount: detail.Stat.Favorite,
 			ShareCount: detail.Stat.Share,
-			Thumbnail:  detail.Pic,
 			WebpageURL: fmt.Sprintf("https://www.bilibili.com/video/%s", actualBvID),
 			TName:      detail.TName,
 		}
@@ -604,34 +603,10 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		}
 	} // end skipNFO
 
-	// 下载封面图并记录路径 (受 SkipOption 控制)
-	detailPic := ""
-	if detail != nil {
-		detailPic = detail.Pic
-	}
-	if !skipPoster && detailPic != "" && result.FilePath != "" {
-		ext := filepath.Ext(result.FilePath)
-		thumbPath := strings.TrimSuffix(result.FilePath, ext) + "-thumb.jpg"
-		if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-			if err := bilibili.DownloadFile(detailPic, thumbPath); err != nil {
-				log.Printf("Thumbnail download failed for %s: %v", videoID, err)
-			} else {
-				s.db.UpdateThumbPath(dlID, thumbPath)
-				log.Printf("Thumbnail saved: %s", thumbPath)
-			}
-		} else {
-			// 已存在，也更新路径到数据库
-			s.db.UpdateThumbPath(dlID, thumbPath)
-		}
-	}
-
 	// 更新 detail_status 位图
 	statusBits := db.StatusBitVideo
 	if !skipNFO && detail != nil {
 		statusBits |= db.StatusBitNFO
-	}
-	if !skipPoster && detailPic != "" {
-		statusBits |= db.StatusBitThumb
 	}
 	if result.DanmakuDone {
 		statusBits |= db.StatusBitDanmaku

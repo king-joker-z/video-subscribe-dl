@@ -30,7 +30,6 @@ type VideoMeta struct {
 	ReplyCount    int64
 	FavoriteCount int64
 	ShareCount    int64
-	Thumbnail     string
 	WebpageURL    string
 	TName         string // B站分区名称
 }

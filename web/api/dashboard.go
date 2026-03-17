@@ -149,8 +149,6 @@ func (h *DashboardHandler) HandleDashboard(w http.ResponseWriter, r *http.Reques
 	// 最近下载（前10条，去掉图片URL减少前端请求）
 	if recent, err := h.db.GetDownloads(10); err == nil {
 		for i := range recent {
-			recent[i].Thumbnail = ""
-			recent[i].ThumbPath = ""
 		}
 		result["recent_downloads"] = recent
 	}

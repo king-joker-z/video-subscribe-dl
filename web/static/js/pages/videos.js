@@ -431,15 +431,13 @@ function DouyinLogo({ size = 40 }) {
   );
 }
 
-// 视频卡片组件（带封面图）
+// 视频卡片组件
 function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction, selected = false, onSelect }) {
-  const [imgError, setImgError] = useState(false);
-  const thumbSrc = `/api/thumb/${v.id}`;
   const isDownloading = v.status === 'downloading';
   const platform = detectPlatform(v.video_id);
 
-  // 缩略图加载失败时显示对应平台 logo
-  const renderThumbFallback = () => {
+  // 平台占位背景
+  const renderPlaceholder = () => {
     if (platform === 'bilibili') {
       return h('div', { className: 'w-full h-full flex items-center justify-center', style: { background: '#00AEEC' } },
         h(BilibiliLogo, { size: 48 })
@@ -460,7 +458,7 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
     className: cn('group overflow-hidden', selected ? 'ring-2 ring-blue-500 ring-inset' : (isDownloading ? 'border-l-4 border-blue-500' : '')),
     onClick
   },
-    // 封面图区域
+    // 封面占位区域（不再请求缩略图）
     h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-900 overflow-hidden' },
       // 选择 checkbox（左上角覆盖层）
       onSelect && h('div', {
@@ -473,15 +471,7 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
           selected && h(Icon, { name: 'check', size: 12, className: 'text-white' })
         )
       ),
-      !imgError
-        ? h('img', {
-            src: thumbSrc,
-            className: 'w-full h-full object-cover',
-            referrerPolicy: 'no-referrer',
-            loading: 'lazy',
-            onError: () => setImgError(true)
-          })
-        : renderThumbFallback(),
+      renderPlaceholder(),
       // 时长标签
       v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/75 text-white text-xs px-1.5 py-0.5 rounded' },
         formatDurationShort(v.duration)

@@ -7,7 +7,6 @@ import (
 
 // 下载状态位图常量
 const (
-	StatusBitThumb    = 1  // 封面已下载
 	StatusBitVideo    = 2  // 视频已下载
 	StatusBitNFO      = 4  // NFO 已生成
 	StatusBitDanmaku  = 8  // 弹幕已下载
@@ -16,9 +15,9 @@ const (
 
 func (d *DB) CreateDownload(dl *Download) (int64, error) {
 	result, err := d.Exec(`
-		INSERT OR IGNORE INTO downloads (source_id, video_id, title, filename, status, uploader, description, thumbnail, duration)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, dl.SourceID, dl.VideoID, dl.Title, dl.Filename, dl.Status, dl.Uploader, dl.Description, dl.Thumbnail, dl.Duration)
+		INSERT OR IGNORE INTO downloads (source_id, video_id, title, filename, status, uploader, description, duration)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, dl.SourceID, dl.VideoID, dl.Title, dl.Filename, dl.Status, dl.Uploader, dl.Description, dl.Duration)
 	if err != nil {
 		return 0, err
 	}
@@ -29,7 +28,7 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status, 
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''), 
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       duration, downloaded_at, COALESCE(error_message,''), created_at
 		FROM downloads ORDER BY created_at DESC LIMIT ?
 	`, limit)
 	if err != nil {
@@ -41,8 +40,8 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
-			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
@@ -57,7 +56,7 @@ func (d *DB) GetDownloadsByStatus(status string, limit int) ([]Download, error) 
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status, 
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''), 
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       duration, downloaded_at, COALESCE(error_message,''), created_at
 		FROM downloads WHERE status = ? ORDER BY created_at DESC LIMIT ?
 	`, status, limit)
 	if err != nil {
@@ -69,8 +68,8 @@ func (d *DB) GetDownloadsByStatus(status string, limit int) ([]Download, error) 
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
-			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
@@ -113,7 +112,6 @@ func (d *DB) GetRetryableDownloads(maxRetries int, limit int) ([]Download, error
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''),
 		       duration, downloaded_at, COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
 		FROM downloads
 		WHERE status = 'failed' AND COALESCE(retry_count,0) < ?
@@ -128,7 +126,7 @@ func (d *DB) GetRetryableDownloads(maxRetries int, limit int) ([]Download, error
 		var dl Download
 		var downloadedAt sql.NullTime
 		err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename, &dl.Status,
-			&dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail, &dl.ThumbPath,
+			&dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
 			&dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.RetryCount, &dl.LastError, &dl.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -157,16 +155,10 @@ func (d *DB) MarkPermanentFailed(maxRetries int) (int64, error) {
 }
 
 // UpdateDownloadMeta 更新下载记录的元数据（下载完成后从 info.json 补充）
-func (d *DB) UpdateDownloadMeta(id int64, uploader, description, thumbnail string, duration int) error {
+func (d *DB) UpdateDownloadMeta(id int64, uploader, description string, duration int) error {
 	_, err := d.Exec(`
-		UPDATE downloads SET uploader=?, description=?, thumbnail=?, duration=? WHERE id = ?
-	`, uploader, description, thumbnail, duration, id)
-	return err
-}
-
-// UpdateThumbPath 更新封面图本地路径
-func (d *DB) UpdateThumbPath(id int64, thumbPath string) error {
-	_, err := d.Exec("UPDATE downloads SET thumb_path=? WHERE id=?", thumbPath, id)
+		UPDATE downloads SET uploader=?, description=?, duration=? WHERE id = ?
+	`, uploader, description, duration, id)
 	return err
 }
 
@@ -207,7 +199,7 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       duration, downloaded_at, COALESCE(error_message,''), created_at
 		FROM downloads WHERE uploader = ? ORDER BY created_at DESC LIMIT ?
 	`, uploader, limit)
 	if err != nil {
@@ -219,8 +211,8 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
-			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
@@ -236,7 +228,7 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       duration, downloaded_at, COALESCE(error_message,''), created_at
 		FROM downloads
 	`)
 	if err != nil {
@@ -248,8 +240,8 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
-			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
@@ -297,7 +289,6 @@ func (d *DB) GetDownload(id int64) (*Download, error) {
 	row := d.QueryRow(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''),
 		       duration, downloaded_at, COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''),
 		       COALESCE(detail_status,0), created_at
 		FROM downloads WHERE id = ?
@@ -305,7 +296,7 @@ func (d *DB) GetDownload(id int64) (*Download, error) {
 	var dl Download
 	var downloadedAt sql.NullTime
 	err := row.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename, &dl.Status,
-		&dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail, &dl.ThumbPath,
+		&dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
 		&dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.RetryCount, &dl.LastError,
 		&dl.DetailStatus, &dl.CreatedAt)
 	if err != nil {
@@ -353,7 +344,6 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 	rows, err := d.Query(`
 		SELECT dl.id, dl.source_id, dl.video_id, COALESCE(dl.title,''), COALESCE(dl.filename,''), dl.status,
 		       COALESCE(dl.file_path,''), dl.file_size, COALESCE(dl.uploader,''), COALESCE(dl.description,''),
-		       COALESCE(dl.thumbnail,''), COALESCE(dl.thumb_path,''),
 		       dl.duration, dl.downloaded_at, COALESCE(dl.error_message,''), dl.created_at
 		FROM downloads dl
 		JOIN sources s ON s.id = dl.source_id
@@ -369,8 +359,8 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
-			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)
@@ -494,8 +484,8 @@ func (d *DB) GetDownloadsByUploaderPaged(uploader, status string, page, pageSize
 	// 分页（按状态优先级排序）
 	query := fmt.Sprintf(`
 		SELECT id, source_id, video_id, title, status, file_path,
-			COALESCE(uploader,''), COALESCE(thumbnail,''), COALESCE(description,''),
-			COALESCE(duration,0), COALESCE(thumb_path,''),
+			COALESCE(uploader,''), COALESCE(description,''),
+			COALESCE(duration,0),
 			COALESCE(retry_count,0), COALESCE(last_error,''), created_at
 		FROM downloads d %s
 		ORDER BY
@@ -524,8 +514,8 @@ func (d *DB) GetDownloadsByUploaderPaged(uploader, status string, page, pageSize
 	for rows.Next() {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title,
-			&dl.Status, &dl.FilePath, &dl.Uploader, &dl.Thumbnail, &dl.Description,
-			&dl.Duration, &dl.ThumbPath, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
+			&dl.Status, &dl.FilePath, &dl.Uploader, &dl.Description,
+			&dl.Duration, &dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		downloads = append(downloads, dl)

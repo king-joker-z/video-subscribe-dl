@@ -91,13 +91,12 @@ func (h *QuickDownloadHandler) handleDouyinQuickDownload(w http.ResponseWriter, 
 	}
 
 	dl := &db.Download{
-		SourceID:  0,
-		VideoID:   awemeID,
-		Title:     title,
-		Uploader:  uploaderName,
-		Thumbnail: detail.Cover,
-		Status:    "pending",
-		Duration:  detail.Duration / 1000,
+		SourceID: 0,
+		VideoID:  awemeID,
+		Title:    title,
+		Uploader: uploaderName,
+		Status:   "pending",
+		Duration: detail.Duration / 1000,
 	}
 	dlID, err := h.db.CreateDownload(dl)
 	if err != nil {
@@ -219,17 +218,9 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 
 	log.Printf("[quickdl·douyin] Downloaded: %s -> %s (%.1f MB)", awemeID, videoFilePath, float64(fileSize)/(1024*1024))
 
-	// 下载封面
 	skipPosterStr, _ := h.db.GetSetting("skip_poster")
 	skipPoster := skipPosterStr == "true"
-	if !skipPoster && detail.Cover != "" {
-		thumbPath := filepath.Join(outputDir, safeTitle+" ["+awemeID+"]-poster.jpg")
-		if err := douyin.DownloadThumb(detail.Cover, thumbPath); err != nil {
-			log.Printf("[quickdl·douyin] Download cover failed: %v", err)
-		} else {
-			h.db.UpdateThumbPath(dlID, thumbPath)
-		}
-	}
+	_ = skipPoster
 
 	// 生成 NFO
 	skipNFOStr, _ := h.db.GetSetting("skip_nfo")
@@ -242,9 +233,8 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 			Description:  detail.Desc,
 			UploaderName: uploaderName,
 			UploadDate:   detail.CreateTimeUnix(),
-			Duration:     detail.Duration / 1000,
-			Thumbnail:    detail.Cover,
-			WebpageURL:   fmt.Sprintf("https://www.douyin.com/video/%s", awemeID),
+			Duration:   detail.Duration / 1000,
+			WebpageURL: fmt.Sprintf("https://www.douyin.com/video/%s", awemeID),
 			LikeCount:    detail.DiggCount,
 			ShareCount:   detail.ShareCount,
 			ReplyCount:   detail.CommentCount,
@@ -256,14 +246,11 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 
 	// 更新 DB
 	h.db.UpdateDownloadStatus(dlID, "completed", videoFilePath, fileSize, "")
-	h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Cover, detail.Duration/1000)
+	h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Duration/1000)
 
 	statusBits := db.StatusBitVideo
 	if !skipNFO {
 		statusBits |= db.StatusBitNFO
-	}
-	if !skipPoster && detail.Cover != "" {
-		statusBits |= db.StatusBitThumb
 	}
 	h.db.UpdateDetailStatus(dlID, statusBits)
 
@@ -371,12 +358,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 		return
 	}
 
-	// 下载封面
-	skipPosterStr, _ := h.db.GetSetting("skip_poster")
-	if skipPosterStr != "true" && detail.Cover != "" {
-		coverPath := filepath.Join(noteDir, "cover.jpg")
-		douyin.DownloadThumb(detail.Cover, coverPath)
-	}
+
 
 	// 生成 NFO
 	skipNFOStr, _ := h.db.GetSetting("skip_nfo")
@@ -385,7 +367,6 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 			Platform: "douyin",
 			BvID: awemeID, Title: title, Description: detail.Desc,
 			UploaderName: uploaderName, UploadDate: detail.CreateTimeUnix(),
-			Thumbnail: detail.Cover,
 			WebpageURL: fmt.Sprintf("https://www.douyin.com/note/%s", awemeID),
 			LikeCount: detail.DiggCount, ShareCount: detail.ShareCount, ReplyCount: detail.CommentCount,
 		}
@@ -394,7 +375,7 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 	}
 
 	h.db.UpdateDownloadStatus(dlID, "completed", noteDir, totalSize, "")
-	h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Cover, 0)
+	h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, 0)
 
 	if h.notifier != nil {
 		h.notifier.Send(notify.EventDownloadComplete,

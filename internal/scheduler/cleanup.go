@@ -60,7 +60,7 @@ func (s *Scheduler) RunAutoCleanup() *CleanupResult {
 		// Delete associated files in the same directory (NFO, thumb, danmaku)
 		dir := filepath.Dir(dl.FilePath)
 		baseName := strings.TrimSuffix(filepath.Base(dl.FilePath), filepath.Ext(dl.FilePath))
-		associatedExts := []string{".nfo", "-thumb.jpg", ".danmaku.ass", ".danmaku.xml"}
+		associatedExts := []string{".nfo", ".danmaku.ass", ".danmaku.xml"}
 		for _, ext := range associatedExts {
 			assocPath := filepath.Join(dir, baseName+ext)
 			os.Remove(assocPath) // best effort, ignore errors
@@ -145,7 +145,7 @@ func (s *Scheduler) RunDiskPressureCleanup() *CleanupResult {
 		// Clean associated files
 		dir := filepath.Dir(dl.FilePath)
 		baseName := strings.TrimSuffix(filepath.Base(dl.FilePath), filepath.Ext(dl.FilePath))
-		for _, ext := range []string{".nfo", "-thumb.jpg", ".danmaku.ass"} {
+		for _, ext := range []string{".nfo", ".danmaku.ass"} {
 			os.Remove(filepath.Join(dir, baseName+ext))
 		}
 		removeEmptyDirs(dir)
