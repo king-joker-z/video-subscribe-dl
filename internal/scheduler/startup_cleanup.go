@@ -117,7 +117,7 @@ func (s *Scheduler) resetDownloadsForDir(dirPath string) {
 	// 匹配 file_path 以该目录开头的记录
 	pattern := dirPath + "%"
 	result, err := s.db.Exec(
-		"UPDATE downloads SET status = 'pending', file_path = '', file_size = 0, error_message = 'reset by startup cleanup' WHERE file_path LIKE ? AND status IN ('completed', 'relocated')",
+		"UPDATE downloads SET status = 'pending', file_path = '', file_size = 0, thumb_path = '', error_message = 'reset by startup cleanup' WHERE file_path LIKE ? AND status IN ('completed', 'relocated')",
 		pattern,
 	)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 // associatedExts 视频关联文件扩展名
 var associatedExts = []string{
 	".nfo",
+	"-thumb.jpg",
 	".danmaku.ass",
 	".danmaku.xml",
 }

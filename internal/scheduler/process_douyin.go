@@ -164,6 +164,14 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	log.Printf("[douyin-dl] Downloaded: %s → %s (%.1f MB)", dl.VideoID, videoFilePath, float64(fileSize)/(1024*1024))
 
+	// Step 5: 下载封面
+	if !src.SkipPoster && detail.Cover != "" {
+		thumbPath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
+		if err := douyin.DownloadThumb(detail.Cover, thumbPath); err != nil {
+			log.Printf("[douyin-dl] Download cover failed for %s: %v", dl.VideoID, err)
+		}
+	}
+
 	// Step 6: 生成 NFO
 	if !src.SkipNFO {
 		meta := &nfo.VideoMeta{
@@ -174,6 +182,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 			UploaderName: uploaderName,
 			UploadDate:   detail.CreateTimeUnix(),
 			Duration:     detail.Duration / 1000,
+			Thumbnail:    detail.Cover,
 			WebpageURL:   douyin.BuildVideoWebURL(dl.VideoID),
 			LikeCount:    detail.DiggCount,
 			ShareCount:   detail.ShareCount,
@@ -186,7 +195,7 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 
 	// Step 7: 更新 DB
 	s.db.UpdateDownloadStatus(dl.ID, "completed", videoFilePath, fileSize, "")
-	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Duration/1000)
+	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, detail.Duration/1000)
 
 	s.notifier.Send(notify.EventDownloadComplete, "抖音视频下载完成: "+title,
 		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(fileSize)/(1024*1024)))
@@ -275,6 +284,14 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 	log.Printf("[douyin-note] Downloaded %d/%d images for %s (%.1f MB total)",
 		successCount, len(detail.Images), dl.VideoID, float64(totalSize)/(1024*1024))
 
+	// 下载封面（使用第一张图作为封面）
+	if !src.SkipPoster && detail.Cover != "" {
+		coverPath := filepath.Join(noteDir, "cover.jpg")
+		if err := douyin.DownloadThumb(detail.Cover, coverPath); err != nil {
+			log.Printf("[douyin-note] Download cover failed: %v", err)
+		}
+	}
+
 	// 生成 NFO
 	if !src.SkipNFO {
 		meta := &nfo.VideoMeta{
@@ -284,6 +301,7 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 			Description:  detail.Desc,
 			UploaderName: uploaderName,
 			UploadDate:   detail.CreateTimeUnix(),
+			Thumbnail:    detail.Cover,
 			WebpageURL:   douyin.BuildNoteWebURL(dl.VideoID),
 			LikeCount:    detail.DiggCount,
 			ShareCount:   detail.ShareCount,
@@ -297,7 +315,7 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 
 	// 更新 DB —— 存目录路径
 	s.db.UpdateDownloadStatus(dl.ID, "completed", noteDir, totalSize, "")
-	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, 0)
+	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, 0)
 
 	s.notifier.Send(notify.EventDownloadComplete,
 		fmt.Sprintf("抖音图集下载完成: %s (%d张)", title, successCount),

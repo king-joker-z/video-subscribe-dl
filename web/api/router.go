@@ -171,6 +171,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		rt.videos.HandleDetectCharge(w, r)
 	})
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
+	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 
 	// Video Stream (playback)
 	mux.HandleFunc("/api/stream/", rt.stream.HandleStream)

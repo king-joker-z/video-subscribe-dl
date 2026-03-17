@@ -147,6 +147,7 @@ func (s *Scheduler) checkUP(src db.Source) {
 						VideoID:   v.BvID,
 						Title:     v.Title,
 						Uploader:  uploaderName,
+						Thumbnail: v.Pic,
 						Status:    "pending",
 					}
 					if _, err := s.db.CreateDownload(dl); err != nil {
@@ -265,6 +266,7 @@ func (s *Scheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid i
 					VideoID:   v.BvID,
 					Title:     v.Title,
 					Uploader:  uploaderName,
+					Thumbnail: v.Cover,
 					Status:    "pending",
 				}
 				if _, err := s.db.CreateDownload(dl); err != nil {
@@ -431,6 +433,7 @@ func (s *Scheduler) fullScanUP(src db.Source) {
 			VideoID:   v.BvID,
 			Title:     v.Title,
 			Uploader:  uploaderName,
+			Thumbnail: v.Pic,
 			Status:    "pending",
 		}
 		if _, err := s.db.CreateDownload(dl); err != nil {

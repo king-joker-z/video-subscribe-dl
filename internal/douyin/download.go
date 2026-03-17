@@ -32,6 +32,11 @@ var sharedVideoClient = &http.Client{
 	Transport: sharedDownloadTransport,
 }
 
+// sharedThumbClient 用于封面等小文件下载的复用 HTTP Client（短超时）
+var sharedThumbClient = &http.Client{
+	Timeout:   30 * time.Second,
+	Transport: sharedDownloadTransport,
+}
 
 // CloseDownloadClients 关闭共享下载 Transport 的空闲连接，释放资源。
 // 应在程序退出或 DouyinClient.Close() 时调用。
@@ -92,4 +97,34 @@ func DownloadFile(fileURL, destPath string) (int64, error) {
 	return written, nil
 }
 
+// DownloadThumb 下载封面图到 destPath。若已存在则跳过。
+func DownloadThumb(thumbURL, destPath string) error {
+	if _, err := os.Stat(destPath); err == nil {
+		return nil
+	}
 
+	req, err := http.NewRequest("GET", thumbURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
+
+	resp, err := sharedThumbClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("thumb download returned %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, resp.Body)
+	return err
+}

@@ -180,11 +180,12 @@ func (h *QuickDownloadHandler) HandleQuickDownload(w http.ResponseWriter, r *htt
 
 	if len(pages) == 1 {
 		dl := &db.Download{
-			SourceID: 0,
-			VideoID:  bvid,
-			Title:    detail.Title,
-			Uploader: uploaderName,
-			Status:   "pending",
+			SourceID:  0,
+			VideoID:   bvid,
+			Title:     detail.Title,
+			Uploader:  uploaderName,
+			Thumbnail: detail.Pic,
+			Status:    "pending",
 		}
 		dlID, err := h.db.CreateDownload(dl)
 		if err != nil {
@@ -258,11 +259,12 @@ func (h *QuickDownloadHandler) HandleQuickDownload(w http.ResponseWriter, r *htt
 			partTitle := fmt.Sprintf("S01E%02d - %s [%s]", page.Page, page.PartName, bvid)
 
 			dl := &db.Download{
-				SourceID: 0,
-				VideoID:  partVideoID,
-				Title:    partTitle,
-				Uploader: uploaderName,
-				Status:   "pending",
+				SourceID:  0,
+				VideoID:   partVideoID,
+				Title:     partTitle,
+				Uploader:  uploaderName,
+				Thumbnail: detail.Pic,
+				Status:    "pending",
 			}
 			dlID, err := h.db.CreateDownload(dl)
 			if err != nil {
@@ -456,7 +458,7 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 
 	h.db.UpdateDownloadStatus(dlID, "completed", result.FilePath, result.FileSize, "")
 	if detail != nil {
-		h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Duration)
+		h.db.UpdateDownloadMeta(dlID, uploaderName, detail.Desc, detail.Pic, detail.Duration)
 	}
 
 	actualBvID := videoID
@@ -480,7 +482,7 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 				Tags: tags, ViewCount: detail.Stat.View, LikeCount: detail.Stat.Like,
 				CoinCount: detail.Stat.Coin, DanmakuCount: detail.Stat.Danmaku,
 				ReplyCount: detail.Stat.Reply, FavoriteCount: detail.Stat.Favorite,
-				ShareCount: detail.Stat.Share,
+				ShareCount: detail.Stat.Share, Thumbnail: detail.Pic,
 				WebpageURL: fmt.Sprintf("https://www.bilibili.com/video/%s", actualBvID),
 				TName:      detail.TName,
 			}
@@ -488,9 +490,24 @@ func (h *QuickDownloadHandler) handleResult(dlID int64, videoID string, detail *
 		}
 	}
 
+	if !skipPoster && detail != nil && detail.Pic != "" && result.FilePath != "" {
+		ext := filepath.Ext(result.FilePath)
+		thumbPath := strings.TrimSuffix(result.FilePath, ext) + "-thumb.jpg"
+		if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+			if err := bilibili.DownloadFile(detail.Pic, thumbPath); err == nil {
+				h.db.UpdateThumbPath(dlID, thumbPath)
+			}
+		} else {
+			h.db.UpdateThumbPath(dlID, thumbPath)
+		}
+	}
+
 	statusBits := db.StatusBitVideo
 	if !skipNFO && detail != nil {
 		statusBits |= db.StatusBitNFO
+	}
+	if !skipPoster && detail != nil && detail.Pic != "" {
+		statusBits |= db.StatusBitThumb
 	}
 	if result.DanmakuDone {
 		statusBits |= db.StatusBitDanmaku
