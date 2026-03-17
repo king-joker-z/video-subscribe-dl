@@ -4,6 +4,11 @@ import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card,
 import { VideoDetailModal } from '../components/video-detail.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
+// 检测是否手机端（<= 768px）
+function isMobileViewport() {
+  return typeof window !== 'undefined' && window.innerWidth <= 768;
+}
+
 export function VideosPage({ params = {} } = {}) {
   const [videos, setVideos] = useState([]);
   const [total, setTotal] = useState(0);
@@ -17,11 +22,26 @@ export function VideosPage({ params = {} } = {}) {
   const [sort, setSort] = useState('created_desc');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
-  const [viewMode, setViewMode] = useState('table');
+  // 手机端默认卡片视图，桌面端默认表格视图
+  const [viewMode, setViewMode] = useState(() => isMobileViewport() ? 'card' : 'table');
+  const [isMobile, setIsMobile] = useState(() => isMobileViewport());
+  const [filterExpanded, setFilterExpanded] = useState(() => !isMobileViewport());
   const [detailVideo, setDetailVideo] = useState(null);
   const searchTimer = useRef(null);
   const [progress, setProgress] = useState([]);
   const [batchLoading, setBatchLoading] = useState(false);
+
+  // 监听窗口 resize，更新 isMobile 状态
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = isMobileViewport();
+      setIsMobile(mobile);
+      // 切到移动端时强制卡片视图，切回桌面不强制改变
+      if (mobile) setViewMode('card');
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,12 +207,24 @@ export function VideosPage({ params = {} } = {}) {
           title: uploader ? `下载 ${uploader} 的全部待处理视频` : '下载全部待处理视频'
         }, uploader ? '下载该UP主Pending' : '下载全部Pending'),
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
-        h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
-        h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
+        // 手机端隐藏视图切换（强制卡片视图）
+        !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
+        !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
       )
     ),
-    // 筛选栏
-    h('div', { className: 'flex items-center gap-3 flex-wrap' },
+    // 筛选栏（手机端可折叠）
+    h('div', { className: 'space-y-2' },
+      // 手机端折叠控制行
+      isMobile && h('button', {
+        onClick: () => setFilterExpanded(v => !v),
+        className: 'flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors w-full'
+      },
+        h(Icon, { name: filterExpanded ? 'chevron-up' : 'chevron-down', size: 14 }),
+        h('span', null, filterExpanded ? '收起筛选' : '展开筛选'),
+        // 有激活筛选时显示小徽章
+        (status || search || uploader || sourceId) && h('span', { className: 'ml-auto text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full' }, '已筛选')
+      ),
+    (filterExpanded || !isMobile) && h('div', { className: 'flex items-center gap-3 flex-wrap' },
       h('div', { className: 'relative' },
         h(Icon, { name: 'search', size: 16, className: 'absolute left-3 top-1/2 -translate-y-1/2 text-slate-500' }),
         h('input', {
@@ -229,17 +261,29 @@ export function VideosPage({ params = {} } = {}) {
         h('option', { value: 'size_desc' }, '文件最大'),
         h('option', { value: 'downloaded_desc' }, '最近下载'),
       ),
-    ),
+    )), // 结束 filterExpanded 条件 + 外层 space-y-2 div
     // 批量操作栏
-    selected.size > 0 && h('div', { className: 'flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-lg px-4 py-2' },
-      h('span', { className: 'text-sm text-blue-400' }, batchLoading ? `处理中...` : `已选 ${selected.size} 项`),
-      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '重试'),
-      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '重新下载'),
-      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '取消'),
-      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '删除文件'),
-      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '恢复'),
-      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading }, '删除'),
-      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto', disabled: batchLoading }, '清除选择')
+    selected.size > 0 && h('div', { className: 'flex items-center gap-2 flex-wrap bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2' },
+      h('span', { className: 'text-sm text-blue-400 mr-1' }, batchLoading ? '处理中...' : `已选 ${selected.size} 项`),
+      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重试' },
+        h(Icon, { name: 'refresh', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重试')
+      ),
+      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重新下载' },
+        h(Icon, { name: 'download', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重下')
+      ),
+      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '取消下载' },
+        h(Icon, { name: 'x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '取消')
+      ),
+      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '删除文件' },
+        h(Icon, { name: 'file-x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删文件')
+      ),
+      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '恢复' },
+        h(Icon, { name: 'undo', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '恢复')
+      ),
+      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading, title: '删除' },
+        h(Icon, { name: 'trash', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删除')
+      ),
+      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto', disabled: batchLoading }, isMobile ? h(Icon, { name: 'x-circle', size: 14 }) : '清除选择')
     ),
     // 内容
     loading
@@ -346,7 +390,9 @@ export function VideosPage({ params = {} } = {}) {
               videos.map(v => h(VideoCard, {
                 key: v.id, video: v,
                 progress: getProgress(v.id, v.video_id),
-                onClick: () => setDetailVideo(v)
+                isMobile,
+                onClick: () => setDetailVideo(v),
+                onAction: load
               }))
             ),
     h(Pagination, { page, pageSize, total, onChange: setPage })
@@ -354,7 +400,7 @@ export function VideosPage({ params = {} } = {}) {
 }
 
 // 视频卡片组件（带封面图）
-function VideoCard({ video: v, progress: prog, onClick }) {
+function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction }) {
   const [imgError, setImgError] = useState(false);
   const thumbSrc = `/api/thumb/${v.id}`;
 
@@ -395,6 +441,25 @@ function VideoCard({ video: v, progress: prog, onClick }) {
       h('div', { className: 'flex items-center gap-2 mt-2' },
         h(StatusBadge, { status: v.status }),
         v.file_size > 0 && h('span', { className: 'text-xs text-slate-500' }, formatBytes(v.file_size))
+      ),
+      // 手机端快捷操作按钮（触摸区域加大，min-h-9）
+      isMobile && h('div', { className: 'flex items-center gap-2 mt-3 pt-2 border-t border-slate-700/40' },
+        v.status === 'pending' && h('button', {
+          onClick: async (e) => { e.stopPropagation(); try { await api.redownloadVideo(v.id); if (onAction) onAction(); } catch {} },
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-green-500/15 text-green-400 text-xs font-medium active:bg-green-500/30'
+        }, h(Icon, { name: 'download', size: 14 }), '下载'),
+        (v.status === 'failed' || v.status === 'permanent_failed') && h('button', {
+          onClick: async (e) => { e.stopPropagation(); try { await api.retryVideo(v.id); if (onAction) onAction(); } catch {} },
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-slate-700/60 text-slate-300 text-xs font-medium active:bg-slate-700'
+        }, h(Icon, { name: 'refresh', size: 14 }), '重试'),
+        (v.status === 'completed' || v.status === 'relocated') && h('button', {
+          onClick: async (e) => { e.stopPropagation(); if (!confirm('删除本地文件（保留记录）？')) return; try { await api.deleteVideoFiles(v.id); if (onAction) onAction(); } catch {} },
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-orange-500/15 text-orange-400 text-xs font-medium active:bg-orange-500/30'
+        }, h(Icon, { name: 'file-x', size: 14 }), '删文件'),
+        v.status === 'deleted' && h('button', {
+          onClick: async (e) => { e.stopPropagation(); if (!confirm('恢复并重新下载？')) return; try { await api.restoreVideo(v.id); if (onAction) onAction(); } catch {} },
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-medium active:bg-emerald-500/30'
+        }, h(Icon, { name: 'undo', size: 14 }), '恢复')
       )
     )
   );
