@@ -88,7 +88,19 @@ export function LogsPage() {
   const handleScroll = () => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    setAutoScroll(scrollHeight - scrollTop - clientHeight < 50);
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 20;
+    if (!atBottom) {
+      setAutoScroll(false);
+    } else {
+      setAutoScroll(true);
+    }
+  };
+
+  const scrollToBottom = () => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      setAutoScroll(true);
+    }
   };
 
   // 清空日志：调 API 清后端 buffer → 清前端数组 → 断开重连
@@ -111,8 +123,10 @@ export function LogsPage() {
 
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => {
     const msg = (l.message || l.msg || '').toLowerCase();
-    if (filter === 'error') return l.level === 'ERROR' || l.level === 'error' || msg.includes('error') || msg.includes('fail');
-    if (filter === 'warn') return l.level === 'WARN' || l.level === 'warn' || msg.includes('warn');
+    const level = (l.level || '').toLowerCase();
+    if (filter === 'error') return level === 'error' || msg.includes('[error]') || msg.includes('error') || msg.includes('fail');
+    if (filter === 'warn') return level === 'warn' || msg.includes('[warn]');
+    if (filter === 'info') return level === 'info' || msg.includes('[info]');
     return true;
   });
 
@@ -128,9 +142,10 @@ export function LogsPage() {
   };
 
   const filters = [
-    { value: 'all', label: '全部' },
-    { value: 'error', label: 'ERROR' },
+    { value: 'all', label: 'ALL' },
+    { value: 'info', label: 'INFO' },
     { value: 'warn', label: 'WARN' },
+    { value: 'error', label: 'ERROR' },
   ];
 
   return h('div', { className: 'page-enter flex flex-col h-[calc(100vh-8rem)]' },
@@ -159,24 +174,31 @@ export function LogsPage() {
         }, '🗑 清空')
       )
     ),
-    // 日志容器
-    h('div', {
-      ref: containerRef,
-      onScroll: handleScroll,
-      className: 'flex-1 bg-slate-900/80 border border-slate-700/50 rounded-xl p-4 overflow-y-auto font-mono text-xs leading-5'
-    },
-      filteredLogs.length === 0
-        ? h('div', { className: 'text-slate-600 text-center py-8' }, '等待日志...')
-        : filteredLogs.map((l, i) => {
-            const time = l.time ? new Date(l.time).toLocaleTimeString('zh-CN') : '';
-            const level = l.level || '';
-            const msg = l.message || l.msg || JSON.stringify(l);
-            return h('div', { key: i, className: 'flex gap-2 hover:bg-slate-800/50 py-0.5 px-1 rounded' },
-              time && h('span', { className: 'text-slate-600 flex-shrink-0' }, time),
-              level && h('span', { className: cn('flex-shrink-0 w-12', levelColors[level] || 'text-slate-400') }, level),
-              h('span', { className: 'text-slate-300 break-all' }, msg)
-            );
-          })
+    // 日志容器（relative wrapper for floating button）
+    h('div', { className: 'flex-1 relative' },
+      h('div', {
+        ref: containerRef,
+        onScroll: handleScroll,
+        className: 'h-full bg-slate-900/80 border border-slate-700/50 rounded-xl p-4 overflow-y-auto font-mono text-xs leading-5'
+      },
+        filteredLogs.length === 0
+          ? h('div', { className: 'text-slate-600 text-center py-8' }, '等待日志...')
+          : filteredLogs.map((l, i) => {
+              const time = l.time ? new Date(l.time).toLocaleTimeString('zh-CN') : '';
+              const level = l.level || '';
+              const msg = l.message || l.msg || JSON.stringify(l);
+              return h('div', { key: i, className: 'flex gap-2 hover:bg-slate-800/50 py-0.5 px-1 rounded' },
+                time && h('span', { className: 'text-slate-600 flex-shrink-0' }, time),
+                level && h('span', { className: cn('flex-shrink-0 w-12', levelColors[level] || 'text-slate-400') }, level),
+                h('span', { className: 'text-slate-300 break-all' }, msg)
+              );
+            })
+      ),
+      // 浮动"回到底部"按钮（仅 autoScroll=false 时显示）
+      !autoScroll && h('button', {
+        onClick: scrollToBottom,
+        className: 'absolute bottom-4 right-6 px-3 py-1.5 rounded-lg bg-slate-700 border border-slate-600 text-slate-300 text-xs font-medium shadow-lg hover:bg-slate-600 transition-colors flex items-center gap-1'
+      }, '↓ 回到底部')
     )
   );
 }
