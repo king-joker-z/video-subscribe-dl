@@ -12,6 +12,7 @@ type DouyinAPI interface {
 	ResolveShareURL(shareURL string) (*douyin.ResolveResult, error)
 	GetVideoDetail(videoID string) (*douyin.DouyinVideo, error)
 	ResolveVideoURL(videoURL string) (string, error)
+	GetMixVideos(mixID string) ([]douyin.DouyinVideo, error)
 }
 
 // douyinClientAdapter 将 *douyin.DouyinClient 适配到 DouyinAPI 接口

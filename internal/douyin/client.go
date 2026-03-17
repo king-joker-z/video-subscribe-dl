@@ -1215,3 +1215,165 @@ func truncate(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// GetMixVideos 获取抖音合集中的所有视频列表
+// 使用 MixVideosAPI (cursor-based 分页)，最多返回 500 条
+func (c *DouyinClient) GetMixVideos(mixID string) ([]DouyinVideo, error) {
+	const maxVideos = 500
+	var allVideos []DouyinVideo
+	cursor := int64(0)
+	errCount := 0
+
+	for {
+		if len(allVideos) >= maxVideos {
+			logger.Info("GetMixVideos reached max limit", "mixID", mixID, "limit", maxVideos)
+			break
+		}
+
+		c.limiter.AcquireWithBackoff(errCount)
+
+		cookie := c.getSessionCookie()
+
+		params := c.buildBaseParams()
+		params.Set("mix_id", mixID)
+		params.Set("cursor", fmt.Sprintf("%d", cursor))
+		params.Set("count", "20")
+
+		queryStr := params.Encode()
+
+		ua := c.fingerprint.UserAgent
+		sr := signURLWithABogus(queryStr, ua)
+		apiURL := applySignResult(MixVideosAPI, queryStr, sr)
+
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Cookie", cookie)
+		c.setFullHeaders(req)
+
+		resp, err := c.normalClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("fetch mix videos: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read mix videos: %w", err)
+		}
+
+		logger.Info("GetMixVideos response",
+			"mixID", mixID,
+			"cursor", cursor,
+			"statusCode", resp.StatusCode,
+			"bodyLen", len(body))
+
+		if len(body) == 0 {
+			return nil, fmt.Errorf("mix videos API returned empty body (status=%d)", resp.StatusCode)
+		}
+
+		c.limiter.ReportResult(resp.StatusCode)
+
+		if resp.StatusCode != 200 {
+			snippet := string(body)
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			return nil, fmt.Errorf("mix videos API returned %d: %s", resp.StatusCode, snippet)
+		}
+
+		var apiResp struct {
+			StatusCode int `json:"status_code"`
+			AwemeList  []struct {
+				AwemeID    string  `json:"aweme_id"`
+				Desc       string  `json:"desc"`
+				CreateTime float64 `json:"create_time"`
+				Author     struct {
+					UID      string `json:"uid"`
+					SecUID   string `json:"sec_uid"`
+					Nickname string `json:"nickname"`
+				} `json:"author"`
+				Video struct {
+					Cover struct {
+						URLList []string `json:"url_list"`
+					} `json:"cover"`
+					PlayAddr struct {
+						URLList []string `json:"url_list"`
+					} `json:"play_addr"`
+					Duration int `json:"duration"`
+				} `json:"video"`
+				Statistics struct {
+					DiggCount    int64 `json:"digg_count"`
+					ShareCount   int64 `json:"share_count"`
+					CommentCount int64 `json:"comment_count"`
+				} `json:"statistics"`
+				Images []struct {
+					URLList []string `json:"url_list"`
+				} `json:"images"`
+			} `json:"aweme_list"`
+			HasMore int   `json:"has_more"` // 抖音返回 1/0
+			Cursor  int64 `json:"cursor"`
+		}
+
+		if err := json.Unmarshal(body, &apiResp); err != nil {
+			return nil, fmt.Errorf("parse mix videos: %w (body=%s)", err, truncate(string(body), 200))
+		}
+
+		if apiResp.StatusCode != 0 {
+			logger.Warn("GetMixVideos non-zero status_code",
+				"statusCode", apiResp.StatusCode,
+				"mixID", mixID,
+				"cursor", cursor)
+		}
+
+		for _, item := range apiResp.AwemeList {
+			v := DouyinVideo{
+				AwemeID:      item.AwemeID,
+				Desc:         item.Desc,
+				CreateTime:   int64(item.CreateTime),
+				Duration:     item.Video.Duration,
+				DiggCount:    item.Statistics.DiggCount,
+				ShareCount:   item.Statistics.ShareCount,
+				CommentCount: item.Statistics.CommentCount,
+				Author: DouyinUser{
+					UID:      item.Author.UID,
+					SecUID:   item.Author.SecUID,
+					Nickname: item.Author.Nickname,
+				},
+			}
+			if len(item.Video.Cover.URLList) > 0 {
+				v.Cover = pickNonWebpURLStr(item.Video.Cover.URLList)
+			}
+			if len(item.Video.PlayAddr.URLList) > 0 {
+				v.VideoURL = strings.ReplaceAll(item.Video.PlayAddr.URLList[0], "playwm", "play")
+			}
+			if len(item.Images) > 0 {
+				v.IsNote = true
+				v.VideoURL = ""
+				for _, img := range item.Images {
+					if len(img.URLList) > 0 {
+						v.Images = append(v.Images, pickNonWebpURLStr(img.URLList))
+					}
+				}
+			}
+			allVideos = append(allVideos, v)
+		}
+
+		logger.Info("GetMixVideos page completed",
+			"mixID", mixID,
+			"cursor", cursor,
+			"got", len(apiResp.AwemeList),
+			"total", len(allVideos),
+			"hasMore", apiResp.HasMore == 1,
+			"nextCursor", apiResp.Cursor)
+
+		if apiResp.HasMore != 1 || len(apiResp.AwemeList) == 0 {
+			break
+		}
+		cursor = apiResp.Cursor
+		errCount = 0
+	}
+
+	return allVideos, nil
+}

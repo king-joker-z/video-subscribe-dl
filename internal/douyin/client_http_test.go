@@ -941,3 +941,174 @@ func TestParseAwemeDetail_AuthorAvatarThumb(t *testing.T) {
 		t.Errorf("Author.AvatarURL = %q, want thumb URL", video.Author.AvatarURL)
 	}
 }
+
+// =====================================================================
+// GetMixVideos tests
+// =====================================================================
+
+// TestGetMixVideos_TwoPagePagination 测试正常分页抓取（2页，has_more: true→false）
+func TestGetMixVideos_TwoPagePagination(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/aweme/v1/web/mix/aweme") &&
+			!strings.Contains(r.URL.RawQuery, "mix_id") {
+			http.NotFound(w, r)
+			return
+		}
+		page++
+		var resp map[string]interface{}
+		if page == 1 {
+			resp = map[string]interface{}{
+				"status_code": 0,
+				"has_more":    1,
+				"cursor":      100,
+				"aweme_list": []interface{}{
+					map[string]interface{}{
+						"aweme_id":    "9001",
+						"desc":        "mix video 1",
+						"create_time": 1700000001.0,
+						"author": map[string]interface{}{
+							"uid":      "mu1",
+							"sec_uid":  "sec_mu1",
+							"nickname": "MixCreator",
+						},
+						"video": map[string]interface{}{
+							"cover": map[string]interface{}{
+								"url_list": []string{"https://mixcover1.jpg"},
+							},
+							"play_addr": map[string]interface{}{
+								"url_list": []string{"https://play.com/playwm/mix1.mp4"},
+							},
+							"duration": 45000,
+						},
+						"statistics": map[string]interface{}{
+							"digg_count":    300.0,
+							"share_count":   30.0,
+							"comment_count": 12.0,
+						},
+					},
+				},
+			}
+		} else {
+			resp = map[string]interface{}{
+				"status_code": 0,
+				"has_more":    0,
+				"cursor":      200,
+				"aweme_list": []interface{}{
+					map[string]interface{}{
+						"aweme_id":    "9002",
+						"desc":        "mix video 2",
+						"create_time": 1700000002.0,
+						"author": map[string]interface{}{
+							"uid":      "mu1",
+							"sec_uid":  "sec_mu1",
+							"nickname": "MixCreator",
+						},
+						"video": map[string]interface{}{
+							"cover": map[string]interface{}{
+								"url_list": []string{"https://mixcover2.jpg"},
+							},
+							"play_addr": map[string]interface{}{
+								"url_list": []string{"https://play.com/playwm/mix2.mp4"},
+							},
+							"duration": 60000,
+						},
+						"statistics": map[string]interface{}{
+							"digg_count":    150.0,
+							"share_count":   15.0,
+							"comment_count": 6.0,
+						},
+					},
+				},
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL)
+	defer c.Close()
+
+	videos, err := c.GetMixVideos("mix12345")
+	if err != nil {
+		t.Fatalf("GetMixVideos() error: %v", err)
+	}
+	if len(videos) != 2 {
+		t.Fatalf("videos count = %d, want 2", len(videos))
+	}
+	if videos[0].AwemeID != "9001" {
+		t.Errorf("videos[0].AwemeID = %q, want %q", videos[0].AwemeID, "9001")
+	}
+	if videos[1].AwemeID != "9002" {
+		t.Errorf("videos[1].AwemeID = %q, want %q", videos[1].AwemeID, "9002")
+	}
+	if !strings.Contains(videos[0].VideoURL, "play/mix1.mp4") {
+		t.Errorf("videos[0].VideoURL = %q, expected playwm replaced with play", videos[0].VideoURL)
+	}
+	if videos[0].Author.Nickname != "MixCreator" {
+		t.Errorf("Author.Nickname = %q, want MixCreator", videos[0].Author.Nickname)
+	}
+}
+
+// TestGetMixVideos_Empty 测试空合集（has_more: 0, aweme_list: []）
+func TestGetMixVideos_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"status_code": 0,
+			"has_more":    0,
+			"cursor":      0,
+			"aweme_list":  []interface{}{},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL)
+	defer c.Close()
+
+	videos, err := c.GetMixVideos("empty_mix")
+	if err != nil {
+		t.Fatalf("GetMixVideos() error: %v", err)
+	}
+	if len(videos) != 0 {
+		t.Errorf("expected 0 videos for empty mix, got %d", len(videos))
+	}
+}
+
+// TestGetMixVideos_HTTPError 测试 HTTP 错误处理
+func TestGetMixVideos_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		w.Write([]byte("internal server error"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL)
+	defer c.Close()
+
+	_, err := c.GetMixVideos("mix_error")
+	if err == nil {
+		t.Fatal("expected error for HTTP 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error = %q, expected to mention 500", err)
+	}
+}
+
+// TestGetMixVideos_InvalidJSON 测试非法 JSON 响应
+func TestGetMixVideos_InvalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("not valid json"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL)
+	defer c.Close()
+
+	_, err := c.GetMixVideos("mix_bad_json")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}

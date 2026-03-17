@@ -431,3 +431,93 @@ func (s *Scheduler) getDouyinSetting(key string) string {
 	}
 	return ""
 }
+
+// checkDouyinMix 检查抖音合集的新视频（增量下载）
+func (s *Scheduler) checkDouyinMix(src db.Source) {
+	// 1. 检查暂停状态
+	if s.IsDouyinPaused() {
+		log.Printf("[douyin·合集] 抖音已暂停，跳过检查 %s", src.Name)
+		return
+	}
+
+	client := s.newDouyinClient()
+	defer client.Close()
+
+	// 2. 从 URL 中解析 mix_id
+	// 支持格式：
+	//   - https://www.douyin.com/collection/{mix_id}
+	//   - 直接是 mix_id 字符串
+	mixID := parseMixID(src.URL)
+	if mixID == "" {
+		log.Printf("[douyin·合集] mix_id 解析失败，请检查 URL: %s", src.URL)
+		return
+	}
+
+	log.Printf("[douyin·合集] %s: 开始检查 mix_id=%s", src.Name, mixID)
+
+	// 3. 获取合集视频列表
+	videos, err := client.GetMixVideos(mixID)
+	if err != nil {
+		log.Printf("[douyin·合集] %s: 获取视频列表失败: %v", src.Name, err)
+		return
+	}
+
+	// 4. 遍历视频，增量检查（IsVideoDownloaded）+ 创建下载记录
+	newCount := 0
+	for _, v := range videos {
+		exists, _ := s.db.IsVideoDownloaded(src.ID, v.AwemeID)
+		if exists {
+			continue
+		}
+
+		uploaderName := v.Author.Nickname
+		if uploaderName == "" {
+			uploaderName = src.Name
+		}
+
+		title := v.Desc
+		if title == "" {
+			title = fmt.Sprintf("douyin_%s", v.AwemeID)
+		}
+
+		dl := &db.Download{
+			SourceID:  src.ID,
+			VideoID:   v.AwemeID,
+			Title:     title,
+			Uploader:  uploaderName,
+			Thumbnail: v.Cover,
+			Status:    "pending",
+			Duration:  v.Duration / 1000,
+		}
+		if _, err := s.db.CreateDownload(dl); err != nil {
+			log.Printf("[douyin·合集] 保存待下载记录失败 %s: %v", v.AwemeID, err)
+		} else {
+			newCount++
+		}
+	}
+
+	// 5. 日志
+	log.Printf("[douyin·合集] %s: 发现 %d 个新视频（合集共 %d 个）", src.Name, newCount, len(videos))
+
+	if newCount > 0 {
+		go s.ProcessAllPending()
+	}
+}
+
+// parseMixID 从 URL 中提取 mix_id
+// 支持格式：
+//   - https://www.douyin.com/collection/{mix_id}（取 /collection/ 后面的部分）
+//   - 直接是 mix_id 字符串
+func parseMixID(rawURL string) string {
+	const collectionPrefix = "/collection/"
+	if idx := strings.Index(rawURL, collectionPrefix); idx >= 0 {
+		rest := rawURL[idx+len(collectionPrefix):]
+		// 去掉 query string 和 fragment
+		if i := strings.IndexAny(rest, "?#/"); i >= 0 {
+			rest = rest[:i]
+		}
+		return strings.TrimSpace(rest)
+	}
+	// 无 /collection/，把整个 URL 视为纯 mix_id
+	return strings.TrimSpace(rawURL)
+}

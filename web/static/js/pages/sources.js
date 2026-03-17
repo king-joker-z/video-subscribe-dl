@@ -3,8 +3,8 @@ import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
-const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音' };
-const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning' };
+const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集' };
+const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning' };
 
 const qualityOptions = [
   { value: 'best', label: '最高画质' },
@@ -527,7 +527,7 @@ export function SourcesPage({ onNavigate }) {
             h('label', { className: 'text-sm text-slate-400 mb-1' }, 'B 站 / 抖音链接（必填）'),
             h('div', { className: 'flex gap-2' },
               h('input', {
-                type: 'text', value: newURL, placeholder: 'B站/抖音链接: bilibili.com/xxx 或 douyin.com/user/xxx',
+                type: 'text', value: newURL, placeholder: 'B站/抖音链接: bilibili.com/xxx | douyin.com/user/xxx | douyin.com/collection/{mix_id}',
                 onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
                 onKeyDown: (e) => e.key === 'Enter' && handleParse(),
                 className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'

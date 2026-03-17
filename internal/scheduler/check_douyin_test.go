@@ -31,6 +31,9 @@ type mockDouyinAPI struct {
 	// ResolveVideoURL mock
 	resolveVideoResult string
 	resolveVideoErr    error
+	// GetMixVideos mock
+	mixVideoResult []douyin.DouyinVideo
+	mixVideoErr    error
 }
 
 type mockVideoPage struct {
@@ -101,6 +104,13 @@ func (m *mockDouyinAPI) ResolveVideoURL(videoURL string) (string, error) {
 		return m.resolveVideoResult, nil
 	}
 	return videoURL, nil
+}
+
+func (m *mockDouyinAPI) GetMixVideos(mixID string) ([]douyin.DouyinVideo, error) {
+	if m.mixVideoErr != nil {
+		return nil, m.mixVideoErr
+	}
+	return m.mixVideoResult, nil
 }
 
 func (m *mockDouyinAPI) isClosed() bool {
@@ -1133,4 +1143,173 @@ func TestCheckDouyin_LatestVideoAt_NotUpdatedWhenNoNewVideos(t *testing.T) {
 	if latestAt != originalLatest {
 		t.Errorf("expected latestVideoAt unchanged at %d, got %d", originalLatest, latestAt)
 	}
+}
+
+// ============================
+// checkDouyinMix 测试
+// ============================
+
+// TestCheckDouyinMix_SkipWhenPaused 暂停时跳过
+func TestCheckDouyinMix_SkipWhenPaused(t *testing.T) {
+	mock := &mockDouyinAPI{}
+	s := newTestScheduler(t, mock)
+
+	// 设置暂停状态
+	s.douyinPaused = true
+
+	src := createTestSourceWithType(t, s.db, "TestMix", "https://www.douyin.com/collection/mix12345", "douyin_mix")
+	callsBefore := 0 // mixVideoResult 调用计数（通过检查 downloads 数量）
+	s.checkDouyinMix(src)
+
+	// 暂停时不应该创建任何下载记录
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != callsBefore {
+		t.Errorf("expected no downloads when paused, got %d", len(downloads))
+	}
+}
+
+// TestCheckDouyinMix_ParseCollectionURL 从合集 URL 解析 mix_id
+func TestCheckDouyinMix_ParseCollectionURL(t *testing.T) {
+	videos := []douyin.DouyinVideo{
+		{
+			AwemeID:    "mix_v001",
+			Desc:       "mix video 1",
+			CreateTime: 1700000001,
+			Duration:   30000,
+			Author:     douyin.DouyinUser{UID: "u1", Nickname: "MixCreator"},
+			VideoURL:   "https://play.com/video.mp4",
+			Cover:      "https://cover.jpg",
+		},
+	}
+	mock := &mockDouyinAPI{
+		mixVideoResult: videos,
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSourceWithType(t, s.db, "TestMix", "https://www.douyin.com/collection/mx9999", "douyin_mix")
+	s.checkDouyinMix(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	if downloads[0].VideoID != "mix_v001" {
+		t.Errorf("VideoID = %q, want mix_v001", downloads[0].VideoID)
+	}
+	if downloads[0].Uploader != "MixCreator" {
+		t.Errorf("Uploader = %q, want MixCreator", downloads[0].Uploader)
+	}
+}
+
+// TestCheckDouyinMix_ParseRawMixID mix_id 直接作为 URL（无 /collection/ 前缀）
+func TestCheckDouyinMix_ParseRawMixID(t *testing.T) {
+	videos := []douyin.DouyinVideo{
+		{
+			AwemeID:    "mix_v002",
+			Desc:       "raw mix video",
+			CreateTime: 1700000002,
+			Duration:   20000,
+			Author:     douyin.DouyinUser{UID: "u2", Nickname: "RawMixCreator"},
+		},
+	}
+	mock := &mockDouyinAPI{
+		mixVideoResult: videos,
+	}
+	s := newTestScheduler(t, mock)
+
+	// URL 就是纯 mix_id
+	src := createTestSourceWithType(t, s.db, "RawMixTest", "rawmix123", "douyin_mix")
+	s.checkDouyinMix(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("expected 1 download, got %d", len(downloads))
+	}
+	if downloads[0].VideoID != "mix_v002" {
+		t.Errorf("VideoID = %q, want mix_v002", downloads[0].VideoID)
+	}
+}
+
+// TestCheckDouyinMix_IncrementalDedup 重复视频不创建两次
+func TestCheckDouyinMix_IncrementalDedup(t *testing.T) {
+	videos := []douyin.DouyinVideo{
+		{
+			AwemeID:    "mix_dup001",
+			Desc:       "dup video",
+			CreateTime: 1700000010,
+			Duration:   25000,
+			Author:     douyin.DouyinUser{Nickname: "DupCreator"},
+		},
+	}
+	mock := &mockDouyinAPI{
+		mixVideoResult: videos,
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSourceWithType(t, s.db, "DupMix", "https://www.douyin.com/collection/dupMix", "douyin_mix")
+
+	// 第一次检查
+	s.checkDouyinMix(src)
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Fatalf("after 1st check: expected 1 download, got %d", len(downloads))
+	}
+
+	// 第二次检查（同样的视频），不应再增加
+	s.checkDouyinMix(src)
+	downloads = getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 1 {
+		t.Errorf("after 2nd check: expected 1 download (no dup), got %d", len(downloads))
+	}
+}
+
+// TestCheckDouyinMix_EmptyMix 空合集不创建下载
+func TestCheckDouyinMix_EmptyMix(t *testing.T) {
+	mock := &mockDouyinAPI{
+		mixVideoResult: []douyin.DouyinVideo{},
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSourceWithType(t, s.db, "EmptyMix", "https://www.douyin.com/collection/emptyMix", "douyin_mix")
+	s.checkDouyinMix(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 0 {
+		t.Errorf("expected 0 downloads for empty mix, got %d", len(downloads))
+	}
+}
+
+// TestCheckDouyinMix_GetMixVideosError API 错误时优雅退出
+func TestCheckDouyinMix_GetMixVideosError(t *testing.T) {
+	mock := &mockDouyinAPI{
+		mixVideoErr: fmt.Errorf("API error: rate limited"),
+	}
+	s := newTestScheduler(t, mock)
+
+	src := createTestSourceWithType(t, s.db, "ErrMix", "https://www.douyin.com/collection/errMix", "douyin_mix")
+
+	// 不应 panic，应该优雅退出
+	s.checkDouyinMix(src)
+
+	downloads := getDownloadsForSource(t, s.db, src.ID)
+	if len(downloads) != 0 {
+		t.Errorf("expected 0 downloads on API error, got %d", len(downloads))
+	}
+}
+
+// createTestSourceWithType 在 DB 中创建指定类型的 Source
+func createTestSourceWithType(t *testing.T, database *db.DB, name, rawURL, srcType string) db.Source {
+	t.Helper()
+	src := &db.Source{
+		Type:    srcType,
+		URL:     rawURL,
+		Name:    name,
+		Enabled: true,
+	}
+	id, err := database.CreateSource(src)
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	src.ID = id
+	return *src
 }
