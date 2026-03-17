@@ -53,9 +53,27 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }
     )
   },
     h('div', { className: cn('flex items-center gap-3 px-4 h-14 border-b border-slate-700/50', collapsed && 'justify-center') },
-      h('div', { className: 'w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0' }, 'V'),
+      h('div', {
+        className: 'w-8 h-8 rounded-lg flex-shrink-0 overflow-hidden',
+        style: { background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)' }
+      },
+        h('svg', {
+          viewBox: '0 0 32 32',
+          fill: 'none',
+          xmlns: 'http://www.w3.org/2000/svg',
+          className: 'w-full h-full'
+        },
+          h('rect', { x: '4', y: '6', width: '24', height: '15', rx: '2', fill: 'rgba(255,255,255,0.13)' }),
+          h('rect', { x: '5', y: '7', width: '22', height: '13', rx: '1.5', fill: 'rgba(0,0,0,0.28)' }),
+          h('path', { d: 'M13 10.5 L21.5 13.5 L13 16.5 Z', fill: 'white', opacity: '0.92' }),
+          h('rect', { x: '5', y: '22.5', width: '22', height: '2', rx: '1', fill: 'rgba(255,255,255,0.1)' }),
+          h('rect', { x: '5', y: '22.5', width: '12', height: '2', rx: '1', fill: 'rgba(255,255,255,0.5)' }),
+          h('path', { d: 'M11 27 Q16 25.5 21 27', stroke: 'rgba(255,255,255,0.35)', strokeWidth: '1.2', fill: 'none', strokeLinecap: 'round' }),
+          h('circle', { cx: '16', cy: '27.2', r: '0.9', fill: 'rgba(255,255,255,0.5)' })
+        )
+      ),
       !collapsed && h('div', null,
-        h('div', { className: 'font-semibold text-sm text-slate-200' }, 'Video DL'),
+        h('div', { className: 'font-semibold text-sm text-slate-200 tracking-wide' }, 'Video DL'),
         h('div', { className: 'text-[10px] text-slate-500' }, '订阅下载管理')
       )
     ),
