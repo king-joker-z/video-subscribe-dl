@@ -1,6 +1,6 @@
 # VSD 迭代记录
 
-> 最后更新: 2026-03-17（douyin 包测试覆盖提升至 80.5%）
+> 最后更新: 2026-03-17（第二轮迭代完成，转入前端优化/移动适配方向）
 
 ## 已完成
 
@@ -10,70 +10,81 @@
 - [x] 增量检查 checkDouyin + 全量补漏 fullScanDouyin
 - [x] 视频下载（无水印）+ 图集/笔记下载
 - [x] 快速下载（粘贴链接）
+- [x] 抖音合集下载（douyin_mix 类型，GetMixVideos，cursor 分页）— 4c58342
+- [x] Cookie 过期自动检测 + dashboard 降级 banner — bad5a63
+- [x] 抖音下载进度追踪 SSE 集成 — 8ba22bf
+
+### Bug 修复
+- [x] sign_pool.go escapeJSString 转义修复
+- [x] replaceEntry() 池耗尽 fallback
+- [x] 充电专属视频标 charge_blocked 而非 failed — e1a8ced
+- [x] 抖音文件名 hashtag 整体去除（#话题 不再变 _话题）— 8b8b5f4
+- [x] process_douyin.go rune 截断修复（U+FFFD 乱码）— 98f7db5
+- [x] 日志页自动滚动（requestAnimationFrame）— 4e5ac33
 
 ### 签名与反风控
-- [x] a_bogus 签名引擎（goja JS Runtime，池化复用）— 0a9340d
-- [x] X-Bogus 签名引擎（降级链: a_bogus → X-Bogus → 无签名）
-- [x] 签名 JS 热更新（SignUpdater，ETag 缓存）— ddd9b0f / b953349
-- [x] UA 池 + sec-ch-ua Client Hints — 5789f6b
-- [x] 浏览器指纹随机生成 — b5163db
-- [x] 令牌桶限流器（AcquireWithBackoff + ReportResult）— f9c01ee
-- [x] Cookie 会话一致性（同一会话内保持相同指纹）— 104304e
-- [x] Referer/Origin 头 — 9754417
-- [x] msToken 翻页一致性（URL 和 Cookie 共用 sessionMsToken）— 491430e
+- [x] a_bogus + X-Bogus 签名引擎，降级链，热更新，UA 池，指纹随机化
+- [x] 令牌桶限流 + 连续错误计数 + 风控检测冷却
 
-### Cookie 管理
-- [x] 用户 Cookie 配置 Web UI（设置页 textarea + 验证 + 保存 + 清除）— 282bfc9 / 50083ce
-- [x] Cookie 验证 API（POST /api/douyin/cookie/validate）— 282bfc9
-- [x] Cookie 热更新（保存后即时生效，无需重启）— 282bfc9
-- [x] Cookie 非法字符清洗（换行符/制表符/多余空格）— 19e64c6 / 41407d5
-- [x] Scheduler 启动自动加载用户 Cookie — 282bfc9
+### 前端
+- [x] 视频列表卡片/表格双视图 + 筛选 + 批量操作
+- [x] 空状态清除筛选按钮 — 63c8fcc
+- [x] 批量操作 loading 状态 — c335389
+- [x] 日志页级别过滤（ALL/INFO/WARN/ERROR）+ 暂停滚动按钮 — 577bed1
+- [x] 搜索支持 uploader 名称 — 7665df3
 
-### NFO 与文件管理
-- [x] 平台区分 NFO（actor role: B 站→UP主，抖音→作者；uniqueid type 按平台）— 5c3fe70
-- [x] 抖音视频独立子目录（{title} [{awemeID}]/）— 5c3fe70
-- [x] SanitizePath 对齐 B 站（Unicode 不可见字符 + 80 字符截断）— 35af5aa
-- [x] 启动时版本化清理幽灵目录（cleanup v2）— adfc186
-- [x] SanitizePath 过滤 emoji（U+1F000-U+1FFFF，NAS 兼容性）— 4e42765
-- [x] 删除订阅时可选清除本地文件 + DB 记录（前端两步确认）— 16dbbb6
-
-### 基础设施
-- [x] RateLimiter 生命周期管理 + DouyinClient.Close() — 8f812d1 / d33b77e
-- [x] Prometheus metrics 端点 — 16d7ec7
-- [x] pprof 性能分析端点 — b79888a
-- [x] CI test + coverage — cd3f863
-- [x] 诊断日志（翻页响应 statusCode/bodyLen）— 5f67145
-- [x] API 端点集中管理 endpoints.go — fd85448
-- [x] quickdl.go 拆分（B 站 / 抖音独立文件）— d5c1fe8
-- [x] 连续错误计数 + 自动降级 — ff0b0f8
-- [x] 风控检测（filter_list + status_code 诊断）— 2bc01f8
+---
 
 ## 待做
 
-### P0 — Bug 修复
-- [x] sign_pool.go:103 缺少 escapeJSString 转义（与 abogus_pool.go 不一致，一行修复）
-- [x] replaceEntry() 全部失败时池耗尽导致永久阻塞（加 fallback）
+### P1 — 前端移动端适配（高优）
 
-### P1 — 代码质量
-- [x] checkDouyin/fullScanDouyin mock 测试（30+ 用例，覆盖 11.7%）— 97f7442 / eb647bb
-- [x] checkDouyin/fullScanDouyin 覆盖率补充测试（12 用例：profile error/author fallback/backoff progression/cap/字段验证等）
-- [x] 单元测试覆盖提升 — processDouyin/retryOneDouyinDownload/resolveDouyinSecUID/getDouyinSetting/loadDouyinUserCookie mock 测试（scheduler 21.3%→28.3%）— 7e7f260
-- [x] downloadDouyinFile 去重（scheduler 和 web/api 中有完全重复实现）
-- [x] HTTP Client 复用（web/api 包共享 HTTP Client + Transport 连接池）— f2ac2c3
-- [x] douyin 包 HTTP mock 测试 — GetVideoDetail/GetUserVideos/GetUserProfile/ResolveVideoURL/ResolveShareURL（33 用例，覆盖 52.7%→69.8%）
-- [x] douyin 包补充测试 — getNoteDetail/DownloadFile/DownloadThumb/getCookieString/ValidateCookie/fetchTTWID/diag/stats（27 用例，覆盖 69.8%→80.5%）
+**问题：** 移动端（手机/平板）页面目前布局残缺，视频列表表格横向溢出，订阅源卡片堆叠混乱，操作按钮过小。
 
-### P2 — 功能增强
-- [ ] 抖音合集下载（/aweme/v1/web/mix/aweme/，API 端点已定义）
-- [ ] 抖音喜欢列表下载（API 端点已定义）
-- [ ] Cookie 过期自动检测 + 降级通知（当前过期后静默失败）
-- [ ] 抖音下载进度追踪（与前端 SSE 集成，参考 B 站实现）
+- [ ] **移动端底部导航栏**（手机端 `lg:hidden` 的底部 tab bar，替代侧边栏）
+  - 5 个主要页面图标 + 标签，固定在底部
+  - 当前 MobileHeader 只有汉堡菜单，手势不友好
+- [ ] **视频列表移动端优化**
+  - 手机端强制卡片视图（隐藏表格视图切换按钮）
+  - 卡片操作按钮在手机端改为底部弹出菜单（ActionSheet 风格）
+  - 批量操作工具栏移动端适配（按钮太小）
+- [ ] **订阅源页面移动端**
+  - 手机端单列卡片（当前 `md:grid-cols-2 xl:grid-cols-3` 在小屏挤）
+  - 添加订阅源表单滚动时不被遮挡
+- [ ] **仪表盘统计卡片移动端**
+  - `grid-cols-2 lg:grid-cols-3` 在手机上两列数字太小，改为竖排或 2x2
 
-### P3 — 新能力
-- [ ] TikTok 国际版支持（参考 yt-dlp Mobile API 方案，不需要 Web 签名）
-- [ ] 抖音直播录制（ffmpeg 已在 Docker 中）
-- [ ] 抖音收藏夹下载
+### P2 — 前端 UI 美化
+
+- [ ] **视频卡片视觉升级**
+  - 缩略图加载失败时显示平台 icon（B 站/抖音 logo）而非空白
+  - 进度条样式优化（当前太细，下载中状态不够明显）
+  - 状态 badge 加 tooltip（hover 时显示详细状态文本）
+- [ ] **仪表盘最近下载列表**
+  - 每行加缩略图（16:9 小图，30px 高）
+  - 区分平台（B 站蓝/抖音红小圆点）
+- [ ] **侧边栏 LOGO 优化**
+  - 当前只是 "V" 字母蓝色方块，太简陋
+  - 换成更有设计感的图标/文字组合
+- [ ] **空状态页面统一美化**
+  - 当前用 Lucide 图标 + 文字，可以加 SVG 插图（内联 SVG，不增加依赖）
+- [ ] **全局加载动效**
+  - 页面切换时的 skeleton 加载更精细（目前 skeleton 是矩形块，改为模拟真实卡片形状）
+
+### P3 — 功能完善
+
+- [ ] **视频详情页增强**
+  - 显示文件大小 + 时长 + 分辨率（从 file_path 推断或存 DB）
+  - 下载中状态实时进度条（接 SSE）
+- [ ] **订阅源"立即检查"按钮**
+  - 目前只能等定时触发，手动 trigger 一次检查很有用
+- [ ] **批量下载进度汇总**
+  - 顶部全局进度条（X/Y 视频下载中）
+- [ ] **抖音喜欢列表下载**（API 端点已有 UserLikedAPI）
 
 ### P4 — 优化
+
 - [ ] a_bogus 签名升级（对齐 f2 满血版）
-- [ ] 代理池支持（高频使用场景下绕 IP 限制）
+- [ ] 代理池支持
+- [ ] TikTok 国际版支持
+
