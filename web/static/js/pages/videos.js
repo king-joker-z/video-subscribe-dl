@@ -21,6 +21,7 @@ export function VideosPage({ params = {} } = {}) {
   const [detailVideo, setDetailVideo] = useState(null);
   const searchTimer = useRef(null);
   const [progress, setProgress] = useState([]);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,12 +81,14 @@ export function VideosPage({ params = {} } = {}) {
     if (action === 'delete' && !confirm('确定批量删除？')) return;
     if (action === 'restore' && !confirm('恢复选中视频并重新下载？')) return;
     if (action === 'delete_files' && !confirm('将删除选中视频的本地文件（不删数据库记录），确认？')) return;
+    setBatchLoading(true);
+    const labels = { retry: '重试', cancel: '取消', delete: '删除', redownload: '重新下载', delete_files: '删除文件', restore: '恢复' };
     try {
       await api.batchVideos(action, Array.from(selected));
-      const labels = { retry: '重试', cancel: '取消', delete: '删除', redownload: '重新下载', delete_files: '删除文件', restore: '恢复' };
-      toast.success(`批量${labels[action] || action}成功`);
+      toast.success(`批量${labels[action] || action}成功，共 ${selected.size} 项`);
       setSelected(new Set()); load();
     } catch (e) { toast.error(e.message); }
+    finally { setBatchLoading(false); }
   };
 
   const toggleSelect = (id) => {
@@ -201,14 +204,14 @@ export function VideosPage({ params = {} } = {}) {
     ),
     // 批量操作栏
     selected.size > 0 && h('div', { className: 'flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-lg px-4 py-2' },
-      h('span', { className: 'text-sm text-blue-400' }, `已选 ${selected.size} 项`),
-      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm' }, '重试'),
-      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm' }, '重新下载'),
-      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm' }, '取消'),
-      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm' }, '删除文件'),
-      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm' }, '恢复'),
-      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm' }, '删除'),
-      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto' }, '清除选择')
+      h('span', { className: 'text-sm text-blue-400' }, batchLoading ? `处理中...` : `已选 ${selected.size} 项`),
+      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '重试'),
+      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '重新下载'),
+      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '取消'),
+      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '删除文件'),
+      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm', disabled: batchLoading }, '恢复'),
+      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading }, '删除'),
+      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300 ml-auto', disabled: batchLoading }, '清除选择')
     ),
     // 内容
     loading
