@@ -1,6 +1,6 @@
 # VSD 迭代记录
 
-> 最后更新: 2026-03-17（P1 手机端底部 tab 导航栏已完成）
+> 最后更新: 2026-03-17（P1 定时自动刷新已完成）
 
 ## 已完成
 
@@ -45,7 +45,7 @@
   - fixed bottom-0，5 个主页面图标 + 文字标签，56px 高
   - 当前页高亮，主内容区 `pb-16`（仅手机端）
   - 替代/补充 MobileHeader 汉堡菜单
-- [ ] **定时自动刷新**（videos.js / sources.js / uploaders.js）
+- [x] **定时自动刷新**（videos.js / sources.js / uploaders.js）<!-- commit: 43c9c0f -->
   - videos.js：每 15s 刷新（下载中状态变化快）
   - sources.js：每 30s 刷新
   - uploaders.js：每 60s 刷新
