@@ -1,7 +1,24 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, formatBytes, formatTime, toast, Icon, Card, Button, StatusBadge, Badge } from './utils.js';
+import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Badge } from './utils.js';
 const { createElement: h, useState, useEffect, useCallback, Fragment } = React;
+
+// 从文件路径/文件名推断分辨率标签
+function inferResolution(filePath) {
+  if (!filePath) return null;
+  const name = filePath.split('/').pop() || '';
+  // 常见分辨率关键词匹配（优先高精度）
+  if (/4K|2160p|2160P|uhd|UHD/i.test(name)) return '4K';
+  if (/1440p|1440P|2K/i.test(name)) return '2K';
+  if (/1080p|1080P|FHD|fhd/i.test(name)) return '1080p';
+  if (/720p|720P|HD(?!R)/i.test(name)) return '720p';
+  if (/480p|480P|SD/i.test(name)) return '480p';
+  if (/360p|360P/i.test(name)) return '360p';
+  if (/HDR/i.test(name)) return 'HDR';
+  if (/AV1|av1/i.test(name)) return 'AV1';
+  if (/HEVC|hevc|H\.265|x265/i.test(name)) return 'HEVC';
+  return null;
+}
 
 // 格式化秒数为可读时长
 function formatDuration(sec) {
@@ -25,12 +42,14 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const [loading, setLoading] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [progress, setProgress] = useState(null); // SSE 实时进度
   const videoRef = React.useRef(null);
 
   useEffect(() => {
     if (!video) return;
     setImgError(false);
     setShowPlayer(false);
+    setProgress(null);
     setLoading(true);
     api.getVideo(video.id)
       .then(res => setDetail(res.data || video))
@@ -45,9 +64,31 @@ export function VideoDetailModal({ video, onClose, onAction }) {
     return () => window.removeEventListener('keydown', handler);
   }, [video, onClose]);
 
+  // SSE 进度监听（仅下载中状态订阅）
+  useEffect(() => {
+    if (!video) return;
+    let es;
+    try {
+      es = new EventSource('/api/events');
+      es.addEventListener('progress', (e) => {
+        try {
+          const list = JSON.parse(e.data) || [];
+          const v = detail || video;
+          const found = list.find(p =>
+            (p.download_id && String(p.download_id) === String(v.id)) ||
+            (v.video_id && p.bvid && p.bvid === v.video_id)
+          );
+          setProgress(found || null);
+        } catch {}
+      });
+    } catch {}
+    return () => { if (es) es.close(); };
+  }, [video, detail]);
+
   if (!video) return null;
 
   const v = detail || video;
+  const resolution = inferResolution(v.file_path);
   const bvid = extractBVID(v.video_id);
   const biliURL = bvid ? `https://www.bilibili.com/video/${bvid}` : null;
   const streamURL = `/api/stream/${v.id}`;
@@ -152,10 +193,14 @@ export function VideoDetailModal({ video, onClose, onAction }) {
             h('div', { className: 'flex items-center gap-3 text-xs text-slate-500 flex-wrap' },
               v.duration > 0 && h('span', null, '\u23F1 ' + formatDuration(v.duration)),
               v.file_size > 0 && h('span', null, '\uD83D\uDCBE ' + formatBytes(v.file_size)),
+              resolution && h('span', { className: 'bg-indigo-500/15 text-indigo-400 px-1.5 py-0.5 rounded text-[10px] font-medium' }, resolution),
               v.video_id && h('span', { className: 'text-slate-600 font-mono' }, v.video_id)
             )
           )
         ),
+
+        // 实时下载进度条（SSE 驱动，仅下载中时显示）
+        progress && h(DownloadProgressBar, { progress }),
 
         // Description
         v.description && h('div', { className: 'bg-slate-900/50 rounded-lg px-4 py-3' },
@@ -263,6 +308,44 @@ function DetailStatusBar({ status }) {
           c.label
         );
       })
+    )
+  );
+}
+
+// 实时下载进度条组件（SSE 驱动）
+function DownloadProgressBar({ progress: prog }) {
+  if (!prog) return null;
+  const pct = prog.percent || 0;
+  const hasTotal = prog.total > 0;
+
+  return h('div', { className: 'bg-blue-500/8 border border-blue-500/25 rounded-lg px-4 py-3 space-y-2' },
+    // 标题行 + 百分比
+    h('div', { className: 'flex items-center justify-between' },
+      h('div', { className: 'flex items-center gap-2' },
+        h('div', { className: 'w-2 h-2 rounded-full bg-blue-400 animate-pulse' }),
+        h('span', { className: 'text-xs font-medium text-blue-300' }, '下载中')
+      ),
+      h('span', { className: 'text-sm font-semibold text-blue-200 tabular-nums' }, pct.toFixed(1) + '%')
+    ),
+    // 进度条
+    h('div', { className: 'h-2 bg-slate-700/60 rounded-full overflow-hidden' },
+      h('div', {
+        className: 'h-2 rounded-full transition-all duration-500 progress-bar',
+        style: {
+          width: pct + '%',
+          background: 'linear-gradient(90deg, #3b82f6 0%, #60a5fa 60%, #93c5fd 100%)'
+        }
+      })
+    ),
+    // 速度 / 大小 / ETA
+    h('div', { className: 'flex items-center gap-3 text-xs text-slate-400 flex-wrap' },
+      prog.speed > 0 && h('span', { className: 'text-blue-400 font-semibold' }, formatSpeed(prog.speed)),
+      hasTotal && h('span', { className: 'tabular-nums' },
+        formatBytes(prog.downloaded || 0) + ' / ' + formatBytes(prog.total)
+      ),
+      formatETA(prog.downloaded, prog.total, prog.speed) && h('span', { className: 'text-slate-500' },
+        'ETA ' + formatETA(prog.downloaded, prog.total, prog.speed)
+      )
     )
   );
 }
