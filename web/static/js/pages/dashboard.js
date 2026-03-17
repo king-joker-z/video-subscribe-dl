@@ -175,11 +175,26 @@ export function DashboardPage({ onNavigate }) {
       }, cred.status === 'expired' ? '重新登录' : '去登录')
     ),
 
-    // 统计卡片网格
-    h('div', { className: 'grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4' },
+    // 统计卡片网格 - 手机端分两行：主要4个 + 次要4个；桌面端全部一行
+    // 桌面端：所有8个并排
+    h('div', { className: 'hidden sm:grid grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4' },
       stats.map((s, i) => h(Card, { key: i },
         h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
         h('div', { className: cn('text-2xl font-bold', s.color) }, s.value.toLocaleString())
+      ))
+    ),
+    // 手机端：主要4个（2x2），加粗显示
+    h('div', { className: 'grid sm:hidden grid-cols-2 gap-3' },
+      stats.slice(0, 4).map((s, i) => h(Card, { key: i },
+        h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
+        h('div', { className: cn('text-3xl font-bold', s.color) }, s.value.toLocaleString())
+      ))
+    ),
+    // 手机端：次要4个（2x4，紧凑）
+    h('div', { className: 'grid sm:hidden grid-cols-4 gap-2' },
+      stats.slice(4).map((s, i) => h('div', { key: i, className: 'bg-slate-800/50 rounded-lg px-2 py-2 text-center' },
+        h('div', { className: cn('text-xl font-bold', s.color) }, s.value.toLocaleString()),
+        h('div', { className: 'text-[10px] text-slate-500 mt-0.5' }, s.label)
       ))
     ),
 
@@ -371,11 +386,11 @@ export function DashboardPage({ onNavigate }) {
     data?.recent_downloads?.length > 0 && h(Card, null,
       h('h3', { className: 'font-medium mb-4 text-slate-200' }, '最近下载'),
       h('div', { className: 'space-y-2' },
-        data.recent_downloads.slice(0, 8).map(dl =>
-          h('div', { key: dl.id, className: 'flex items-center gap-3 py-2 border-b border-slate-700/30 last:border-0' },
+        data.recent_downloads.slice(0, 8).map((dl, i) =>
+          h('div', { key: dl.id, className: cn('flex items-center gap-3 py-2 border-b border-slate-700/30 last:border-0', i >= 5 && 'hidden sm:flex') },
             h('div', { className: 'flex-1 min-w-0' },
               h('div', { className: 'text-sm truncate' }, dl.title || dl.video_id),
-              h('div', { className: 'text-xs text-slate-500' }, dl.uploader || '--')
+              h('div', { className: 'text-xs text-slate-500 truncate' }, dl.uploader || '--')
             ),
             h(StatusBadge, { status: dl.status }),
             h('span', { className: 'text-xs text-slate-500 flex-shrink-0 hidden sm:block' }, formatTime(dl.created_at))

@@ -479,6 +479,13 @@ export function SourcesPage({ onNavigate }) {
       onSave: () => { setEditSource(null); load(); },
       onClose: () => setEditSource(null)
     }),
+    // 移动端 FAB 新增按钮（固定右下角，仅手机端显示）
+    h('button', {
+      onClick: () => setShowAdd(true),
+      className: 'lg:hidden fixed bottom-20 right-4 z-40 w-14 h-14 rounded-full bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-colors',
+      title: '新增订阅源',
+      'aria-label': '新增订阅源'
+    }, h(Icon, { name: 'plus', size: 24 })),
     // 导入结果弹窗
     showImportResult && h('div', { className: 'fixed inset-0 bg-black/60 flex items-center justify-center z-50', onClick: (e) => { if (e.target === e.currentTarget) setShowImportResult(null); } },
       h('div', { className: 'bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4' },
@@ -530,7 +537,7 @@ export function SourcesPage({ onNavigate }) {
           h(Icon, { name: 'download', size: 14 }), '导出'),
         h(Button, { onClick: handleImportFile, size: 'sm', variant: 'ghost', title: '导入订阅源' },
           h(Icon, { name: 'upload', size: 14 }), '导入'),
-        h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm' },
+        h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm', className: 'hidden lg:flex' },
           h(Icon, { name: 'plus', size: 14 }), '新增')
       )
     ),
@@ -643,7 +650,7 @@ export function SourcesPage({ onNavigate }) {
                     !s.enabled && h(Badge, { variant: 'outline' }, '已禁用')
                   )
                 ),
-                h('div', { className: 'flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity' },
+                h('div', { className: 'flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity' },
                   h('button', { onClick: () => setEditSource(s), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '编辑' }, h(Icon, { name: 'edit', size: 14 })),
                   h('button', { onClick: () => handleSync(s.id), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '同步' }, h(Icon, { name: 'sync', size: 14 })),
                   h('button', { onClick: () => handleFullScan(s.id), className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '全量补漏' }, h(Icon, { name: 'hard-drive', size: 14 })),
