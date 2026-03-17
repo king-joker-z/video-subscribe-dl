@@ -67,6 +67,12 @@ export function LogsPage() {
   useEffect(() => {
     api.getLogs(200).then(res => {
       setLogs(res.data || []);
+      // 历史日志加载完后滚到底部
+      requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      });
     }).catch(e => toast.error(e.message));
     
     connect();
@@ -78,11 +84,15 @@ export function LogsPage() {
     };
   }, [reconnectKey.current]);
 
-  // 自动滚动
+  // 自动滚动：延迟一帧确保 DOM/scrollHeight 已更新
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
-    }
+    if (!autoScroll || !containerRef.current) return;
+    const el = containerRef.current;
+    // requestAnimationFrame 确保浏览器 layout 完成后再滚动
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [logs, autoScroll]);
 
   const handleScroll = () => {
