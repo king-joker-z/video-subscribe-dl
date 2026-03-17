@@ -525,6 +525,13 @@ func (s *Scheduler) handleDownloadResult(dlID int64, videoID string, detail *bil
 		if result.Error != nil {
 			errMsg = result.Error.Error()
 		}
+		// 无视频流 = 充电专属/付费视频（B站未登录或无权限时 DASH 接口返回空流而非 403）
+		// 此时元数据里 is_charge_plus 可能为 0（未登录时 B 站不暴露该字段），所以在此兜底处理
+		if strings.Contains(errMsg, "no video streams available") || strings.Contains(errMsg, "no suitable video stream") {
+			log.Printf("充电专属/付费视频（无流）: %s - %s", videoID, errMsg)
+			s.db.UpdateDownloadStatus(dlID, "charge_blocked", "", 0, "充电专属/付费视频（无可用流）")
+			return
+		}
 		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, errMsg)
 		s.db.IncrementRetryCount(dlID, errMsg)
 		log.Printf("Failed: %s - %s", videoID, errMsg)
