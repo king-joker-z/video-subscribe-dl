@@ -3,6 +3,7 @@ package douyin
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ValidateCookie 验证抖音 Cookie 是否可用
@@ -28,8 +29,19 @@ func (c *DouyinClient) ValidateCookie() (bool, string) {
 
 	// 尝试调用 GetUserProfile 验证 Cookie 是否有效
 	// 使用一个已知存在的公开用户 secUID 做探测
+	// 抖音 API 偶发返回空 body，最多重试 3 次
 	testSecUID := "MS4wLjABAAAAgfP-wrR4bAf4EpXE01yHQEk4Sd0yoJ0zPyEJn1T29b4"
-	profile, err := c.GetUserProfile(testSecUID)
+	var profile *DouyinUserProfile
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		profile, err = c.GetUserProfile(testSecUID)
+		if err == nil {
+			break
+		}
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second)
+		}
+	}
 	if err != nil {
 		return false, fmt.Sprintf("Cookie 验证失败: %v", err)
 	}
