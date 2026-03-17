@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState } from '../components/utils.js';
+import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState, VideoCardSkeleton } from '../components/utils.js';
 import { VideoDetailModal } from '../components/video-detail.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
@@ -287,7 +287,7 @@ export function VideosPage({ params = {} } = {}) {
     ),
     // 内容
     loading
-      ? h('div', { className: 'space-y-3' }, Array.from({ length: 5 }, (_, i) => h('div', { key: i, className: 'skeleton h-16 rounded-lg' })))
+      ? h('div', { className: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4' }, Array.from({ length: 6 }, (_, i) => h(VideoCardSkeleton, { key: i })))
       : videos.length === 0
         ? h(EmptyState, {
             icon: 'video',

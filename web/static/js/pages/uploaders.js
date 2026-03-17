@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState } from '../components/utils.js';
+import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState , UploaderCardSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 
@@ -119,7 +119,7 @@ export function UploadersPage({ onNavigate }) {
     ),
     loading
       ? h('div', { className: 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4' },
-          Array.from({ length: 8 }, (_, i) => h(Card, { key: i }, h('div', { className: 'skeleton h-24 rounded-lg' }))))
+          Array.from({ length: 8 }, (_, i) => h(UploaderCardSkeleton, { key: i })))
       : uploaders.length === 0
         ? h(EmptyState, { icon: 'users', message: '暂无 UP 主数据' })
         : h('div', { className: 'grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4' },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { formatBytes, formatSpeed, formatETA, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton } from '../components/utils.js';
+import { formatBytes, formatSpeed, formatETA, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton, DashboardStatSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef, Fragment } = React;
 
 export function DashboardPage({ onNavigate }) {
@@ -88,7 +88,7 @@ export function DashboardPage({ onNavigate }) {
 
   if (loading) return h('div', { className: 'page-enter space-y-4' },
     h('div', { className: 'grid grid-cols-2 lg:grid-cols-3 gap-4' },
-      Array.from({ length: 6 }, (_, i) => h(Card, { key: i }, h(Skeleton, { className: 'h-16' })))
+      Array.from({ length: 8 }, (_, i) => h(DashboardStatSkeleton, { key: i }))
     )
   );
 

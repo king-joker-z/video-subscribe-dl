@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck } from '../components/utils.js';
+import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
 const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集' };
@@ -647,7 +647,7 @@ export function SourcesPage({ onNavigate }) {
     // 列表
     loading
       ? h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
-          Array.from({ length: 6 }, (_, i) => h(Card, { key: i }, h('div', { className: 'skeleton h-24 rounded-lg' }))))
+          Array.from({ length: 6 }, (_, i) => h(SourceCardSkeleton, { key: i })))
       : sources.length === 0
         ? h(EmptyState, { icon: 'rss', message: '还没有订阅源', action: h(Button, { onClick: () => setShowAdd(true), size: 'sm' }, h(Icon, { name: 'plus', size: 14 }), '添加第一个') })
         : h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },

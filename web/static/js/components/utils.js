@@ -191,6 +191,96 @@ export function Skeleton({ className = '' }) {
   return h('div', { className: cn('skeleton rounded-lg h-4', className) });
 }
 
+// 精细化 Skeleton：视频卡片（带封面图占位 + 标题 + 状态行）
+export function VideoCardSkeleton() {
+  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl overflow-hidden' },
+    // 封面图占位（aspect-video）
+    h('div', { className: 'skeleton w-full aspect-video' }),
+    h('div', { className: 'p-4 space-y-2.5' },
+      // 标题行
+      h('div', { className: 'skeleton h-4 w-full rounded' }),
+      h('div', { className: 'skeleton h-3 w-2/3 rounded' }),
+      // 状态 badge + 大小
+      h('div', { className: 'flex items-center gap-2 mt-1' },
+        h('div', { className: 'skeleton h-5 w-14 rounded-full' }),
+        h('div', { className: 'skeleton h-3 w-12 rounded' }),
+      )
+    )
+  );
+}
+
+// 精细化 Skeleton：订阅源卡片（标题 + badge + 4列统计 + 底部信息）
+export function SourceCardSkeleton() {
+  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
+    // 顶部：标题 + 操作按钮
+    h('div', { className: 'flex items-start justify-between' },
+      h('div', { className: 'flex-1 space-y-2 mr-3' },
+        h('div', { className: 'skeleton h-4 w-3/4 rounded' }),
+        h('div', { className: 'skeleton h-5 w-16 rounded-full' }),
+      ),
+      h('div', { className: 'flex gap-1' },
+        h('div', { className: 'skeleton w-7 h-7 rounded' }),
+        h('div', { className: 'skeleton w-7 h-7 rounded' }),
+      )
+    ),
+    // 4列统计
+    h('div', { className: 'grid grid-cols-4 gap-2' },
+      ...[0,1,2,3].map(i => h('div', { key: i, className: 'text-center space-y-1' },
+        h('div', { className: 'skeleton h-6 w-8 mx-auto rounded' }),
+        h('div', { className: 'skeleton h-3 w-8 mx-auto rounded' }),
+      ))
+    ),
+    // 底部信息行
+    h('div', { className: 'pt-2 border-t border-slate-700/30 flex items-center gap-2' },
+      h('div', { className: 'skeleton h-3 w-20 rounded' }),
+      h('div', { className: 'skeleton h-3 w-16 rounded' }),
+    )
+  );
+}
+
+// 精细化 Skeleton：UP主卡片（头像 + 名字 + 3列统计）
+export function UploaderCardSkeleton() {
+  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
+    // 头像 + 名字
+    h('div', { className: 'flex items-center gap-3' },
+      h('div', { className: 'skeleton w-10 h-10 rounded-full flex-shrink-0' }),
+      h('div', { className: 'flex-1 space-y-1.5' },
+        h('div', { className: 'skeleton h-4 w-3/4 rounded' }),
+        h('div', { className: 'skeleton h-3 w-1/2 rounded' }),
+      )
+    ),
+    // 3列统计
+    h('div', { className: 'grid grid-cols-3 gap-2' },
+      ...[0,1,2].map(i => h('div', { key: i, className: 'text-center space-y-1' },
+        h('div', { className: 'skeleton h-6 w-8 mx-auto rounded' }),
+        h('div', { className: 'skeleton h-3 w-8 mx-auto rounded' }),
+      ))
+    )
+  );
+}
+
+// 精细化 Skeleton：仪表盘统计卡片（标签 + 大数字）
+export function DashboardStatSkeleton() {
+  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
+    h('div', { className: 'skeleton h-3 w-12 rounded' }),
+    h('div', { className: 'skeleton h-8 w-16 rounded' }),
+  );
+}
+
+// 精细化 Skeleton：设置分区卡片（标题 + 多个表单行）
+export function SettingsSectionSkeleton() {
+  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-4' },
+    h('div', { className: 'skeleton h-4 w-24 rounded mb-2' }),
+    ...[0,1,2].map(i => h('div', { key: i, className: 'flex items-center justify-between py-2 border-b border-slate-700/30 last:border-0' },
+      h('div', { className: 'space-y-1.5 flex-1 mr-4' },
+        h('div', { className: 'skeleton h-3.5 w-28 rounded' }),
+        h('div', { className: 'skeleton h-3 w-48 rounded' }),
+      ),
+      h('div', { className: 'skeleton h-8 w-40 rounded-lg' }),
+    ))
+  );
+}
+
 export function EmptyState({ icon = 'video', message = '暂无数据', action }) {
   return h('div', { className: 'flex flex-col items-center justify-center py-16 text-slate-500' },
     h(Icon, { name: icon, size: 48, className: 'mb-4 opacity-30' }),

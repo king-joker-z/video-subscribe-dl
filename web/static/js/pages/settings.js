@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Button, Badge } from '../components/utils.js';
+import { cn, toast, Icon, Card, Button, Badge , SettingsSectionSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, Fragment } = React;
 
 // Toggle 开关组件
@@ -199,7 +199,7 @@ export function SettingsPage() {
     );
 
   if (loading) return h('div', { className: 'page-enter space-y-4' },
-    Array.from({ length: 4 }, (_, i) => h(Card, { key: i }, h('div', { className: 'skeleton h-32 rounded-lg' })))
+    Array.from({ length: 4 }, (_, i) => h(SettingsSectionSkeleton, { key: i }))
   );
 
   const hasDirty = Object.keys(dirty).length > 0;
