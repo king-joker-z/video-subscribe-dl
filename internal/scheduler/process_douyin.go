@@ -112,8 +112,8 @@ func (s *Scheduler) retryOneDouyinDownload(dl db.Download) {
 		title = fmt.Sprintf("douyin_%s", dl.VideoID)
 	}
 	safeTitle := douyin.SanitizePath(title)
-	if len(safeTitle) > 100 {
-		safeTitle = safeTitle[:100]
+	if len([]rune(safeTitle)) > 80 {
+		safeTitle = string([]rune(safeTitle)[:80])
 	}
 	// 每个视频一个独立文件夹（和 B 站保持一致）
 	videoDir := filepath.Join(outputDir, safeTitle+" ["+dl.VideoID+"]")
@@ -220,8 +220,8 @@ func (s *Scheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *do
 		title = fmt.Sprintf("douyin_%s", dl.VideoID)
 	}
 	safeTitle := douyin.SanitizePath(title)
-	if len(safeTitle) > 100 {
-		safeTitle = safeTitle[:100]
+	if len([]rune(safeTitle)) > 80 {
+		safeTitle = string([]rune(safeTitle)[:80])
 	}
 
 	uploaderDir := douyin.SanitizePath(uploaderName)
