@@ -189,7 +189,10 @@ export function EmptyState({ icon = 'video', message = '暂无数据', action })
   return h('div', { className: 'flex flex-col items-center justify-center py-16 text-slate-500' },
     h(Icon, { name: icon, size: 48, className: 'mb-4 opacity-30' }),
     h('p', { className: 'text-lg mb-4' }, message),
-    action
+    action && action.label && h('button', {
+      onClick: action.onClick,
+      className: 'mt-2 px-4 py-1.5 rounded-lg text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors',
+    }, action.label)
   );
 }
 

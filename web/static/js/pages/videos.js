@@ -217,7 +217,21 @@ export function VideosPage({ params = {} } = {}) {
     loading
       ? h('div', { className: 'space-y-3' }, Array.from({ length: 5 }, (_, i) => h('div', { key: i, className: 'skeleton h-16 rounded-lg' })))
       : videos.length === 0
-        ? h(EmptyState, { icon: 'video', message: status ? '该状态下暂无视频' : '暂无视频' })
+        ? h(EmptyState, {
+            icon: 'video',
+            message: (status || search) ? '没有符合筛选条件的视频' : '暂无视频',
+            action: (status || search) ? {
+              label: '清除筛选',
+              onClick: () => {
+                setStatus('');
+                setSearch('');
+                setPage(1);
+                // 同时清空搜索框输入框
+                const searchInput = document.querySelector('input[placeholder="搜索标题/UP主..."]');
+                if (searchInput) searchInput.value = '';
+              }
+            } : undefined
+          })
         : viewMode === 'table'
           ? h('div', { className: 'overflow-x-auto' },
               h('table', { className: 'w-full' },
