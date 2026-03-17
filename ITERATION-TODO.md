@@ -61,7 +61,7 @@
 
 ### P2 — UI 美化（P1 完成后）
 
-- [ ] **视频卡片升级**
+- [x] **视频卡片升级** <!-- commit: 7c3c007 feat(ui): P2 视频卡片升级 - 平台 logo 兜底 + 状态 badge tooltip + 下载进度条优化 -->
   - 缩略图加载失败显示平台 logo（B 站/抖音 icon，SVG 内联）
   - 进度条样式优化，下载中状态更明显
   - 状态 badge 加 tooltip
