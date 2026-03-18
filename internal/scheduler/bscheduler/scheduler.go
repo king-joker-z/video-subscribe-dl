@@ -13,6 +13,7 @@ import (
 	"video-subscribe-dl/internal/notify"
 )
 
+
 // upInfoCacheEntry 缓存 UP 主信息（包括负缓存）
 type upInfoCacheEntry struct {
 	info      *bilibili.UPInfo
@@ -59,6 +60,10 @@ type BiliScheduler struct {
 
 	// 热配置
 	hotConfig *config.HotConfig
+
+	// 热配置监视器（由 Startup/Stop 管理）
+	configWatcher   *config.ConfigWatcher
+	configWatcherMu sync.Mutex
 
 	// 全量扫描去重
 	fullScanRunning   map[int64]bool
@@ -134,11 +139,4 @@ func (s *BiliScheduler) IsPaused() bool {
 		return false
 	}
 	return s.dl.IsPaused()
-}
-
-// Stop 清理资源
-func (s *BiliScheduler) Stop() {
-	if s.downloadLimiter != nil {
-		s.downloadLimiter.Stop()
-	}
 }

@@ -1,10 +1,7 @@
 package scheduler
 
 import (
-	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -12,50 +9,26 @@ import (
 	"github.com/robfig/cron/v3"
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
-	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/downloader"
-	"video-subscribe-dl/internal/nfo"
 	"video-subscribe-dl/internal/notify"
+	"video-subscribe-dl/internal/scheduler/bscheduler"
 )
 
+// Scheduler 顶层编排器：持有子平台 scheduler，统一管理生命周期和任务分发。
+// 所有 B 站平台相关逻辑委托给 bili (*bscheduler.BiliScheduler)。
+// 抖音相关字段/方法保留在顶层，供同包测试直接访问。
 type Scheduler struct {
 	db          *db.DB
 	dl          *downloader.Downloader
-	bili        *bilibili.Client
 	downloadDir string
-	cookiePath  string
 	notifier    *notify.Notifier
 	stopCh      chan struct{}
 	wg          sync.WaitGroup
 
-	// bili client 保护
-	biliMu sync.RWMutex
-
-	// 风控退避（平台级隔离）
-	rateLimitMu        sync.Mutex
-	biliCooldownUntil    time.Time // B站风控冷却截止时间
-	douyinCooldownUntil  time.Time // 抖音风控冷却截止时间
-	lastCooldownNotify time.Time // 上次风控通知时间（防重复）
-
-	// Cookie 定期检测
-	lastCookieCheck time.Time // 上次 Cookie 主动检测时间
-	lastDouyinCookieCheck time.Time // 上次抖音 Cookie 验证时间
-
-	// Credential 管理
-	db2 *db.DB // alias, same as db (for clarity in credential methods)
-
-	// 并发控制信号量（参考 bili-sync workflow.rs）
-	videoSema *bilibili.Semaphore // video 级别并发限制
-	pageSema  *bilibili.Semaphore // page 级别并发限制
-
-	// 热配置
-	hotConfig     *config.HotConfig
-	configWatcher *config.ConfigWatcher
-
-	// UP 主信息缓存（减少 API 请求）
-	upInfoCache   map[int64]*upInfoCacheEntry
-	upInfoCacheMu sync.RWMutex
+	// B 站子调度器（负责所有 B 站平台逻辑）
+	bili *bscheduler.BiliScheduler
 
 	// cron 调度器
 	cronScheduler *cron.Cron
@@ -68,142 +41,89 @@ type Scheduler struct {
 	pendingSourcesMu sync.Mutex
 	pendingSources   []db.Source
 
-	// 抖音风控暂停（手动恢复）
+	// ─── 抖音专属字段（测试直接访问，不可移动）────────────────────────────────
+
+	// 抖音风控冷却（时间截止）
+	rateLimitMu         sync.Mutex
+	douyinCooldownUntil time.Time
+
+	// 抖音暂停控制（手动恢复）
 	douyinPausedMu    sync.RWMutex
 	douyinPaused      bool
 	douyinPauseReason string
 	douyinPausedAt    time.Time
 
-	// 可注入的依赖（测试用）
-	sleepFn func(time.Duration) // 替代 time.Sleep（测试中跳过等待）
-	newDouyinClient func() DouyinAPI // 替代 douyin.NewClient
+	// Cookie 定期检测
+	lastDouyinCookieCheck time.Time
 
-	// 抖音下载频率限制器（每分钟最多 2 条）
+	// 可注入依赖（测试用）
+	sleepFn         func(time.Duration)
+	newDouyinClient func() DouyinAPI
+
+	// 抖音下载频率限制器
 	douyinDownloadLimiter *douyin.RateLimiter
-
-	// B站下载频率限制器（每分钟最多 4 条）
-	biliDownloadLimiter   *bilibili.RateLimiter
 }
 
-type upInfoCacheEntry struct {
-	info      *bilibili.UPInfo
-	err       error // 非 nil 时表示负缓存（API 请求失败）
-	fetchedAt time.Time
-}
-
+// New 创建顶层 Scheduler，同时初始化 BiliScheduler 子调度器。
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
-	cookie := bilibili.ReadCookieFile(cookiePath)
+	notifier := notify.New(database)
+	hotConfig := config.NewHotConfig()
+	wg := &sync.WaitGroup{}
+
+	bili := bscheduler.New(bscheduler.Config{
+		DB:          database,
+		Downloader:  dl,
+		DownloadDir: downloadDir,
+		CookiePath:  cookiePath,
+		Notifier:    notifier,
+		HotConfig:   hotConfig,
+		WG:          wg,
+	})
+
 	return &Scheduler{
-		db:              database,
-		dl:              dl,
-		bili:            bilibili.NewClient(cookie),
-		downloadDir:     downloadDir,
-		cookiePath:      cookiePath,
-		notifier:        notify.New(database),
-		stopCh:          make(chan struct{}),
-		hotConfig:       config.NewHotConfig(),
-		upInfoCache:     make(map[int64]*upInfoCacheEntry),
-		fullScanRunning:   make(map[int64]bool),
-		newDouyinClient:  defaultNewDouyinClient,
-		sleepFn:          time.Sleep,
-		videoSema:             bilibili.NewSemaphore(3), // 最多同时处理 3 个视频
-		pageSema:              bilibili.NewSemaphore(2), // 每个视频最多同时下载 2 个分P
-		douyinDownloadLimiter: douyin.NewRateLimiter(4, 1, 15*time.Second), // 每分钟最多 4 条抖音下载
-		biliDownloadLimiter:   bilibili.NewRateLimiter(4, 1, 15*time.Second), // 每分钟最多 4 条 B站下载
+		db:                    database,
+		dl:                    dl,
+		downloadDir:           downloadDir,
+		notifier:              notifier,
+		stopCh:                make(chan struct{}),
+		bili:                  bili,
+		fullScanRunning:       make(map[int64]bool),
+		newDouyinClient:       defaultNewDouyinClient,
+		sleepFn:               time.Sleep,
+		douyinDownloadLimiter: douyin.NewRateLimiter(4, 1, 15*time.Second),
 	}
 }
 
-// GetNotifier 返回通知器实例（供 web server 使用）
-func (s *Scheduler) GetNotifier() *notify.Notifier {
-	return s.notifier
-}
-
-// getBili 线程安全地获取 bilibili client
-// GetBiliClient 公开方法：线程安全地获取 bilibili client
-func (s *Scheduler) GetBiliClient() *bilibili.Client {
-	s.biliMu.RLock()
-	defer s.biliMu.RUnlock()
-	return s.bili
-}
-
-func (s *Scheduler) getBili() *bilibili.Client {
-	s.biliMu.RLock()
-	defer s.biliMu.RUnlock()
-	return s.bili
-}
-
-// resetCaches 清除 WBI 签名缓存，在 cookie 更新/风控恢复等场景下调用
-func (s *Scheduler) resetCaches() {
-	bilibili.ClearWbiCache()
-}
-
-// applyNewClient 创建新的 bilibili client 并同步更新 scheduler 和 downloader
-func (s *Scheduler) applyNewClient(client *bilibili.Client) {
-	s.biliMu.Lock()
-	s.bili = client
-	s.biliMu.Unlock()
-	s.dl.UpdateClient(client)
-	s.resetCaches()
-}
-
-// UpdateCredential 使用新的 Credential 更新 client
-func (s *Scheduler) UpdateCredential(cred *bilibili.Credential) {
-	client := bilibili.NewClientWithCredential(cred)
-	s.applyNewClient(client)
-}
+// ─── 生命周期 ─────────────────────────────────────────────────────────────────
 
 func (s *Scheduler) Start() {
-	// 初始化 cookiePath 缓存
-	if s.cookiePath == "" {
-		if cp, err := s.db.GetSetting("cookie_path"); err == nil && cp != "" {
-			s.cookiePath = cp
-		}
-
-		// 启动配置热更新监视器
-		s.configWatcher = config.NewConfigWatcher(s.hotConfig, s.db, 30*time.Second)
-		s.configWatcher.Start()
-	}
-
+	// 初始化热配置监视器（通过 bscheduler 的启动流程）
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		// 启动时重置 stale pending/downloading 状态（容器重启后队列已清空）
+
+		// 启动时重置 stale pending/downloading 状态
 		if reset, err := s.db.ResetStaleDownloads(); err == nil && reset > 0 {
 			log.Printf("[startup] Reset %d stale pending/downloading records (will be requeued)", reset)
 		}
-		s.verifyCookie("startup")
-		s.loadDouyinUserCookie() // 从 DB 加载用户配置的抖音 Cookie
-		// 启动时处理容器重启前遗留的 pending 下载
-		// 动态并发控制（从设置读取）
-		if v, err := s.db.GetSetting("concurrent_video"); err == nil && v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				s.videoSema = bilibili.NewSemaphore(n)
-				log.Printf("[scheduler] video 并发数: %d", n)
-			}
-		}
-		if v, err := s.db.GetSetting("concurrent_page"); err == nil && v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				s.pageSema = bilibili.NewSemaphore(n)
-				log.Printf("[scheduler] page 并发数: %d", n)
-			}
-		}
+
+		// 委托给 BiliScheduler 做 B 站初始化工作
+		s.bili.Startup()
+
+		s.loadDouyinUserCookie()
 		s.ProcessAllPending()
 		s.checkAll()
 
-		// 检查是否配置了 cron 表达式
+		// Cron 或固定间隔调度
 		cronExpr, _ := s.db.GetSetting("schedule_cron")
 		if cronExpr != "" {
 			s.cronScheduler = cron.New(cron.WithSeconds())
 			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
-				// Cookie 检查不受风控冷却影响
-				s.periodicCookieCheck()
-
-				// B站冷却结束时恢复下载器
-				if s.dl.IsPaused() && !s.isBiliInCooldown() {
+				s.bili.PeriodicCookieCheck()
+				if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
 					s.dl.Resume()
 					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
 				}
-				// 不再整轮跳过，改为 checkSourceList 内部按平台跳过
 				s.checkAll()
 			})
 			if err != nil {
@@ -230,15 +150,11 @@ func (s *Scheduler) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				// Cookie 检查不受风控冷却影响
-				s.periodicCookieCheck()
-
-				// B站冷却结束时恢复下载器
-				if s.dl.IsPaused() && !s.isBiliInCooldown() {
+				s.bili.PeriodicCookieCheck()
+				if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
 					s.dl.Resume()
 					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
 				}
-				// 不再整轮跳过，改为 checkSourceList 内部按平台跳过
 				s.checkAll()
 			case <-s.stopCh:
 				return
@@ -248,11 +164,280 @@ func (s *Scheduler) Start() {
 	log.Println("Scheduler started (interval: 5min)")
 }
 
-// isBiliInCooldown 检查B站是否在风控冷却期内
+func (s *Scheduler) Stop() {
+	s.bili.Stop()
+	if s.douyinDownloadLimiter != nil {
+		s.douyinDownloadLimiter.Stop()
+	}
+	close(s.stopCh)
+	s.wg.Wait()
+}
+
+// ─── 检查逻辑 ──────────────────────────────────────────────────────────────────
+
+func (s *Scheduler) checkAll() {
+	// B 站冷却已过期但 downloader 还在 paused，自动恢复
+	if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
+		s.dl.Resume()
+		log.Printf("[scheduler] checkAll: B站风控冷却已过期，恢复下载器")
+	}
+	// 先检查 Credential 是否需要刷新（委托给 bscheduler）
+	s.bili.CheckAndRefreshCredential()
+	s.bili.VerifyCookie("scheduled sync")
+
+	// Retry failed downloads
+	s.retryFailedDownloads()
+
+	// 优先处理风控断点续检
+	s.pendingSourcesMu.Lock()
+	resumeSources := s.pendingSources
+	s.pendingSources = nil
+	s.pendingSourcesMu.Unlock()
+
+	if len(resumeSources) > 0 {
+		log.Printf("[scheduler] 风控断点续检: 恢复 %d 个未检查的 source", len(resumeSources))
+		s.checkSourceList(resumeSources)
+		s.ProcessAllPending()
+		return
+	}
+
+	globalInterval := 0
+	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			globalInterval = n * 60
+		}
+	}
+
+	sources, err := s.db.GetSourcesDueForCheck(globalInterval)
+	if err != nil {
+		log.Printf("Get due sources failed: %v", err)
+		return
+	}
+	s.checkSourceList(sources)
+	s.ProcessAllPending()
+}
+
+// checkSourceList 检查一组 source，按平台级冷却跳过对应源
+func (s *Scheduler) checkSourceList(sources []db.Source) {
+	for i, src := range sources {
+		switch src.Type {
+		case "douyin", "douyin_mix":
+			if s.isDouyinInCooldown() {
+				continue
+			}
+		default:
+			if s.isBiliInCooldown() {
+				continue
+			}
+		}
+
+		s.safeCheckSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
+
+		if i < len(sources)-1 {
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+// safeCheckSource 带 panic 保护的 checkSource 调用
+func (s *Scheduler) safeCheckSource(src db.Source) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] checkSource panic for %s (id=%d): %v", src.Name, src.ID, r)
+		}
+	}()
+	s.checkSource(src)
+}
+
+func (s *Scheduler) checkAllForce() {
+	log.Println("Manual sync triggered")
+	s.bili.VerifyCookie("manual sync")
+	sources, err := s.db.GetEnabledSources()
+	if err != nil {
+		log.Printf("Get sources failed: %v", err)
+		return
+	}
+	for i, src := range sources {
+		switch src.Type {
+		case "douyin", "douyin_mix":
+			if s.isDouyinInCooldown() {
+				continue
+			}
+		default:
+			if s.isBiliInCooldown() {
+				continue
+			}
+		}
+
+		s.safeCheckSource(src)
+		s.db.UpdateSourceLastCheck(src.ID)
+
+		if i < len(sources)-1 {
+			time.Sleep(5 * time.Second)
+		}
+	}
+	s.ProcessAllPending()
+	log.Println("Manual sync completed")
+}
+
+// checkSource 按 source 类型分发到对应平台 scheduler
+func (s *Scheduler) checkSource(src db.Source) {
+	log.Printf("Checking: %s (%s) [type=%s]", src.Name, src.URL, src.Type)
+
+	switch src.Type {
+	case "douyin":
+		s.checkDouyin(src)
+		return
+	case "douyin_mix":
+		s.checkDouyinMix(src)
+		return
+	default:
+		// 所有 B 站类型委托给 bscheduler
+		s.bili.CheckSource(src)
+	}
+}
+
+// ─── 公开 API 方法 ─────────────────────────────────────────────────────────────
+
+// CheckNow 触发一次立即全量检查
+func (s *Scheduler) CheckNow() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.checkAllForce()
+	}()
+}
+
+// ProcessAllPending 把所有 pending 记录提交到下载队列
+func (s *Scheduler) ProcessAllPending() {
+	if s.dl == nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		downloads, err := s.db.GetDownloadsByStatus("pending", 10000)
+		if err != nil {
+			log.Printf("[process-pending] Error: %v", err)
+			return
+		}
+		if len(downloads) == 0 {
+			log.Printf("[process-pending] No pending downloads")
+			return
+		}
+		batchSize := 3
+		log.Printf("[process-pending] Processing %d pending downloads (batch size: %d)", len(downloads), batchSize)
+		for i := 0; i < len(downloads); i += batchSize {
+			end := i + batchSize
+			if end > len(downloads) {
+				end = len(downloads)
+			}
+			batch := downloads[i:end]
+			for _, dl := range batch {
+				s.retryOneDownload(dl)
+				time.Sleep(1 * time.Second)
+			}
+			log.Printf("[process-pending] Batch %d-%d submitted, waiting for completion...", i+1, end)
+			for s.dl.IsBusy() {
+				time.Sleep(5 * time.Second)
+			}
+		}
+		log.Printf("[process-pending] All %d pending downloads processed", len(downloads))
+	}()
+}
+
+// CheckOneSource 只同步指定 source
+func (s *Scheduler) CheckOneSource(sourceID int64) {
+	src, err := s.db.GetSource(sourceID)
+	if err != nil || src == nil {
+		log.Printf("[scheduler] Source %d not found", sourceID)
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.checkSource(*src)
+		log.Printf("Manual sync completed for source %d: %s", src.ID, src.Name)
+	}()
+}
+
+// FullScanSource 触发单个 source 的全量补漏扫描
+func (s *Scheduler) FullScanSource(sourceID int64) {
+	src, err := s.db.GetSource(sourceID)
+	if err != nil || src == nil {
+		log.Printf("[scheduler] FullScanSource: source %d not found", sourceID)
+		return
+	}
+	switch src.Type {
+	case "douyin", "douyin_mix":
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.fullScanDouyin(*src)
+		}()
+	default:
+		s.bili.FullScanSource(sourceID)
+	}
+}
+
+// SyncAll 触发全部源检查（供 API 调用）
+func (s *Scheduler) SyncAll() {
+	go s.checkAllForce()
+}
+
+// StartupCleanup 一次性启动清理（扫描非法字符目录 + 重置全量扫描）
+func (s *Scheduler) StartupCleanup() {
+	s.bili.StartupCleanup()
+}
+
+// ─── 代理方法：B 站平台 ────────────────────────────────────────────────────────
+
+// GetBiliClient 获取 bilibili client（供 web API 使用）
+func (s *Scheduler) GetBiliClient() *bilibili.Client {
+	return s.bili.GetBiliClient()
+}
+
+// UpdateCredential 更新 B 站 Credential
+func (s *Scheduler) UpdateCredential(cred *bilibili.Credential) {
+	s.bili.UpdateCredential(cred)
+}
+
+// UpdateCookie 更新 B 站 Cookie 文件路径
+func (s *Scheduler) UpdateCookie(cookiePath string) {
+	s.bili.UpdateCookie(cookiePath)
+}
+
+// GetBiliCooldownInfo 返回 B 站风控冷却状态
+func (s *Scheduler) GetBiliCooldownInfo() (bool, int) {
+	return s.bili.GetCooldownInfo()
+}
+
+// ReloadConfig 手动触发配置重载
+func (s *Scheduler) ReloadConfig() {
+	s.bili.ReloadConfig()
+}
+
+// GetHotConfig 获取当前热配置快照
+func (s *Scheduler) GetHotConfig() config.HotConfigSnapshot {
+	return s.bili.GetHotConfig()
+}
+
+// ─── 代理方法：通知器 ──────────────────────────────────────────────────────────
+
+// GetNotifier 返回通知器实例
+func (s *Scheduler) GetNotifier() *notify.Notifier {
+	return s.notifier
+}
+
+// ─── 风控冷却（顶层汇总）──────────────────────────────────────────────────────
+
+// isBiliInCooldown 检查 B 站是否在风控冷却期内
 func (s *Scheduler) isBiliInCooldown() bool {
-	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
-	return time.Now().Before(s.biliCooldownUntil)
+	if s.bili == nil {
+		return false
+	}
+	return s.bili.IsInCooldown()
 }
 
 // isDouyinInCooldown 检查抖音是否在风控冷却期内
@@ -262,22 +447,35 @@ func (s *Scheduler) isDouyinInCooldown() bool {
 	return time.Now().Before(s.douyinCooldownUntil)
 }
 
-// isInCooldown 检查是否有任一平台在风控冷却期内（用于全局判断）
-func (s *Scheduler) isInCooldown() bool {
+// triggerDouyinCooldown 触发抖音风控冷却
+func (s *Scheduler) triggerDouyinCooldown() {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
-	return time.Now().Before(s.biliCooldownUntil) || time.Now().Before(s.douyinCooldownUntil)
+	s.douyinCooldownUntil = time.Now().Add(config.CooldownDuration)
+	log.Printf("[WARN] 触发抖音风控，暂停抖音检查 %v（恢复时间: %s）",
+		config.CooldownDuration, s.douyinCooldownUntil.Format("15:04:05"))
 }
 
-// GetCooldownInfo 返回风控冷却状态（供 API 使用）
+// GetCooldownInfo 返回风控冷却状态（供 API 使用，合并两个平台）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
+	// 抖音冷却
 	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
+	douyinUntil := s.douyinCooldownUntil
+	s.rateLimitMu.Unlock()
+
+	// B 站冷却
+	var biliUntil time.Time
+	if s.bili != nil {
+		biliIn, biliSec := s.bili.GetCooldownInfo()
+		if biliIn {
+			biliUntil = time.Now().Add(time.Duration(biliSec) * time.Second)
+		}
+	}
+
 	now := time.Now()
-	// 返回两个平台中较晚的冷却截止时间
-	latest := s.biliCooldownUntil
-	if s.douyinCooldownUntil.After(latest) {
-		latest = s.douyinCooldownUntil
+	latest := douyinUntil
+	if biliUntil.After(latest) {
+		latest = biliUntil
 	}
 	if now.Before(latest) {
 		return true, int(time.Until(latest).Seconds())
@@ -285,40 +483,14 @@ func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	return false, 0
 }
 
-// triggerBiliCooldown 触发B站风控冷却
-func (s *Scheduler) triggerBiliCooldown() {
-	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
-	s.biliCooldownUntil = time.Now().Add(config.CooldownDuration)
-	s.dl.Pause() // B站用 Downloader 队列，需要暂停
-	log.Printf("[WARN] 触发B站风控，暂停B站下载器 %v（恢复时间: %s）",
-		config.CooldownDuration, s.biliCooldownUntil.Format("15:04:05"))
-
-	// 防重复通知：30分钟内只发一次
-	if time.Since(s.lastCooldownNotify) > 30*time.Minute {
-		s.lastCooldownNotify = time.Now()
-		s.notifier.Send(notify.EventRateLimited, "B站风控触发",
-			fmt.Sprintf("已暂停 %v，预计 %s 恢复",
-				config.CooldownDuration, s.biliCooldownUntil.Format("15:04:05")))
-	}
-}
-
-// triggerDouyinCooldown 触发抖音风控冷却
-func (s *Scheduler) triggerDouyinCooldown() {
-	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
-	s.douyinCooldownUntil = time.Now().Add(config.CooldownDuration)
-	// 抖音不走 Downloader 队列，不调 s.dl.Pause()
-	log.Printf("[WARN] 触发抖音风控，暂停抖音检查 %v（恢复时间: %s）",
-		config.CooldownDuration, s.douyinCooldownUntil.Format("15:04:05"))
-}
+// ─── 抖音暂停控制 ──────────────────────────────────────────────────────────────
 
 // PauseDouyin 暂停抖音下载（风控触发，需手动恢复）
 func (s *Scheduler) PauseDouyin(reason string) {
 	s.douyinPausedMu.Lock()
 	defer s.douyinPausedMu.Unlock()
 	if s.douyinPaused {
-		return // 已暂停，不重复
+		return
 	}
 	s.douyinPaused = true
 	s.douyinPauseReason = reason
@@ -352,428 +524,4 @@ func (s *Scheduler) GetDouyinPauseStatus() (paused bool, reason string, pausedAt
 	s.douyinPausedMu.RLock()
 	defer s.douyinPausedMu.RUnlock()
 	return s.douyinPaused, s.douyinPauseReason, s.douyinPausedAt
-}
-
-func (s *Scheduler) Stop() {
-	if s.configWatcher != nil {
-		s.configWatcher.Stop()
-	}
-	if s.douyinDownloadLimiter != nil {
-		s.douyinDownloadLimiter.Stop()
-	}
-	if s.biliDownloadLimiter != nil {
-		s.biliDownloadLimiter.Stop()
-	}
-	close(s.stopCh)
-	s.wg.Wait()
-}
-
-func (s *Scheduler) CheckNow() {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.checkAllForce()
-	}()
-}
-
-// ProcessAllPending 把所有 pending 记录提交到下载队列
-func (s *Scheduler) ProcessAllPending() {
-	if s.dl == nil {
-		return
-	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		downloads, err := s.db.GetDownloadsByStatus("pending", 10000)
-		if err != nil {
-			log.Printf("[process-pending] Error: %v", err)
-			return
-		}
-		if len(downloads) == 0 {
-			log.Printf("[process-pending] No pending downloads")
-			return
-		}
-		// 分批处理：同时只有 3 个在下载队列中（和 worker 数一致）
-		batchSize := 3
-		log.Printf("[process-pending] Processing %d pending downloads (batch size: %d)", len(downloads), batchSize)
-		for i := 0; i < len(downloads); i += batchSize {
-			end := i + batchSize
-			if end > len(downloads) {
-				end = len(downloads)
-			}
-			batch := downloads[i:end]
-			for _, dl := range batch {
-				s.retryOneDownload(dl)
-				time.Sleep(1 * time.Second)
-			}
-			// 等当前批次下载完再提交下一批（检查队列是否空了）
-			log.Printf("[process-pending] Batch %d-%d submitted, waiting for completion...", i+1, end)
-			for s.dl.IsBusy() {
-				time.Sleep(5 * time.Second)
-			}
-		}
-		log.Printf("[process-pending] All %d pending downloads processed", len(downloads))
-	}()
-}
-
-// CheckOneSource 只同步指定 source
-func (s *Scheduler) CheckOneSource(sourceID int64) {
-	src, err := s.db.GetSource(sourceID)
-	if err != nil || src == nil {
-		log.Printf("[scheduler] Source %d not found", sourceID)
-		return
-	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.checkSource(*src)
-		log.Printf("Manual sync completed for source %d: %s", src.ID, src.Name)
-	}()
-}
-
-func (s *Scheduler) UpdateCookie(cookiePath string) {
-	s.cookiePath = cookiePath // 同步更新缓存
-	cookie := bilibili.ReadCookieFile(cookiePath)
-	s.applyNewClient(bilibili.NewClient(cookie))
-}
-
-func (s *Scheduler) checkAll() {
-	// B站冷却已过期但 downloader 还在 paused，自动恢复
-	if s.dl.IsPaused() && !s.isBiliInCooldown() {
-		s.dl.Resume()
-		log.Printf("[scheduler] checkAll: B站风控冷却已过期，恢复下载器")
-	}
-	// 先检查 Credential 是否需要刷新
-	s.checkAndRefreshCredential()
-	s.verifyCookie("scheduled sync")
-
-	// Retry failed downloads
-	s.retryFailedDownloads()
-
-	// 优先处理风控断点续检
-	s.pendingSourcesMu.Lock()
-	resumeSources := s.pendingSources
-	s.pendingSources = nil
-	s.pendingSourcesMu.Unlock()
-
-	if len(resumeSources) > 0 {
-		log.Printf("[scheduler] 风控断点续检: 恢复 %d 个未检查的 source", len(resumeSources))
-		s.checkSourceList(resumeSources)
-		// 断点续检完毕后处理 pending 下载
-		s.ProcessAllPending()
-		return // 本轮只做断点恢复，不再拉新的 due sources
-	}
-
-	// 读取全局 check_interval_minutes 设置
-	globalInterval := 0
-	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			globalInterval = n * 60 // 转为秒
-		}
-	}
-
-	sources, err := s.db.GetSourcesDueForCheck(globalInterval)
-	if err != nil {
-		log.Printf("Get due sources failed: %v", err)
-		return
-	}
-	s.checkSourceList(sources)
-
-	// 所有 source 检查完后，处理遗留的 pending 下载
-	s.ProcessAllPending()
-
-	// Auto-cleanup: retention-based and disk-pressure
-}
-
-// checkSourceList 检查一组 source，按平台级冷却跳过对应源
-func (s *Scheduler) checkSourceList(sources []db.Source) {
-	for i, src := range sources {
-		// 平台级冷却检查：只跳过对应平台的 source
-		switch src.Type {
-		case "douyin":
-			if s.isDouyinInCooldown() {
-				continue // 跳过抖音但不跳过B站
-			}
-		default: // B站类型: up, channel, favorite, season, series, watchlater
-			if s.isBiliInCooldown() {
-				continue // 跳过B站但不跳过抖音
-			}
-		}
-
-		s.safeCheckSource(src)
-		s.db.UpdateSourceLastCheck(src.ID)
-
-		// source 间隔 5 秒，避免触发风控
-		if i < len(sources)-1 {
-			time.Sleep(5 * time.Second)
-		}
-	}
-}
-
-// safeCheckSource 带 panic 保护的 checkSource 调用
-func (s *Scheduler) safeCheckSource(src db.Source) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[PANIC] checkSource panic for %s (id=%d): %v", src.Name, src.ID, r)
-		}
-	}()
-	s.checkSource(src)
-}
-
-func (s *Scheduler) checkAllForce() {
-	log.Println("Manual sync triggered")
-	s.verifyCookie("manual sync")
-	sources, err := s.db.GetEnabledSources()
-	if err != nil {
-		log.Printf("Get sources failed: %v", err)
-		return
-	}
-	for i, src := range sources {
-		// 平台级冷却检查
-		switch src.Type {
-		case "douyin":
-			if s.isDouyinInCooldown() {
-				continue
-			}
-		default:
-			if s.isBiliInCooldown() {
-				continue
-			}
-		}
-
-		s.safeCheckSource(src)
-		s.db.UpdateSourceLastCheck(src.ID)
-
-		// source 间隔 3 秒，避免触发风控
-		if i < len(sources)-1 {
-			time.Sleep(5 * time.Second)
-		}
-	}
-	s.ProcessAllPending()
-	log.Println("Manual sync completed")
-}
-
-func (s *Scheduler) checkSource(src db.Source) {
-	log.Printf("Checking: %s (%s) [type=%s]", src.Name, src.URL, src.Type)
-
-	switch src.Type {
-	case "season":
-		s.checkSeason(src)
-	case "series":
-		s.checkSeries(src)
-	case "favorite":
-		s.checkFavorite(src)
-	case "douyin":
-		s.checkDouyin(src)
-		return
-	case "douyin_mix":
-		s.checkDouyinMix(src)
-		return
-	case "watchlater":
-		s.checkWatchLater(src)
-	case "up", "channel", "":
-		s.checkUP(src)
-	default:
-		log.Printf("[WARN] Unknown source type: %s, treating as UP", src.Type)
-		s.checkUP(src)
-	}
-}
-
-func (s *Scheduler) clientForSource(src db.Source) *bilibili.Client {
-	if src.CookiesFile != "" {
-		cookie := bilibili.ReadCookieFile(src.CookiesFile)
-		if cookie != "" {
-			return bilibili.NewClient(cookie)
-		}
-	}
-	return s.getBili()
-}
-
-func (s *Scheduler) ensurePeopleDir(upInfo *bilibili.UPInfo) {
-	if upInfo == nil || upInfo.Name == "" {
-		return
-	}
-	dir := filepath.Join(s.downloadDir, "metadata", "people", bilibili.SanitizePath(upInfo.Name))
-	os.MkdirAll(dir, 0755)
-	// 每轮更新 person.nfo（追踪签名/等级变化）
-	nfo.GeneratePersonNFO(&nfo.PersonMeta{
-		Name:  upInfo.Name,
-		Thumb: upInfo.Face,
-		MID:   upInfo.MID,
-		Sign:  upInfo.Sign,
-		Level: upInfo.Level,
-		Sex:   upInfo.Sex,
-	}, dir)
-	if upInfo.Face != "" {
-		avatarPath := filepath.Join(dir, "folder.jpg")
-		if _, err := os.Stat(avatarPath); os.IsNotExist(err) {
-			if err := bilibili.DownloadFile(upInfo.Face, avatarPath); err != nil {
-				log.Printf("Avatar download failed for %s: %v", upInfo.Name, err)
-			}
-		}
-	}
-}
-
-// periodicCookieCheck 每 6 小时主动检测 Cookie 有效性
-func (s *Scheduler) periodicCookieCheck() {
-	if time.Since(s.lastCookieCheck) < 6*time.Hour {
-		return
-	}
-	s.lastCookieCheck = time.Now()
-	log.Println("[scheduler] Periodic cookie check triggered")
-
-	result, err := s.getBili().VerifyCookie()
-	if err != nil {
-		log.Printf("[WARN] Periodic cookie check failed: %v", err)
-		return
-	}
-	if !result.LoggedIn {
-		log.Printf("[WARN] Periodic cookie check: Cookie is invalid or expired")
-		s.notifier.Send(notify.EventCookieExpired, "Cookie 已过期（定期检测）",
-			"定期检测发现 Cookie 已失效，请及时更新")
-		// 尝试自动刷新
-		s.tryCookieRefresh("periodic check")
-	}
-}
-
-// verifyCookie 验证当前 cookie 是否有效，即将过期时自动刷新，失效打 warning
-func (s *Scheduler) verifyCookie(trigger string) {
-	result, err := s.getBili().VerifyCookie()
-	if err != nil {
-		log.Printf("[WARN] Cookie verify failed during %s: %v", trigger, err)
-		return
-	}
-	if !result.LoggedIn {
-		log.Printf("[WARN] Cookie is invalid or expired (trigger: %s). Attempting refresh...", trigger)
-		s.tryCookieRefresh(trigger)
-		return
-	}
-
-	vipLabel := "无"
-	switch result.VIPType {
-	case 1:
-		vipLabel = "月度大会员"
-	case 2:
-		vipLabel = "年度大会员"
-	}
-
-	// 检查 VIP 到期时间
-	if result.VIPDueDate != "" {
-		dueDate, parseErr := time.Parse("2006-01-02", result.VIPDueDate)
-		if parseErr == nil {
-			daysUntil := time.Until(dueDate).Hours() / 24
-			if daysUntil < -30 {
-				// 过期超过30天，不再尝试刷新，只在 startup 时提示一次
-				if trigger == "startup" {
-					log.Printf("[INFO] Cookie valid: user=%s, VIP=%s (已过期: %s). 非大会员仍可下载 1080P/192kbps",
-						result.Username, vipLabel, result.VIPDueDate)
-				}
-				return
-			} else if daysUntil < 7 {
-				log.Printf("[INFO] Cookie/VIP 将在 %s 到期（<7天），尝试刷新...", result.VIPDueDate)
-				s.tryCookieRefresh(trigger)
-			}
-		}
-	}
-
-	log.Printf("[INFO] Cookie valid: user=%s, VIP=%s, expires=%s (trigger: %s)",
-		result.Username, vipLabel, result.VIPDueDate, trigger)
-}
-
-// tryCookieRefresh 尝试自动刷新 Cookie
-func (s *Scheduler) tryCookieRefresh(trigger string) {
-	cookiePath := s.cookiePath
-	if cookiePath == "" {
-		log.Printf("[WARN] No cookie path configured, cannot auto-refresh")
-		s.notifier.Send(notify.EventCookieExpired, "Cookie 已过期", "未配置 cookie 路径，请手动更新 Cookie")
-		return
-	}
-
-	refreshResult, err := s.getBili().RefreshCookie(cookiePath)
-	if err != nil {
-		log.Printf("[WARN] Cookie refresh error during %s: %v", trigger, err)
-		s.notifier.Send(notify.EventCookieExpired, "Cookie 刷新失败", fmt.Sprintf("错误: %v，请手动更新 Cookie", err))
-		return
-	}
-
-	if refreshResult.Success {
-		log.Printf("[INFO] Cookie 自动刷新成功 (trigger: %s)", trigger)
-		// 刷新下载器的 client 并清除缓存
-		s.resetCaches()
-		s.dl.UpdateClient(s.getBili())
-	} else {
-		log.Printf("[WARN] Cookie 刷新失败: %s (trigger: %s). 请手动更新 Cookie。", refreshResult.Message, trigger)
-		s.notifier.Send(notify.EventCookieExpired, "Cookie 需要手动更新", refreshResult.Message)
-	}
-}
-
-// checkAndRefreshCredential 检查 DB 中的 Credential 是否需要刷新，需要则自动刷新
-func (s *Scheduler) checkAndRefreshCredential() {
-	credJSON, err := s.db.GetSetting("credential_json")
-	if err != nil || credJSON == "" {
-		return // 没有 credential，跳过
-	}
-	cred := bilibili.CredentialFromJSON(credJSON)
-	if cred == nil || cred.IsEmpty() {
-		return
-	}
-
-	httpClient := s.getBili().GetHTTPClient()
-	needRefresh, err := cred.NeedRefresh(httpClient)
-	if err != nil {
-		log.Printf("[credential] NeedRefresh check failed: %v", err)
-		return
-	}
-	if !needRefresh {
-		return
-	}
-
-	log.Printf("[credential] Cookie needs refresh, attempting auto-refresh...")
-	newCred, err := cred.Refresh(httpClient)
-	if err != nil {
-		log.Printf("[WARN] Credential auto-refresh failed: %v", err)
-		s.notifier.Send(notify.EventCookieExpired, "凭证自动刷新失败", err.Error())
-		return
-	}
-
-	// 保存到 DB
-	if err := s.db.SetSetting("credential_json", newCred.ToJSON()); err != nil {
-		log.Printf("[WARN] Save refreshed credential failed: %v", err)
-		return
-	}
-
-	// 更新 scheduler 的 client
-	s.UpdateCredential(newCred)
-	log.Printf("[credential] Auto-refresh successful")
-}
-
-// ReloadConfig 手动触发配置重载（API 调用后立即生效）
-func (s *Scheduler) ReloadConfig() {
-	if s.configWatcher != nil {
-		s.configWatcher.Reload()
-	}
-}
-
-// GetHotConfig 获取当前热配置快照
-func (s *Scheduler) GetHotConfig() config.HotConfigSnapshot {
-	return s.hotConfig.Get()
-}
-
-// getFilenameTemplate 获取文件名模板（从热配置或 DB）
-func (s *Scheduler) getFilenameTemplate() string {
-	if s.hotConfig != nil {
-		snap := s.hotConfig.Get()
-		if snap.FilenameTemplate != "" {
-			return snap.FilenameTemplate
-		}
-	}
-	if tmpl, err := s.db.GetSetting("filename_template"); err == nil && tmpl != "" {
-		return tmpl
-	}
-	return config.DefaultFilenameTemplate
-}
-
-// SyncAll 触发全部源检查（供 API 调用）
-func (s *Scheduler) SyncAll() {
-	go s.checkAllForce()
 }
