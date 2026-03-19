@@ -194,14 +194,16 @@ func main() {
 		}
 	}()
 
-	// pprof debug server on :6060
-	go func() {
-		pprofAddr := ":6060"
-		log.Printf("pprof debug server listening on http://localhost%s/debug/pprof/", pprofAddr)
-		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
-			log.Printf("pprof server error: %v", err)
-		}
-	}()
+	// pprof 调试服务：仅当 PPROF_ADDR 环境变量设置时启动
+	// 默认不启动，防止生产环境意外暴露调试接口
+	if pprofAddr := os.Getenv("PPROF_ADDR"); pprofAddr != "" {
+		go func() {
+			log.Printf("pprof debug server listening on http://%s/debug/pprof/", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
+	}
 
 	log.Println("Application started successfully")
 

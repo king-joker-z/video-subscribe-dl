@@ -78,6 +78,15 @@ func (s *DouyinScheduler) CheckDouyin(src db.Source) {
 	page := 0
 	consecutiveErrors := 0
 
+	// 过滤规则提前解析，避免在每次循环迭代中重复调用
+	advRulesCheck := filter.ParseRules(src.FilterRules)
+	titleRulesCheck := make([]filter.Rule, 0, len(advRulesCheck))
+	for _, r := range advRulesCheck {
+		if r.Target == "title" {
+			titleRulesCheck = append(titleRulesCheck, r)
+		}
+	}
+
 	for {
 		result, err := client.GetUserVideos(secUID, maxCursor, consecutiveErrors)
 		if err != nil {
@@ -144,18 +153,9 @@ func (s *DouyinScheduler) CheckDouyin(src db.Source) {
 				if src.DownloadFilter != "" && !filter.MatchesSimple(title, src.DownloadFilter) {
 					continue
 				}
-				// 高级规则过滤（仅标题预检，无需获取详情）
-				advRules := filter.ParseRules(src.FilterRules)
-				if len(advRules) > 0 {
-					titleRules := make([]filter.Rule, 0)
-					for _, r := range advRules {
-						if r.Target == "title" {
-							titleRules = append(titleRules, r)
-						}
-					}
-					if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: title}) {
-						continue
-					}
+				// 高级规则过滤（仅标题预检，规则在循环外已解析）
+				if len(titleRulesCheck) > 0 && !filter.MatchesRules(titleRulesCheck, filter.VideoInfo{Title: title}) {
+					continue
 				}
 
 				dl := &db.Download{
@@ -333,6 +333,15 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		return
 	}
 
+	// 过滤规则提前解析，避免在每次循环迭代中重复调用
+	advRulesFull := filter.ParseRules(src.FilterRules)
+	titleRulesFull := make([]filter.Rule, 0, len(advRulesFull))
+	for _, r := range advRulesFull {
+		if r.Target == "title" {
+			titleRulesFull = append(titleRulesFull, r)
+		}
+	}
+
 	created := 0
 	var maxCreated int64
 	for _, v := range missing {
@@ -343,18 +352,9 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		if src.DownloadFilter != "" && !filter.MatchesSimple(v.Title, src.DownloadFilter) {
 			continue
 		}
-		// 高级规则过滤（仅标题预检）
-		advRules := filter.ParseRules(src.FilterRules)
-		if len(advRules) > 0 {
-			titleRules := make([]filter.Rule, 0)
-			for _, r := range advRules {
-				if r.Target == "title" {
-					titleRules = append(titleRules, r)
-				}
-			}
-			if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: v.Title}) {
-				continue
-			}
+		// 高级规则过滤（仅标题预检，规则在循环外已解析）
+		if len(titleRulesFull) > 0 && !filter.MatchesRules(titleRulesFull, filter.VideoInfo{Title: v.Title}) {
+			continue
 		}
 		dl := &db.Download{
 			SourceID:  src.ID,
@@ -406,6 +406,15 @@ func (s *DouyinScheduler) CheckDouyinMix(src db.Source) {
 		return
 	}
 
+	// 过滤规则提前解析，避免在每次循环迭代中重复调用
+	advRulesMix := filter.ParseRules(src.FilterRules)
+	titleRulesMix := make([]filter.Rule, 0, len(advRulesMix))
+	for _, r := range advRulesMix {
+		if r.Target == "title" {
+			titleRulesMix = append(titleRulesMix, r)
+		}
+	}
+
 	newCount := 0
 	for _, v := range videos {
 		exists, _ := s.db.IsVideoDownloaded(src.ID, v.AwemeID)
@@ -422,18 +431,9 @@ func (s *DouyinScheduler) CheckDouyinMix(src db.Source) {
 		if src.DownloadFilter != "" && !filter.MatchesSimple(title, src.DownloadFilter) {
 			continue
 		}
-		// 高级规则过滤（仅标题预检）
-		advRules := filter.ParseRules(src.FilterRules)
-		if len(advRules) > 0 {
-			titleRules := make([]filter.Rule, 0)
-			for _, r := range advRules {
-				if r.Target == "title" {
-					titleRules = append(titleRules, r)
-				}
-			}
-			if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: title}) {
-				continue
-			}
+		// 高级规则过滤（仅标题预检，规则在循环外已解析）
+		if len(titleRulesMix) > 0 && !filter.MatchesRules(titleRulesMix, filter.VideoInfo{Title: title}) {
+			continue
 		}
 
 		dl := &db.Download{

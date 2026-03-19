@@ -91,6 +91,9 @@ type DouyinScheduler struct {
 	// 下载事件推送 channel
 	eventCh chan DownloadEvent
 
+	// 下载 goroutine 并发上限（防止批量提交时无限创建 goroutine）
+	workerSem chan struct{}
+
 	// Cookie 状态（全局单例方式，同步访问）
 	cookieStatusMu sync.RWMutex
 	cookieValid    bool
@@ -123,6 +126,7 @@ func New(cfg Config) *DouyinScheduler {
 		eventCh:         make(chan DownloadEvent, 100),
 		cookieValid:     true,
 		downloadLimiter: douyin.NewRateLimiter(3, 1, 15*time.Second),
+		workerSem:       make(chan struct{}, 8), // 最多 8 个并发下载 goroutine
 	}
 	return s
 }
@@ -139,9 +143,13 @@ func (s *DouyinScheduler) CheckSource(src db.Source) {
 	}
 }
 
-// RetryDownload 重试单个抖音下载记录
+// RetryDownload 重试单个抖音下载记录（通过信号量限制并发 goroutine 数量）
 func (s *DouyinScheduler) RetryDownload(dl db.Download) {
-	s.RetryOneDownload(dl)
+	s.workerSem <- struct{}{} // 获取 slot，满时阻塞（调用方通常在 go func 内，不影响主流程）
+	go func() {
+		defer func() { <-s.workerSem }()
+		s.RetryOneDownload(dl)
+	}()
 }
 
 // IsPaused 返回抖音是否被暂停

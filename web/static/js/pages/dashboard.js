@@ -148,6 +148,27 @@ export function DashboardPage({ onNavigate }) {
       ),
       h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
     ),
+    // 抖音手动暂停横幅
+    douyinPaused && h('div', { className: 'bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
+      h('div', { className: 'text-yellow-500 text-xl' }, '⏸'),
+      h('div', { className: 'flex-1' },
+        h('div', { className: 'text-yellow-700 font-medium' }, '抖音下载已手动暂停'),
+        h('div', { className: 'text-yellow-600/70 text-sm' }, '新视频扫描正常进行，下载任务将在恢复后处理')
+      ),
+      h(Button, {
+        size: 'sm',
+        variant: 'secondary',
+        onClick: async () => {
+          try {
+            await api.resumeDouyin();
+            setDouyinPaused(false);
+            toast('抖音下载已恢复', 'success');
+          } catch (e) {
+            toast('恢复失败: ' + e.message, 'error');
+          }
+        }
+      }, '恢复下载')
+    ),
     // 风控冷却横幅（手动恢复）
     cooldownSec > 0 && h('div', { className: 'bg-orange-50 border border-orange-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
       h('div', { className: 'text-orange-500 text-xl' }, '⚠️'),

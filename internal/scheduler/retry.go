@@ -83,7 +83,12 @@ func (s *Scheduler) RetryByID(dlID int64) {
 	if err != nil || dl == nil {
 		return
 	}
-	s.retryOneDownload(*dl)
+	// 用 wg 包装，确保 Stop() 时能优雅等待完成
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.retryOneDownload(*dl)
+	}()
 }
 
 // RedownloadByID 重新下载指定记录（由 Web API redownload 调用）

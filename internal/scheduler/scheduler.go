@@ -148,6 +148,12 @@ func (s *Scheduler) Start() {
 					if !ok {
 						return
 					}
+					// 二次确认 stop，避免 stopCh 关闭时与 evtCh 竞争导致多发一次事件
+					select {
+					case <-s.stopCh:
+						return
+					default:
+					}
 					s.dl.EmitEvent(downloader.DownloadEvent{
 						Type:     evt.Type,
 						BvID:     evt.VideoID,
