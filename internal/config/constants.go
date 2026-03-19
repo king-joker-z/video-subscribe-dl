@@ -5,7 +5,7 @@ import "time"
 const (
 	// DefaultRequestInterval 下载器默认请求间隔（秒）
 	// 用于防封，避免请求过于密集。实际值可在 Web UI 设置中覆盖。
-	DefaultRequestInterval = 3
+	DefaultRequestInterval = 15
 
 	// DefaultCheckIntervalSec 源默认检查间隔（秒）
 	DefaultCheckIntervalSec = 1800
@@ -23,13 +23,13 @@ const (
 	MinDiskFreeDefault = 1 * 1024 * 1024 * 1024
 
 	// DefaultDownloadWorkers 默认下载并发数
-	DefaultDownloadWorkers = 3
+	DefaultDownloadWorkers = 1
 
 	// MaxRetryCount 最大重试次数
 	MaxRetryCount = 3
 
-	// CooldownDuration 风控冷却时间
-	CooldownDuration = 10 * time.Minute
+	// CooldownDuration 风控冷却时间（设为极大值 = 实际上手动恢复）
+	CooldownDuration = 365 * 24 * time.Hour
 
 	// DefaultQueueSize 下载队列默认大小
 	DefaultQueueSize = 2000

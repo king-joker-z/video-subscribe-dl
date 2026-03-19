@@ -58,8 +58,8 @@ func (c *Client) getWbiKeys() (string, string, error) {
 	wbiCacheInstance.mu.Lock()
 	defer wbiCacheInstance.mu.Unlock()
 
-	// 缓存 1 小时
-	if wbiCacheInstance.imgKey != "" && time.Since(wbiCacheInstance.fetchedAt) < time.Hour {
+	// 缓存 6 小时（WBI keys 实测一天内稳定，减少 /nav 额外请求降低风控风险）
+	if wbiCacheInstance.imgKey != "" && time.Since(wbiCacheInstance.fetchedAt) < 6*time.Hour {
 		return wbiCacheInstance.imgKey, wbiCacheInstance.subKey, nil
 	}
 

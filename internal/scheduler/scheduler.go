@@ -101,10 +101,6 @@ func (s *Scheduler) Start() {
 			s.cronScheduler = cron.New(cron.WithSeconds())
 			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
 				s.bili.PeriodicCookieCheck()
-				if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
-					s.dl.Resume()
-					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
-				}
 				s.checkAll()
 			})
 			if err != nil {
@@ -132,10 +128,6 @@ func (s *Scheduler) Start() {
 			select {
 			case <-ticker.C:
 				s.bili.PeriodicCookieCheck()
-				if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
-					s.dl.Resume()
-					log.Printf("[scheduler] B站风控冷却结束，恢复下载器")
-				}
 				s.checkAll()
 			case <-s.stopCh:
 				return
@@ -157,11 +149,6 @@ func (s *Scheduler) Stop() {
 // ─── 检查逻辑 ──────────────────────────────────────────────────────────────────
 
 func (s *Scheduler) checkAll() {
-	// B 站冷却已过期但 downloader 还在 paused，自动恢复
-	if s.dl != nil && s.dl.IsPaused() && !s.bili.IsInCooldown() {
-		s.dl.Resume()
-		log.Printf("[scheduler] checkAll: B站风控冷却已过期，恢复下载器")
-	}
 	// 先检查 Credential 是否需要刷新（委托给 bscheduler）
 	s.bili.CheckAndRefreshCredential()
 	s.bili.VerifyCookie("scheduled sync")
@@ -445,6 +432,27 @@ func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 		return true, biliSec
 	}
 	return false, 0
+}
+
+// ─── B 站风控恢复（手动）────────────────────────────────────────────────────
+
+// ResumeBili 手动恢复 B 站下载器（风控触发后需手动恢复）
+func (s *Scheduler) ResumeBili() {
+	if s.bili != nil {
+		s.bili.ClearCooldown()
+	}
+	if s.dl != nil {
+		s.dl.Resume()
+	}
+	log.Printf("[scheduler] B站风控已手动恢复")
+}
+
+// IsBiliPaused 检查 B 站下载器是否被暂停
+func (s *Scheduler) IsBiliPaused() bool {
+	if s.dl == nil {
+		return false
+	}
+	return s.dl.IsPaused()
 }
 
 // ─── 抖音暂停控制（委托给 dscheduler）────────────────────────────────────────

@@ -1,7 +1,6 @@
 package bscheduler
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -17,14 +16,12 @@ func (s *BiliScheduler) TriggerCooldown() {
 	if s.dl != nil {
 		s.dl.Pause()
 	}
-	log.Printf("[bscheduler][WARN] 触发B站风控，暂停下载器 %v（恢复时间: %s）",
-		config.CooldownDuration, s.cooldownUntil.Format("15:04:05"))
+	log.Printf("[bscheduler][WARN] 触发B站风控，下载器已暂停，需在 Web UI 手动恢复")
 
 	if time.Since(s.lastCooldownNotify) > 30*time.Minute {
 		s.lastCooldownNotify = time.Now()
 		s.notifier.Send(notify.EventRateLimited, "B站风控触发",
-			fmt.Sprintf("已暂停 %v，预计 %s 恢复",
-				config.CooldownDuration, s.cooldownUntil.Format("15:04:05")))
+			"下载器已暂停，请在 Web UI 手动恢复")
 	}
 }
 
@@ -33,6 +30,14 @@ func (s *BiliScheduler) IsInCooldown() bool {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
 	return time.Now().Before(s.cooldownUntil)
+}
+
+// ClearCooldown 手动清除 B 站风控冷却状态
+func (s *BiliScheduler) ClearCooldown() {
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+	s.cooldownUntil = time.Time{}
+	log.Printf("[bscheduler] B站风控冷却已手动清除")
 }
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用）

@@ -100,7 +100,7 @@ export function DashboardPage({ onNavigate }) {
 
   // 运行状态
   const getRunStatus = () => {
-    if (cooldownSec > 0) return { label: '风控冷却', color: 'text-orange-500', badge: 'cancelled' };
+    if (cooldownSec > 0) return { label: '风控暂停（待恢复）', color: 'text-orange-500', badge: 'cancelled' };
     if (task?.status === 'running') return { label: '运行中', color: 'text-emerald-600', badge: 'downloading' };
     if (task?.status === 'paused') return { label: '已暂停', color: 'text-amber-600', badge: 'cancelled' };
     return { label: '空闲', color: 'text-slate-500', badge: 'completed' };
@@ -145,14 +145,26 @@ export function DashboardPage({ onNavigate }) {
       ),
       h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
     ),
-    // 风控冷却横幅
+    // 风控冷却横幅（手动恢复）
     cooldownSec > 0 && h('div', { className: 'bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3' },
       h('div', { className: 'text-orange-500 text-xl' }, '⚠️'),
       h('div', { className: 'flex-1' },
-        h('div', { className: 'text-orange-600 font-medium' }, 'B站风控冷却中'),
-        h('div', { className: 'text-orange-500/70 text-sm' }, '下载已自动暂停，冷却结束后恢复')
+        h('div', { className: 'text-orange-600 font-medium' }, 'B站触发风控，下载已暂停'),
+        h('div', { className: 'text-orange-500/70 text-sm' }, '请确认网络/Cookie 正常后手动恢复')
       ),
-      h('div', { className: 'text-2xl font-mono font-bold text-orange-500' }, formatCooldown(cooldownSec))
+      h(Button, {
+        size: 'sm',
+        variant: 'secondary',
+        onClick: async () => {
+          try {
+            await api.resumeBili();
+            setCooldownSec(0);
+            toast('B站下载已恢复', 'success');
+          } catch (e) {
+            toast('恢复失败: ' + e.message, 'error');
+          }
+        }
+      }, '手动恢复')
     ),
 
     // 凭证过期/未登录警告横幅

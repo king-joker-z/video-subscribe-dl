@@ -119,6 +119,11 @@ func (rt *Router) SetDouyinResumeFunc(fn func()) {
 	rt.douyinStatus.SetResumeFunc(fn)
 }
 
+// SetBiliResumeFunc 设置 B 站手动恢复回调
+func (rt *Router) SetBiliResumeFunc(fn func()) {
+	rt.task.SetResumeBiliFunc(fn)
+}
+
 // SetDouyinCookieStatusFunc 设置抖音 Cookie 状态查询回调
 func (rt *Router) SetDouyinCookieStatusFunc(fn func() (bool, string)) {
 	rt.douyinStatus.SetCookieStatusFunc(fn)
@@ -275,6 +280,9 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	// Douyin Status (pause/resume)
 	mux.HandleFunc("/api/douyin/status", rt.douyinStatus.HandleStatus)
 	mux.HandleFunc("/api/douyin/resume", rt.douyinStatus.HandleResume)
+
+	// Bili manual resume
+	mux.HandleFunc("/api/bili/resume", rt.task.HandleResumeBili)
 
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)

@@ -86,10 +86,12 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 					s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
 					return
 				}
+				// page > 1：已获取到部分数据，先 break 保存，再触发风控
+				log.Printf("[bscheduler·投稿API] %s: 第%d页风控，保存已获取的 %d 条后触发冷却", uploaderName, page, totalFetched)
 				if bilibili.IsRiskControl(err) {
 					s.TriggerCooldown()
 				}
-				return
+				break
 			}
 			log.Printf("[bscheduler] Get videos page %d failed: %v", page, err)
 			break
@@ -160,7 +162,13 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 			break
 		}
 		page++
-		time.Sleep(time.Duration(3000+rand.Intn(2000)) * time.Millisecond)
+		// 翻页间隔：5~10s，首次全量每 3 页额外休息 10~15s 模拟人类节奏
+		sleepMs := 5000 + rand.Intn(5000)
+		if isFirstScan && page%3 == 0 {
+			sleepMs += 10000 + rand.Intn(5000)
+			log.Printf("[bscheduler·首次全量] 每3页大间隔，额外休息...")
+		}
+		time.Sleep(time.Duration(sleepMs) * time.Millisecond)
 	}
 
 	if maxCreated > latestVideoAt {
