@@ -160,12 +160,14 @@ function EditModal({ source, onSave, onClose }) {
         h('input', { type: 'number', value: form.check_interval, onChange: (e) => update('check_interval', parseInt(e.target.value) || 1800), min: 300, className: inputClass })
       ),
 
-      // 开关组
-      h('div', { className: 'grid grid-cols-3 gap-3' },
+      // 开关组（2×2 网格，每项独立）
+      h('div', { className: 'grid grid-cols-2 gap-3' },
         h('div', { className: 'flex items-center gap-2' },
           h('input', { type: 'checkbox', checked: form.download_danmaku, onChange: (e) => update('download_danmaku', e.target.checked), className: 'rounded border-slate-300' }),
-          h('label', { className: 'text-sm text-slate-600' }, '下载弹幕'),
-          h('input', { type: 'checkbox', checked: form.download_subtitle, onChange: (e) => update('download_subtitle', e.target.checked), className: 'rounded border-slate-300 ml-4' }),
+          h('label', { className: 'text-sm text-slate-600' }, '下载弹幕')
+        ),
+        h('div', { className: 'flex items-center gap-2' },
+          h('input', { type: 'checkbox', checked: form.download_subtitle, onChange: (e) => update('download_subtitle', e.target.checked), className: 'rounded border-slate-300' }),
           h('label', { className: 'text-sm text-slate-600' }, '下载字幕')
         ),
         h('div', { className: 'flex items-center gap-2' },

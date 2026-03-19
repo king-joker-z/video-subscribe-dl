@@ -7,7 +7,9 @@ export function LogsPage() {
   const [logs, setLogs] = useState([]);
   const [filter, setFilter] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0); // 非追随状态下累积的未读新日志数
   const [connType, setConnType] = useState(''); // 'ws' | 'sse'
+  const autoScrollRef = useRef(true); // ref 副本，供 onLog 闭包读取
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
   const skipHistoryRef = useRef(false);
@@ -21,7 +23,12 @@ export function LogsPage() {
       connectionRef.current = null;
     }
 
-    const onLog = (entry) => setLogs(prev => [...prev.slice(-999), entry]);
+    const onLog = (entry) => {
+      setLogs(prev => [...prev.slice(-999), entry]);
+      if (!autoScrollRef.current) {
+        setUnreadCount(prev => prev + 1);
+      }
+    };
 
     // 使用 api.js 导出的 createLogSocket（WebSocket 优先）
     const sock = createLogSocket(onLog, (type) => {
@@ -47,8 +54,13 @@ export function LogsPage() {
 
   const fallbackToSSE = useCallback(() => {
     // 使用全局 SSE 单例的 vsd:log 事件，不新建 EventSource
+    const onLog = (entry) => {
+      setLogs(prev => [...prev.slice(-999), entry]);
+      if (!autoScrollRef.current) {
+        setUnreadCount(prev => prev + 1);
+      }
+    };
     const handler = (e) => { onLog(e.detail); };
-    const onLog = (entry) => setLogs(prev => [...prev.slice(-999), entry]);
     window.addEventListener('vsd:log', handler);
     setConnType('sse');
     connectionRef.current = { close: () => window.removeEventListener('vsd:log', handler), type: 'sse' };
@@ -91,16 +103,30 @@ export function LogsPage() {
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     const atBottom = scrollTop + clientHeight >= scrollHeight - 20;
     if (!atBottom) {
+      autoScrollRef.current = false;
       setAutoScroll(false);
     } else {
+      autoScrollRef.current = true;
       setAutoScroll(true);
+      setUnreadCount(0);
     }
   };
 
   const scrollToBottom = () => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
-      setAutoScroll(true);
+    }
+    autoScrollRef.current = true;
+    setAutoScroll(true);
+    setUnreadCount(0);
+  };
+
+  const toggleAutoScroll = () => {
+    const next = !autoScroll;
+    autoScrollRef.current = next;
+    setAutoScroll(next);
+    if (next) {
+      scrollToBottom();
     }
   };
 
@@ -166,9 +192,19 @@ export function LogsPage() {
           }, f.label))
         ),
         h('button', {
-          onClick: () => setAutoScroll(!autoScroll),
-          className: cn('px-3 py-1 rounded text-xs font-medium', autoScroll ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500')
-        }, autoScroll ? '⏬ 自动滚动' : '⏸ 已暂停'),
+          onClick: toggleAutoScroll,
+          title: autoScroll ? '点击暂停自动追随' : '点击追随最新日志',
+          className: cn(
+            'relative px-3 py-1 rounded text-xs font-medium transition-colors',
+            autoScroll ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500 hover:text-slate-700'
+          )
+        },
+          autoScroll ? '⏬ 追随中' : '⏸ 已暂停',
+          // 未读计数气泡
+          !autoScroll && unreadCount > 0 && h('span', {
+            className: 'absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1'
+          }, unreadCount > 99 ? '99+' : String(unreadCount))
+        ),
         h('button', {
           onClick: handleClear,
           className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-red-500 transition-colors'
@@ -195,11 +231,17 @@ export function LogsPage() {
               );
             })
       ),
-      // 浮动"回到底部"按钮（仅 autoScroll=false 时显示）
+      // 浮动"回到底部 + 恢复追随"按钮（仅非追随状态时显示）
       !autoScroll && h('button', {
         onClick: scrollToBottom,
-        className: 'absolute bottom-4 right-6 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs font-medium shadow-lg hover:bg-slate-100 transition-colors flex items-center gap-1'
-      }, '↓ 回到底部')
+        title: '滚到底部并恢复追随最新日志',
+        className: 'absolute bottom-4 right-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium shadow-lg hover:bg-blue-700 transition-colors'
+      },
+        '↓ 跳到最新',
+        unreadCount > 0 && h('span', {
+          className: 'bg-white/20 rounded px-1 tabular-nums'
+        }, '+' + (unreadCount > 99 ? '99+' : unreadCount))
+      )
     )
   );
 }
