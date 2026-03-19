@@ -1,7 +1,6 @@
 package dscheduler
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -149,7 +148,7 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
-		ctx := context.Background()
+		ctx := s.rootCtx
 		fileSize, err = downloadFileWithProgress(ctx, videoURL, videoFilePath, dl.ID, title, pCb)
 		if err == nil {
 			break

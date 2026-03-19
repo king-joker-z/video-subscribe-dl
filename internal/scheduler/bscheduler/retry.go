@@ -11,6 +11,7 @@ import (
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
+	"video-subscribe-dl/internal/filter"
 	"video-subscribe-dl/internal/nfo"
 )
 
@@ -54,6 +55,27 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		log.Printf("[bscheduler] 视频 %s (%s) 为充电专属/付费内容，更新为 charge_blocked", dl.Title, dl.VideoID)
 		s.db.UpdateDownloadStatus(dl.ID, "charge_blocked", "", 0, "充电专属/付费视频")
 		return
+	}
+
+	// 重新校验过滤规则（用户可能在失败后更新了订阅源的过滤条件）
+	if src.DownloadFilter != "" && !filter.MatchesSimple(dl.Title, src.DownloadFilter) {
+		log.Printf("[bscheduler] retry: %s 不匹配过滤规则 '%s'，跳过", dl.VideoID, src.DownloadFilter)
+		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "filter: not matching simple rule")
+		return
+	}
+	if src.FilterRules != "" {
+		advRules := filter.ParseRules(src.FilterRules)
+		titleRules := make([]filter.Rule, 0, len(advRules))
+		for _, r := range advRules {
+			if r.Field == "" || r.Field == "title" {
+				titleRules = append(titleRules, r)
+			}
+		}
+		if len(titleRules) > 0 && !filter.MatchesRules(titleRules, filter.VideoInfo{Title: dl.Title}) {
+			log.Printf("[bscheduler] retry: %s 不匹配高级过滤规则，跳过", dl.VideoID)
+			s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "filter: not matching advanced rules")
+			return
+		}
 	}
 
 	var cid int64

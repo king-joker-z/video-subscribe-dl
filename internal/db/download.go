@@ -41,11 +41,15 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage,
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage,
 			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}
@@ -71,11 +75,15 @@ func (d *DB) GetDownloadsByStatus(status string, limit int) ([]Download, error) 
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage,
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage,
 			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}
@@ -175,16 +183,16 @@ func (d *DB) UpdateThumbPath(id int64, thumbPath string) error {
 }
 
 // IsVideoDownloaded 检查指定订阅源内是否已有该视频的下载记录（用于去重）
-// 返回 true 表示该视频有活跃记录（非 permanent_failed 和 cleaned 状态）
-// 以下状态不阻止重新下载：permanent_failed（超限永久失败）、cleaned（已自动清理）
+// 返回 true 表示该视频有活跃记录（非 permanent_failed、cleaned、cancelled 状态）
+// 以下状态不阻止重新下载：permanent_failed（超限永久失败）、cleaned（已自动清理）、cancelled（用户取消）
 // 以下状态会阻止重新触发：pending、downloading、failed（处理中）、
 //
-//	charge_blocked（充电专属）、deleted（用户软删除）、cancelled（用户取消）、
+//	charge_blocked（充电专属）、deleted（用户软删除）、
 //	skipped（过滤规则命中）、completed、relocated（已下载完成）
 func (d *DB) IsVideoDownloaded(sourceID int64, videoID string) (bool, error) {
 	var exists int
 	err := d.QueryRow(`
-		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status NOT IN ('permanent_failed', 'cleaned')
+		SELECT COUNT(*) FROM downloads WHERE source_id = ? AND video_id = ? AND status NOT IN ('permanent_failed', 'cleaned', 'cancelled')
 	`, sourceID, videoID).Scan(&exists)
 	return exists > 0, err
 }
@@ -226,10 +234,14 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}
@@ -255,10 +267,14 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}

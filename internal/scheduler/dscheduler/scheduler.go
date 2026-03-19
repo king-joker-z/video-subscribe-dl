@@ -4,6 +4,7 @@
 package dscheduler
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -98,6 +99,10 @@ type DouyinScheduler struct {
 	cookieStatusMu sync.RWMutex
 	cookieValid    bool
 	cookieMsg      string
+
+	// 生命周期 context（Stop 时取消，中断正在进行的下载）
+	rootCtx    context.Context
+	rootCancel context.CancelFunc
 }
 
 // Config 创建 DouyinScheduler 所需的配置
@@ -116,6 +121,7 @@ func New(cfg Config) *DouyinScheduler {
 			return &douyinClientAdapter{douyin.NewClient()}
 		}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &DouyinScheduler{
 		db:              cfg.DB,
 		downloadDir:     cfg.DownloadDir,
@@ -127,6 +133,8 @@ func New(cfg Config) *DouyinScheduler {
 		cookieValid:     true,
 		downloadLimiter: douyin.NewRateLimiter(3, 1, 15*time.Second),
 		workerSem:       make(chan struct{}, 8), // 最多 8 个并发下载 goroutine
+		rootCtx:         ctx,
+		rootCancel:      cancel,
 	}
 	return s
 }
@@ -159,8 +167,11 @@ func (s *DouyinScheduler) IsPaused() bool {
 	return s.paused
 }
 
-// Stop 清理资源
+// Stop 清理资源，取消所有进行中的下载
 func (s *DouyinScheduler) Stop() {
+	if s.rootCancel != nil {
+		s.rootCancel()
+	}
 	if s.downloadLimiter != nil {
 		s.downloadLimiter.Stop()
 	}

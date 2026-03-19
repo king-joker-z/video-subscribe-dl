@@ -165,8 +165,12 @@ func (h *VideosHandler) HandleRetry(w http.ResponseWriter, r *http.Request, id i
 		h.onRetryDownload(id)
 		log.Printf("[video] Retry download %d via API", id)
 	} else {
+		// fallback：直接改 DB 状态并触发 pending 处理
 		h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 		h.db.ResetRetryCount(id)
+		if h.onProcessPending != nil {
+			go h.onProcessPending()
+		}
 	}
 	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重试"})
 }
@@ -197,8 +201,9 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if dl.Status != "completed" && dl.Status != "relocated" {
-		apiError(w, CodeInvalidParam, "只能重新下载已完成或待处理的视频")
+	if dl.Status != "completed" && dl.Status != "relocated" &&
+		dl.Status != "failed" && dl.Status != "permanent_failed" && dl.Status != "cancelled" {
+		apiError(w, CodeInvalidParam, "只能重新下载已完成、失败或已取消的视频")
 		return
 	}
 
