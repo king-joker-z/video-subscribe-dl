@@ -154,10 +154,21 @@ func (h *UploadersHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /api/uploaders/:name — 获取单个 UP 主统计
+	// /api/uploaders/:name — 获取单个 UP 主统计 或 删除 UP 主数据
 	name, err := url.PathUnescape(path)
 	if err != nil {
 		name = path
+	}
+
+	if r.Method == "DELETE" {
+		affected, err := h.db.DeleteUploaderData(name)
+		if err != nil {
+			apiError(w, CodeInternal, "删除失败: "+err.Error())
+			return
+		}
+		log.Printf("[uploaders] 删除 UP 主 %q 数据：%d 条下载记录", name, affected)
+		apiOK(w, map[string]interface{}{"message": "已删除", "affected": affected})
+		return
 	}
 
 	if r.Method != "GET" {

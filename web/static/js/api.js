@@ -105,6 +105,7 @@ export const api = {
   }),
   // UP 主下载 pending（专用 endpoint）
   uploaderDownloadPending: (name) => request(`/api/uploaders/${encodeURIComponent(name)}/download-pending`, { method: 'POST' }),
+  deleteUploader: (name) => request(`/api/uploaders/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // Me — 关注列表
   getMyUppers: (page, pageSize, search) => {
     const qs = new URLSearchParams({ page, page_size: pageSize });

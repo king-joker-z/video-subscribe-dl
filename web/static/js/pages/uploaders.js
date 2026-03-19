@@ -82,8 +82,18 @@ export function UploadersPage({ onNavigate }) {
     e.stopPropagation();
     try {
       const res = await api.uploaderDownloadPending(uploaderName);
-      toast.success(res.data.message || '已提交');
-    } catch (e2) { toast.error(e2.message); }
+      toast(res.data.message || '已提交', 'success');
+    } catch (e2) { toast(e2.message, 'error'); }
+  };
+
+  const handleDeleteUploader = async (uploaderName, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`确认删除 UP 主「${uploaderName}」的所有记录？\n（不会删除本地文件，仅清除数据库数据）`)) return;
+    try {
+      const res = await api.deleteUploader(uploaderName);
+      toast(`已删除，共 ${res.data.affected} 条记录`, 'success');
+      load();
+    } catch (e2) { toast(e2.message, 'error'); }
   };
 
   const handleSearch = (value) => {
@@ -150,12 +160,17 @@ export function UploadersPage({ onNavigate }) {
                     h('div', { className: 'text-xs text-slate-500' }, '失败')
                   ),
                 ),
-                (u.pending > 0) && h('div', { className: 'mt-3 pt-2 border-t border-slate-200' },
-                  h(Button, {
+                h('div', { className: 'mt-3 pt-2 border-t border-slate-200 flex gap-2' },
+                  (u.pending > 0) && h(Button, {
                     onClick: (e) => handleDownloadPending(u.uploader, e),
                     variant: 'secondary', size: 'sm',
-                    className: 'w-full text-xs'
-                  }, `下载待处理 (${u.pending})`)
+                    className: 'flex-1 text-xs'
+                  }, `下载待处理 (${u.pending})`),
+                  h(Button, {
+                    onClick: (e) => handleDeleteUploader(u.uploader, e),
+                    variant: 'secondary', size: 'sm',
+                    className: 'text-xs text-red-500 hover:text-red-600 hover:border-red-300'
+                  }, h(Icon, { name: 'trash', size: 12 }), '删除')
                 )
               )
             )

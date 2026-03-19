@@ -75,6 +75,20 @@ func (d *DB) GetPeopleWithVideoCount() ([]PersonWithCount, error) {
 	return people, nil
 }
 
+// DeleteUploaderData 删除指定 UP 主的所有数据：downloads 记录 + people 记录
+// 不删除本地文件，仅清除 DB 数据，让 UI 上不再显示该 UP 主
+func (d *DB) DeleteUploaderData(name string) (int64, error) {
+	// 删除 downloads（所有状态）
+	res, err := d.Exec("DELETE FROM downloads WHERE uploader = ?", name)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := res.RowsAffected()
+	// 删除 people 记录（按名称）
+	d.Exec("DELETE FROM people WHERE name = ?", name)
+	return affected, nil
+}
+
 // GetPeopleByName 按名称获取 UP 主信息
 func (d *DB) GetPeopleByName(name string) (*Person, error) {
 	var p Person
