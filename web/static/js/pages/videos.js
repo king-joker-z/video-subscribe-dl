@@ -241,16 +241,16 @@ export function VideosPage({ params = {} } = {}) {
           h('button', {
             key: f.value,
             onClick: () => { setStatus(f.value); setPage(1); },
-            className: cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors', status === f.value ? 'bg-blue-500/20 text-blue-600' : 'text-slate-500 hover:text-slate-700')
+            className: cn('px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium transition-colors', status === f.value ? 'bg-blue-500/20 text-blue-600' : 'text-slate-500 hover:text-slate-700')
           }, f.label)
         ),
         uploader && h('button', {
           onClick: () => { setUploader(''); setPage(1); location.hash = '#/videos'; },
-          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1'
+          className: 'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1'
         }, 'UP主: ' + uploader, ' ', h(Icon, { name: 'x', size: 12 })),
         sourceId && h('button', {
           onClick: () => { setSourceId(''); setSourceName(''); setPage(1); location.hash = '#/videos'; },
-          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-100 text-cyan-700 flex items-center gap-1'
+          className: 'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-medium bg-cyan-100 text-cyan-700 flex items-center gap-1'
         }, '订阅源: ' + (sourceName || '#' + sourceId), ' ', h(Icon, { name: 'x', size: 12 }))
       ),
       h('select', {
@@ -268,22 +268,22 @@ export function VideosPage({ params = {} } = {}) {
     // 批量操作栏
     selected.size > 0 && h('div', { className: 'flex items-center gap-2 flex-wrap bg-blue-50 border border-blue-200 rounded-lg px-3 py-2' },
       h('span', { className: 'text-sm text-blue-600 mr-1' }, batchLoading ? '处理中...' : `已选 ${selected.size} 项`),
-      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重试' },
+      h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重试', className: 'shrink-0' },
         h(Icon, { name: 'refresh', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重试')
       ),
-      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重新下载' },
+      h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重新下载', className: 'shrink-0' },
         h(Icon, { name: 'download', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重下')
       ),
-      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '取消下载' },
+      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '取消下载', className: 'shrink-0' },
         h(Icon, { name: 'x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '取消')
       ),
-      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '删除文件' },
+      h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '删除文件', className: 'shrink-0' },
         h(Icon, { name: 'file-x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删文件')
       ),
-      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '恢复' },
+      h(Button, { onClick: () => handleBatch('restore'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '恢复', className: 'shrink-0' },
         h(Icon, { name: 'undo', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '恢复')
       ),
-      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading, title: '删除' },
+      h(Button, { onClick: () => handleBatch('delete'), variant: 'danger', size: 'sm', disabled: batchLoading, title: '删除', className: 'shrink-0' },
         h(Icon, { name: 'trash', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删除')
       ),
       h('button', {

@@ -164,12 +164,12 @@ export function UploadersPage({ onNavigate }) {
                   (u.pending > 0) && h(Button, {
                     onClick: (e) => handleDownloadPending(u.uploader, e),
                     variant: 'secondary', size: 'sm',
-                    className: 'flex-1 text-xs'
+                    className: 'flex-1 text-xs shrink-0'
                   }, `下载待处理 (${u.pending})`),
                   h(Button, {
                     onClick: (e) => handleDeleteUploader(u.uploader, e),
                     variant: 'secondary', size: 'sm',
-                    className: 'text-xs text-red-500 hover:text-red-600 hover:border-red-300'
+                    className: 'text-xs text-red-500 hover:text-red-600 hover:border-red-300 shrink-0'
                   }, h(Icon, { name: 'trash', size: 12 }), '删除')
                 )
               )

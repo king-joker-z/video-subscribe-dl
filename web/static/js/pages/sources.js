@@ -662,7 +662,7 @@ export function SourcesPage({ onNavigate }) {
                     !s.enabled && h(Badge, { variant: 'outline' }, '已禁用')
                   )
                 ),
-                h('div', { className: 'flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity' },
+                h('div', { className: 'flex items-center gap-0.5 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity' },
                   h('button', { onClick: () => setEditSource(s), className: 'p-1.5 rounded hover:bg-slate-100 text-slate-500', title: '编辑' }, h(Icon, { name: 'edit', size: 14 })),
                   h('button', { onClick: () => handleSync(s.id), className: 'p-1.5 rounded hover:bg-slate-100 text-slate-500', title: '同步' }, h(Icon, { name: 'sync', size: 14 })),
                   h('button', { onClick: () => handleFullScan(s.id), className: 'p-1.5 rounded hover:bg-slate-100 text-slate-500', title: '全量补漏' }, h(Icon, { name: 'hard-drive', size: 14 })),
@@ -676,7 +676,7 @@ export function SourcesPage({ onNavigate }) {
                 h('div', null, h('div', { className: 'text-lg font-bold text-amber-600' }, s.pending_count || 0), h('div', { className: 'text-xs text-slate-500' }, '待处理'))
               ),
               // 同步状态信息
-              h('div', { className: 'flex items-center gap-3 mt-3 pt-2 border-t border-slate-200 text-xs text-slate-500' },
+              h('div', { className: 'flex flex-wrap items-center gap-3 mt-3 pt-2 border-t border-slate-200 text-xs text-slate-500' },
                 s.last_check && h('div', { className: 'flex items-center gap-1', title: '上次检查: ' + new Date(s.last_check).toLocaleString('zh-CN') },
                   h(Icon, { name: 'clock', size: 12 }),
                   formatTimeAgo(s.last_check)

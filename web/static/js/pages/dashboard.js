@@ -137,7 +137,7 @@ export function DashboardPage({ onNavigate }) {
 
   return h('div', { className: 'page-enter space-y-6' },
     // 抖音 Cookie 失效横幅
-    !douyinCookieValid && h('div', { className: 'bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3' },
+    !douyinCookieValid && h('div', { className: 'bg-red-50 border border-red-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
       h('div', { className: 'text-red-500 text-xl' }, '⚠️'),
       h('div', { className: 'flex-1' },
         h('div', { className: 'text-red-600 font-medium' }, '抖音 Cookie 已失效，视频无法下载'),
@@ -146,7 +146,7 @@ export function DashboardPage({ onNavigate }) {
       h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
     ),
     // 风控冷却横幅（手动恢复）
-    cooldownSec > 0 && h('div', { className: 'bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3' },
+    cooldownSec > 0 && h('div', { className: 'bg-orange-50 border border-orange-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
       h('div', { className: 'text-orange-500 text-xl' }, '⚠️'),
       h('div', { className: 'flex-1' },
         h('div', { className: 'text-orange-600 font-medium' }, 'B站触发风控，下载已暂停'),
@@ -168,7 +168,7 @@ export function DashboardPage({ onNavigate }) {
     ),
 
     // 凭证过期/未登录警告横幅
-    (cred.status === 'expired' || cred.status === 'none') && h('div', { className: cn('rounded-xl p-4 flex items-center gap-3 border', credStyle.bg, credStyle.border) },
+    (cred.status === 'expired' || cred.status === 'none') && h('div', { className: cn('rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 border', credStyle.bg, credStyle.border) },
       h('div', { className: cn('text-xl', credStyle.color) }, credStyle.icon),
       h('div', { className: 'flex-1' },
         h('div', { className: cn('font-medium', credStyle.color) }, cred.status === 'expired' ? 'B站凭证已过期' : '未登录 B 站'),
@@ -198,7 +198,7 @@ export function DashboardPage({ onNavigate }) {
     ),
     // 手机端：次要4个（2x4，紧凑）
     h('div', { className: 'grid sm:hidden grid-cols-4 gap-2' },
-      stats.slice(4).map((s, i) => h('div', { key: i, className: 'bg-white border border-slate-200 rounded-lg px-2 py-2 text-center shadow-sm' },
+      stats.slice(4).map((s, i) => h('div', { key: i, className: 'rounded-lg bg-white border border-slate-100 p-3 text-center shadow-sm' },
         h('div', { className: cn('text-xl font-bold', s.color) }, s.value.toLocaleString()),
         h('div', { className: 'text-[10px] text-slate-500 mt-0.5' }, s.label)
       ))
@@ -219,7 +219,7 @@ export function DashboardPage({ onNavigate }) {
           h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '队列长度'), h('span', { className: 'text-slate-800' }, task?.queue_length || 0)),
           h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '运行时间'), h('span', { className: 'text-slate-800' }, task?.uptime || '--')),
         ),
-        h('div', { className: 'flex gap-2 mt-4' },
+        h('div', { className: 'flex flex-wrap gap-2 mt-4' },
           h(Button, { onClick: handleTrigger, disabled: triggering || cooldownSec > 0, size: 'sm' },
             h(Icon, { name: 'play', size: 14 }), triggering ? '触发中...' : '立即执行'),
           task?.status === 'paused'
@@ -242,14 +242,14 @@ export function DashboardPage({ onNavigate }) {
           cred.updated_at && h('div', { className: 'flex justify-between text-slate-600' },
             h('span', null, '更新时间'), h('span', { className: 'text-slate-500 text-xs' }, cred.updated_at)
           ),
-          h('div', { className: 'flex gap-2 mt-3' },
+          h('div', { className: 'flex flex-wrap gap-2 mt-3' },
             h(Button, { onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm', variant: 'secondary' },
               h(Icon, { name: 'sync', size: 14 }), refreshingCred ? '刷新中...' : '刷新凭证')
           )
         ) : cred.status === 'expired' ? h('div', { className: 'space-y-3' },
           h('div', { className: 'text-amber-600 text-sm' }, '凭证已过期，请刷新或重新登录'),
           cred.username && h('div', { className: 'text-sm text-slate-500' }, '上次登录: ' + cred.username),
-          h('div', { className: 'flex gap-2 mt-3' },
+          h('div', { className: 'flex flex-wrap gap-2 mt-3' },
             h(Button, { onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm' },
               refreshingCred ? '刷新中...' : '刷新凭证'),
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '重新登录')
@@ -257,13 +257,13 @@ export function DashboardPage({ onNavigate }) {
         ) : cred.status === 'error' ? h('div', { className: 'space-y-3' },
           h('div', { className: 'text-red-500 text-sm' }, '凭证验证失败'),
           h('div', { className: 'text-xs text-slate-500' }, '可能是网络问题，稍后会自动重试'),
-          h('div', { className: 'flex gap-2 mt-3' },
+          h('div', { className: 'flex flex-wrap gap-2 mt-3' },
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '前往设置')
           )
         ) : h('div', { className: 'space-y-3' },
           h('div', { className: 'text-slate-600 text-sm' }, '未登录，仅能下载 480P 视频'),
           h('div', { className: 'text-xs text-slate-500' }, '扫码登录后可下载高画质视频'),
-          h('div', { className: 'flex gap-2 mt-3' },
+          h('div', { className: 'flex flex-wrap gap-2 mt-3' },
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm' },
               h(Icon, { name: 'log-in', size: 14 }), '前往登录')
           )

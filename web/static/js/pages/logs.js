@@ -177,9 +177,9 @@ export function LogsPage() {
 
   return h('div', { className: 'page-enter flex flex-col h-[calc(100vh-8rem)]' },
     // 顶栏
-    h('div', { className: 'flex items-center justify-between mb-3' },
+    h('div', { className: 'flex flex-wrap items-center gap-2 mb-3' },
       h('h2', { className: 'text-lg font-semibold' }, '实时日志'),
-      h('div', { className: 'flex items-center gap-3' },
+      h('div', { className: 'flex flex-wrap items-center gap-2 ml-auto' },
         // 连接状态指示
         connType && h('span', { className: cn('px-2 py-0.5 rounded text-[10px] font-medium',
           connType === 'ws' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-600')
@@ -199,7 +199,7 @@ export function LogsPage() {
             autoScroll ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500 hover:text-slate-700'
           )
         },
-          autoScroll ? '⏬ 追随中' : '⏸ 已暂停',
+          autoScroll ? '⏬ 追随' : '⏸ 暂停',
           // 未读计数气泡
           !autoScroll && unreadCount > 0 && h('span', {
             className: 'absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1'
