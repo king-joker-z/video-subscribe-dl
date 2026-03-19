@@ -45,11 +45,12 @@ type ProgressInfo struct {
 
 // DownloadEvent 描述一个下载完成/失败事件，用于 SSE 推送给前端
 type DownloadEvent struct {
-	Type     string `json:"type"`      // "completed", "failed"
-	BvID     string `json:"bvid"`
-	Title    string `json:"title"`
-	FileSize int64  `json:"file_size"` // bytes, 0 for failed
-	Error    string `json:"error"`     // 失败原因
+	Type         string `json:"type"`          // "completed", "failed"
+	BvID         string `json:"bvid"`
+	Title        string `json:"title"`
+	FileSize     int64  `json:"file_size"`      // bytes, 0 for failed
+	Error        string `json:"error"`          // 失败原因
+	DownloadedAt string `json:"downloaded_at"`  // RFC3339，完成时间，失败时为空
 }
 
 type Downloader struct {
