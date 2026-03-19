@@ -171,17 +171,12 @@ func (d *DB) UpdateThumbPath(id int64, thumbPath string) error {
 }
 
 // IsVideoDownloaded 检查指定订阅源内是否已有该视频的下载记录（用于去重）
-// 排除以下状态（允许重新触发）：
-//   - permanent_failed：超过最大重试次数，用户手动清理后可重新下载
-//   - cleaned：系统自动清理（保留期满），可重新触发
+// 返回 true 表示该视频有活跃记录（非 permanent_failed 和 cleaned 状态）
+// 以下状态不阻止重新下载：permanent_failed（超限永久失败）、cleaned（已自动清理）
+// 以下状态会阻止重新触发：pending、downloading、failed（处理中）、
 //
-// 保留以下状态（不重复下载）：
-//   - completed、relocated：已下载完成，文件可能已迁移但记录有效
-//   - pending、downloading、failed：正在处理中
-//   - charge_blocked：充电专属视频，无法下载
-//   - deleted：用户主动删除，阻止自动重触发（需手动 restore）
-//   - cancelled：用户手动取消，阻止自动重触发（需手动重试）
-//   - skipped：被过滤规则命中，跳过
+//	charge_blocked（充电专属）、deleted（用户软删除）、cancelled（用户取消）、
+//	skipped（过滤规则命中）、completed、relocated（已下载完成）
 func (d *DB) IsVideoDownloaded(sourceID int64, videoID string) (bool, error) {
 	var exists int
 	err := d.QueryRow(`

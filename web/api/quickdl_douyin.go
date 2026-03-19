@@ -154,19 +154,23 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 		return
 	}
 
-	// 解析最终下载 URL
-	videoURL, err := client.ResolveVideoURL(detail.VideoURL)
-	if err != nil {
-		log.Printf("[quickdl·douyin] ResolveVideoURL failed: %v", err)
-		h.db.UpdateDownloadStatus(dlID, "failed", "", 0, err.Error())
-		h.db.IncrementRetryCount(dlID, err.Error())
-		h.downloader.EmitEvent(downloader.DownloadEvent{
-			Type:  "failed",
-			BvID:  awemeID,
-			Title: detail.Desc,
-			Error: err.Error(),
-		})
-		return
+	// page scrape 路径已 resolve（URLResolved=true），无需二次 resolve
+	videoURL := detail.VideoURL
+	var err error
+	if !detail.URLResolved {
+		videoURL, err = client.ResolveVideoURL(detail.VideoURL)
+		if err != nil {
+			log.Printf("[quickdl·douyin] ResolveVideoURL failed: %v", err)
+			h.db.UpdateDownloadStatus(dlID, "failed", "", 0, err.Error())
+			h.db.IncrementRetryCount(dlID, err.Error())
+			h.downloader.EmitEvent(downloader.DownloadEvent{
+				Type:  "failed",
+				BvID:  awemeID,
+				Title: detail.Desc,
+				Error: err.Error(),
+			})
+			return
+		}
 	}
 
 	// 构建输出路径
@@ -183,8 +187,11 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 		title = fmt.Sprintf("douyin_%s", awemeID)
 	}
 	safeTitle := douyin.SanitizePath(title)
-	if len(safeTitle) > 100 {
-		safeTitle = safeTitle[:100]
+	if safeTitle == "unknown" {
+		safeTitle = fmt.Sprintf("douyin_%s", awemeID)
+	}
+	if len([]rune(safeTitle)) > 80 {
+		safeTitle = string([]rune(safeTitle)[:80])
 	}
 	videoFilePath := filepath.Join(outputDir, safeTitle+" ["+awemeID+"].mp4")
 
@@ -313,8 +320,11 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 		title = fmt.Sprintf("douyin_%s", awemeID)
 	}
 	safeTitle := douyin.SanitizePath(title)
-	if len(safeTitle) > 100 {
-		safeTitle = safeTitle[:100]
+	if safeTitle == "unknown" {
+		safeTitle = fmt.Sprintf("douyin_%s", awemeID)
+	}
+	if len([]rune(safeTitle)) > 80 {
+		safeTitle = string([]rune(safeTitle)[:80])
 	}
 
 	noteDir := filepath.Join(h.downloadDir, uploaderDir, safeTitle+" ["+awemeID+"]")

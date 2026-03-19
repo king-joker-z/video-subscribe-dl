@@ -320,10 +320,18 @@ export function SourcesPage({ onNavigate }) {
   const [checkingIds, setCheckingIds] = useState(new Set());
   const [sourcePage, setSourcePage] = useState(1);
   const [sourceTotal, setSourceTotal] = useState(0);
+  const [filterType, setFilterType] = useState('');
+
+  const handleFilterType = (type) => {
+    setFilterType(type);
+    setSourcePage(1);
+  };
 
   const load = useCallback(async () => {
     try {
-      const res = await api.getSources({ page: sourcePage, page_size: 20 });
+      const params = { page: sourcePage, page_size: 20 };
+      if (filterType) params.type = filterType;
+      const res = await api.getSources(params);
       if (Array.isArray(res.data)) {
         setSources(res.data);
       } else if (res.data && res.data.sources) {
@@ -335,7 +343,7 @@ export function SourcesPage({ onNavigate }) {
     }
     catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, [sourcePage]);
+  }, [sourcePage, filterType]);
 
   const loadDouyinStatus = useCallback(async () => {
     try { const res = await api.getDouyinStatus(); setDouyinPaused(res.data || null); }
@@ -563,6 +571,19 @@ export function SourcesPage({ onNavigate }) {
           h(Icon, { name: 'upload', size: 14 }), '导入'),
         h(Button, { onClick: () => setShowAdd(!showAdd), size: 'sm', className: 'hidden lg:flex' },
           h(Icon, { name: 'plus', size: 14 }), '新增')
+      )
+    ),
+    // 类型筛选
+    h('div', { className: 'flex flex-wrap gap-1.5' },
+      [['', '全部'], ['up', 'UP 主'], ['season', '合集'], ['favorite', '收藏夹'], ['watchlater', '稍后再看'], ['series', '系列'], ['douyin', '抖音'], ['douyin_mix', '抖音合集']].map(([val, label]) =>
+        h('button', {
+          key: val,
+          onClick: () => handleFilterType(val),
+          className: cn('px-3 py-1 rounded-full text-xs border transition-colors',
+            filterType === val
+              ? 'bg-blue-500 border-blue-500 text-white'
+              : 'bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600')
+        }, label)
       )
     ),
     // 新增订阅弹窗

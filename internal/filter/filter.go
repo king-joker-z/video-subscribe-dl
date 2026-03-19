@@ -1,4 +1,6 @@
-package bscheduler
+// Package filter 提供视频过滤规则的解析与匹配功能。
+// scheduler 和 bscheduler 共同依赖此包，避免循环 import。
+package filter
 
 import (
 	"encoding/json"
@@ -7,29 +9,33 @@ import (
 	"strings"
 )
 
-// filterRule 高级过滤规则
-type filterRule struct {
-	Target    string `json:"target"`
-	Condition string `json:"condition"`
+// Rule 高级过滤规则
+type Rule struct {
+	Target    string `json:"target"`    // "title" | "duration" | "pubdate" | "pages" | "tags"
+	Condition string `json:"condition"` // "contains" | "not_contains" | "regex" | "gt" | "lt" | "between"
 	Value     string `json:"value"`
-	Value2    string `json:"value2"`
+	Value2    string `json:"value2"` // between 的第二个值
 }
 
-// videoInfo 过滤所需的视频信息
-type videoInfo struct {
+// VideoInfo 过滤所需的视频信息
+type VideoInfo struct {
 	Title    string
-	Duration int
-	PubDate  string
-	Pages    int
-	Tags     string
+	Duration int    // 时长（秒）
+	PubDate  string // 发布日期 YYYY-MM-DD
+	Pages    int    // 分P 数量
+	Tags     string // 标签（逗号分隔）
 }
 
-// matchesFilter 检查标题是否匹配过滤条件（兼容旧格式）
-func matchesFilter(title, filter string) bool {
+// MatchesSimple 检查标题是否匹配简单过滤条件（兼容旧格式）
+// filter 格式: "关键词|关键词"（OR）、"/正则/"、"!排除"
+// 空 filter 表示不过滤，匹配所有标题。
+func MatchesSimple(title, filter string) bool {
 	if filter == "" {
 		return true
 	}
 	filter = strings.TrimSpace(filter)
+
+	// 正则模式: /pattern/
 	if strings.HasPrefix(filter, "/") && strings.HasSuffix(filter, "/") {
 		pattern := filter[1 : len(filter)-1]
 		re, err := regexp.Compile(pattern)
@@ -38,6 +44,8 @@ func matchesFilter(title, filter string) bool {
 		}
 		return re.MatchString(title)
 	}
+
+	// 排除模式: !keyword
 	if strings.HasPrefix(filter, "!") {
 		keywords := strings.Split(filter[1:], "|")
 		for _, kw := range keywords {
@@ -48,6 +56,8 @@ func matchesFilter(title, filter string) bool {
 		}
 		return true
 	}
+
+	// 关键词 OR 模式: keyword1|keyword2
 	keywords := strings.Split(filter, "|")
 	for _, kw := range keywords {
 		kw = strings.TrimSpace(kw)
@@ -58,46 +68,47 @@ func matchesFilter(title, filter string) bool {
 	return false
 }
 
-// parseFilterRules 解析 JSON 格式的过滤规则
-func parseFilterRules(rulesJSON string) []filterRule {
+// ParseRules 解析 JSON 格式的过滤规则
+func ParseRules(rulesJSON string) []Rule {
 	if rulesJSON == "" || rulesJSON == "[]" {
 		return nil
 	}
-	var rules []filterRule
+	var rules []Rule
 	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
 		return nil
 	}
 	return rules
 }
 
-// matchesFilterRules 检查视频是否通过所有高级过滤规则（AND）
-func matchesFilterRules(rules []filterRule, info videoInfo) bool {
+// MatchesRules 检查视频是否通过所有高级过滤规则（AND）
+// 空规则列表返回 true（不过滤）。
+func MatchesRules(rules []Rule, info VideoInfo) bool {
 	for _, rule := range rules {
-		if !matchOneFilterRule(rule, info) {
+		if !matchOneRule(rule, info) {
 			return false
 		}
 	}
 	return true
 }
 
-func matchOneFilterRule(rule filterRule, info videoInfo) bool {
+func matchOneRule(rule Rule, info VideoInfo) bool {
 	switch rule.Target {
 	case "title":
-		return matchStringFilterRule(info.Title, rule.Condition, rule.Value)
+		return matchStringRule(info.Title, rule.Condition, rule.Value)
 	case "duration":
-		return matchNumericFilterRule(info.Duration, rule.Condition, rule.Value, rule.Value2)
+		return matchNumericRule(info.Duration, rule.Condition, rule.Value, rule.Value2)
 	case "pubdate":
-		return matchStringFilterRule(info.PubDate, rule.Condition, rule.Value)
+		return matchStringRule(info.PubDate, rule.Condition, rule.Value)
 	case "pages":
-		return matchNumericFilterRule(info.Pages, rule.Condition, rule.Value, rule.Value2)
+		return matchNumericRule(info.Pages, rule.Condition, rule.Value, rule.Value2)
 	case "tags":
-		return matchStringFilterRule(info.Tags, rule.Condition, rule.Value)
+		return matchStringRule(info.Tags, rule.Condition, rule.Value)
 	default:
 		return true
 	}
 }
 
-func matchStringFilterRule(text, condition, value string) bool {
+func matchStringRule(text, condition, value string) bool {
 	textLower := strings.ToLower(text)
 	valueLower := strings.ToLower(value)
 	switch condition {
@@ -120,7 +131,7 @@ func matchStringFilterRule(text, condition, value string) bool {
 	}
 }
 
-func matchNumericFilterRule(actual int, condition, value, value2 string) bool {
+func matchNumericRule(actual int, condition, value, value2 string) bool {
 	v, err := strconv.Atoi(value)
 	if err != nil {
 		return true

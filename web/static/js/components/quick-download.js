@@ -205,7 +205,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
             onChange: (e) => { setUrl(e.target.value); setPreview(null); },
             onKeyDown: handleKeyDown,
             placeholder: '粘贴 B站/抖音 视频链接...',
-            className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-800 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
+            className: 'flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
           }),
           h(Button, {
             onClick: preview ? handleDownload : handlePreview,

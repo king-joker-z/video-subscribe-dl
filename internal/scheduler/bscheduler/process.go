@@ -12,6 +12,7 @@ import (
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
+	"video-subscribe-dl/internal/filter"
 	"video-subscribe-dl/internal/nfo"
 	"video-subscribe-dl/internal/notify"
 	"video-subscribe-dl/internal/util"
@@ -260,20 +261,20 @@ func (s *BiliScheduler) processOneVideo(src db.Source, client *bilibili.Client, 
 		defer s.videoSema.Release()
 	}
 
-	if src.DownloadFilter != "" && !matchesFilter(title, src.DownloadFilter) {
+	if src.DownloadFilter != "" && !filter.MatchesSimple(title, src.DownloadFilter) {
 		return
 	}
 
-	advRules := parseFilterRules(src.FilterRules)
+	advRules := filter.ParseRules(src.FilterRules)
 	if len(advRules) > 0 {
-		preInfo := videoInfo{Title: title}
-		titleRules := make([]filterRule, 0)
+		preInfo := filter.VideoInfo{Title: title}
+		titleRules := make([]filter.Rule, 0)
 		for _, r := range advRules {
 			if r.Target == "title" {
 				titleRules = append(titleRules, r)
 			}
 		}
-		if !matchesFilterRules(titleRules, preInfo) {
+		if !filter.MatchesRules(titleRules, preInfo) {
 			return
 		}
 	}
@@ -313,7 +314,7 @@ func (s *BiliScheduler) processOneVideo(src db.Source, client *bilibili.Client, 
 	}
 
 	if len(advRules) > 0 {
-		fullInfo := videoInfo{
+		fullInfo := filter.VideoInfo{
 			Title:    title,
 			Duration: detail.Duration,
 			Pages:    len(pages),
@@ -326,7 +327,7 @@ func (s *BiliScheduler) processOneVideo(src db.Source, client *bilibili.Client, 
 				break
 			}
 		}
-		if !matchesFilterRules(advRules, fullInfo) {
+		if !filter.MatchesRules(advRules, fullInfo) {
 			log.Printf("[bscheduler] 视频 %s (%s) 未通过高级过滤规则，跳过", title, bvid)
 			return
 		}

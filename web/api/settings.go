@@ -87,6 +87,10 @@ func (h *SettingsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for key, value := range settings {
+		// 跳过敏感字段的掩码值，防止用户误将 "***" 写回 DB
+		if sensitiveKeys[key] && value == "***" {
+			continue
+		}
 		if err := h.db.SetSetting(key, value); err != nil {
 			apiError(w, CodeInternal, "保存设置失败: "+err.Error())
 			return

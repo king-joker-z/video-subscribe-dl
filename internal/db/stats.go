@@ -36,24 +36,46 @@ func (d *DB) GetStats() (map[string]int, error) {
 		"total":          0,
 	}
 
-	var sources, pending, downloading, completed, failed, relocated, chargeBlocked, total int
+	var sources int
 	d.QueryRow("SELECT COUNT(*) FROM sources WHERE enabled = 1").Scan(&sources)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'pending'").Scan(&pending)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'downloading'").Scan(&downloading)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('completed', 'relocated')").Scan(&completed)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('failed', 'permanent_failed')").Scan(&failed)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'relocated'").Scan(&relocated)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'charge_blocked'").Scan(&chargeBlocked)
-	d.QueryRow("SELECT COUNT(*) FROM downloads").Scan(&total)
 	stats["sources"] = sources
-	stats["pending"] = pending
-	stats["downloading"] = downloading
-	stats["completed"] = completed
-	stats["failed"] = failed
-	stats["relocated"] = relocated
-	stats["charge_blocked"] = chargeBlocked
-	stats["total"] = total
 
+	rows, err := d.Query(`
+		SELECT status, COUNT(*) as cnt
+		FROM downloads
+		GROUP BY status
+	`)
+	if err != nil {
+		return stats, nil
+	}
+	defer rows.Close()
+
+	var total int
+	for rows.Next() {
+		var status string
+		var cnt int
+		if err := rows.Scan(&status, &cnt); err != nil {
+			continue
+		}
+		total += cnt
+		switch status {
+		case "pending":
+			stats["pending"] = cnt
+		case "downloading":
+			stats["downloading"] = cnt
+		case "completed":
+			stats["completed"] += cnt
+		case "relocated":
+			// relocated 同时计入 completed（Dashboard 展示用）和 relocated（独立统计）
+			stats["completed"] += cnt
+			stats["relocated"] = cnt
+		case "failed", "permanent_failed":
+			stats["failed"] += cnt
+		case "charge_blocked":
+			stats["charge_blocked"] = cnt
+		}
+	}
+	stats["total"] = total
 	return stats, nil
 }
 
