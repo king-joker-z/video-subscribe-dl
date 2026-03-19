@@ -67,7 +67,7 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		advRules := filter.ParseRules(src.FilterRules)
 		titleRules := make([]filter.Rule, 0, len(advRules))
 		for _, r := range advRules {
-			if r.Field == "" || r.Field == "title" {
+			if r.Target == "title" {
 				titleRules = append(titleRules, r)
 			}
 		}
