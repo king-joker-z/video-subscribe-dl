@@ -85,6 +85,14 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		return
 	}
 
+	// uploaderDir 固定使用订阅源名称，避免共创/合拍视频因 API 返回别的作者导致目录跑偏
+	uploaderDir := douyin.SanitizePath(src.Name)
+	if uploaderDir == "" {
+		uploaderDir = douyin.SanitizePath(dl.Uploader)
+	}
+	outputDir := filepath.Join(s.downloadDir, uploaderDir)
+
+	// uploaderName 用于 NFO 元数据：优先记录视频实际作者，兜底用订阅源名
 	uploaderName := detail.Author.Nickname
 	if uploaderName == "" {
 		uploaderName = dl.Uploader
@@ -92,8 +100,6 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	if uploaderName == "" {
 		uploaderName = src.Name
 	}
-	uploaderDir := douyin.SanitizePath(uploaderName)
-	outputDir := filepath.Join(s.downloadDir, uploaderDir)
 
 	title := detail.Desc
 	if title == "" {
@@ -185,6 +191,13 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 
 // downloadDouyinNote 下载抖音图集
 func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *douyin.DouyinVideo) {
+	// uploaderDir 固定使用订阅源名称
+	uploaderDir := douyin.SanitizePath(src.Name)
+	if uploaderDir == "" {
+		uploaderDir = douyin.SanitizePath(dl.Uploader)
+	}
+
+	// uploaderName 用于 NFO 元数据：优先记录视频实际作者
 	uploaderName := detail.Author.Nickname
 	if uploaderName == "" {
 		uploaderName = dl.Uploader
@@ -205,7 +218,6 @@ func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, deta
 		safeTitle = string([]rune(safeTitle)[:80])
 	}
 
-	uploaderDir := douyin.SanitizePath(uploaderName)
 	noteDir := filepath.Join(s.downloadDir, uploaderDir, safeTitle+" ["+dl.VideoID+"]")
 	os.MkdirAll(noteDir, 0755)
 
