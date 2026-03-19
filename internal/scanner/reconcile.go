@@ -68,27 +68,24 @@ func (s *Scanner) Reconcile() (*ReconcileResult, error) {
 	})
 	result.TotalLocalFiles = len(localFiles)
 
-	// 2. 获取DB所有下载记录
+	// 2. 反向查询：先扫本地文件，再逐一查 DB（避免 GetAllDownloads 的 LIMIT 50000 上限误判）
+	// 同时用一次 GetAllDownloads 做 stale pending/downloading 检查（有上限但这两类检查影响小）
 	dbRecords, err := s.db.GetAllDownloads()
 	if err != nil {
 		return nil, err
 	}
 	result.TotalDBRecords = len(dbRecords)
 
-	dbVideoIDs := map[string]db.Download{}
-	for _, dl := range dbRecords {
-		dbVideoIDs[dl.VideoID] = dl
-	}
-
-	// 3. 检查本地有但DB无的 (orphan files)
+	// 3. 检查本地有但DB无的 (orphan files) —— 反向查询，不受 LIMIT 影响
 	for videoID, filePath := range localFiles {
-		if _, exists := dbVideoIDs[videoID]; !exists {
+		exists, _ := s.db.IsVideoExists(videoID)
+		if !exists {
 			result.OrphanFiles = append(result.OrphanFiles, filePath)
 		}
 	}
 	result.OrphanCount = len(result.OrphanFiles)
 
-	// 4. 检查DB有(completed)但本地无的 (missing files)
+	// 4. 检查DB有(completed)但本地无的 (missing files) —— 仍用 dbRecords，受 LIMIT 影响但 missing 检查为保守操作
 	for _, dl := range dbRecords {
 		if dl.Status == "completed" {
 			if _, exists := localFiles[dl.VideoID]; !exists {

@@ -146,10 +146,10 @@ func (d *DB) DeleteSource(id int64) error {
 	return err
 }
 
-// DeleteSourceWithFiles 删除订阅并清除本地文件
+// DeleteSourceWithFiles 删除订阅并清除本地文件（含缩略图）
 func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
-	// 1. 查询所有 file_path
-	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ?", id)
+	// 1. 查询所有 file_path + thumb_path
+	rows, err := d.Query("SELECT COALESCE(file_path,''), COALESCE(thumb_path,'') FROM downloads WHERE source_id = ?", id)
 	if err != nil {
 		// 即使查询失败也继续删除 DB 记录
 		log.Printf("[source] Warning: failed to query file paths for source %d: %v", id, err)
@@ -158,10 +158,13 @@ func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
 	}
 	var paths []string
 	for rows.Next() {
-		var p string
-		rows.Scan(&p)
-		if p != "" {
-			paths = append(paths, p)
+		var fp, tp string
+		rows.Scan(&fp, &tp)
+		if fp != "" {
+			paths = append(paths, fp)
+		}
+		if tp != "" {
+			paths = append(paths, tp)
 		}
 	}
 	rows.Close()

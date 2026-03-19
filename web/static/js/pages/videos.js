@@ -87,11 +87,15 @@ export function VideosPage({ params = {} } = {}) {
       if (evt && (evt.type === 'completed' || evt.type === 'failed') && evt.bvid) {
         // 局部更新对应视频的状态，避免全量刷新
         const newStatus = evt.type === 'completed' ? 'completed' : 'failed';
-        setVideos(prev => prev.map(v =>
-          v.video_id === evt.bvid
-            ? { ...v, status: newStatus, error_message: evt.error || v.error_message }
-            : v
-        ));
+        setVideos(prev => prev.map(v => {
+          if (v.video_id !== evt.bvid) return v;
+          const patch = { status: newStatus, error_message: evt.error || v.error_message };
+          if (evt.type === 'completed') {
+            if (evt.file_size) patch.file_size = evt.file_size;
+            if (evt.downloaded_at) patch.downloaded_at = evt.downloaded_at;
+          }
+          return { ...v, ...patch };
+        }));
       } else {
         setTimeout(load, 500);
       }

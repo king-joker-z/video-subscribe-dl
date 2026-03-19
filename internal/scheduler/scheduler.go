@@ -134,6 +134,32 @@ func (s *Scheduler) Start() {
 			}
 		}
 	}()
+	// 转发 dscheduler 抖音事件到 downloader SSE 通道，使前端能收到 vsd:download-event
+	if s.dl != nil && s.douyin != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			evtCh := s.douyin.GetEventChan()
+			for {
+				select {
+				case <-s.stopCh:
+					return
+				case evt, ok := <-evtCh:
+					if !ok {
+						return
+					}
+					s.dl.EmitEvent(downloader.DownloadEvent{
+						Type:     evt.Type,
+						BvID:     evt.VideoID,
+						Title:    evt.Title,
+						FileSize: evt.FileSize,
+						Error:    evt.Error,
+					})
+				}
+			}
+		}()
+	}
+
 	log.Println("Scheduler started (interval: 5min)")
 }
 
@@ -351,7 +377,11 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 
 // SyncAll 触发全部源检查（供 API 调用）
 func (s *Scheduler) SyncAll() {
-	go s.checkAllForce()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.checkAllForce()
+	}()
 }
 
 // StartupCleanup 一次性启动清理（扫描非法字符目录 + 重置全量扫描）

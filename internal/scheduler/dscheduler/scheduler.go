@@ -42,11 +42,12 @@ type ProgressInfo struct {
 
 // DownloadEvent 抖音下载完成/失败事件
 type DownloadEvent struct {
-	Type     string
-	VideoID  string
-	Title    string
-	FileSize int64
-	Error    string
+	Type         string
+	VideoID      string
+	Title        string
+	FileSize     int64
+	Error        string
+	DownloadedAt string // RFC3339，完成时间，失败时为空
 }
 
 // DouyinCookieStatus 抖音 Cookie 有效性状态

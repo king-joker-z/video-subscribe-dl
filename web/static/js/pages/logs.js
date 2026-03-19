@@ -6,41 +6,40 @@ const { createElement: h, useState, useEffect, useRef, useCallback } = React;
 export function LogsPage() {
   const [logs, setLogs] = useState([]);
   const [filter, setFilter] = useState('all');
+  // 反转模式：最新日志在顶部
+  // autoScroll=true 时新日志自动出现在顶部（容器 scrollTop 保持 0）
+  // 用户向下滚动时停止自动追随，显示"跳到最新"浮钮
   const [autoScroll, setAutoScroll] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0); // 非追随状态下累积的未读新日志数
-  const [connType, setConnType] = useState(''); // 'ws' | 'sse'
-  const autoScrollRef = useRef(true); // ref 副本，供 onLog 闭包读取
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [connType, setConnType] = useState('');
+  const autoScrollRef = useRef(true);
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
-  const skipHistoryRef = useRef(false);
-  const reconnectKey = useRef(0); // 用于强制重连
+  const reconnectKey = useRef(0);
 
-  // 连接管理：WebSocket 优先，SSE 降级（复用 api.js 导出的工厂函数）
+  // 连接管理：WebSocket 优先，SSE 降级
   const connect = useCallback(() => {
-    // 关闭旧连接
     if (connectionRef.current) {
       connectionRef.current.close();
       connectionRef.current = null;
     }
 
     const onLog = (entry) => {
-      setLogs(prev => [...prev.slice(-999), entry]);
+      // 新日志 prepend（最新在最前）
+      setLogs(prev => [entry, ...prev.slice(0, 999)]);
       if (!autoScrollRef.current) {
         setUnreadCount(prev => prev + 1);
       }
     };
 
-    // 使用 api.js 导出的 createLogSocket（WebSocket 优先）
     const sock = createLogSocket(onLog, (type) => {
       setConnType('ws');
-      console.log('[logs] WebSocket 已连接');
     });
 
     if (sock.ws) {
       const origOnError = sock.ws.onerror;
       sock.ws.onerror = () => {
         if (origOnError) origOnError();
-        // WebSocket 失败，降级到 SSE
         fallbackToSSE();
       };
       sock.ws.onclose = () => {
@@ -53,9 +52,8 @@ export function LogsPage() {
   }, []);
 
   const fallbackToSSE = useCallback(() => {
-    // 使用全局 SSE 单例的 vsd:log 事件，不新建 EventSource
     const onLog = (entry) => {
-      setLogs(prev => [...prev.slice(-999), entry]);
+      setLogs(prev => [entry, ...prev.slice(0, 999)]);
       if (!autoScrollRef.current) {
         setUnreadCount(prev => prev + 1);
       }
@@ -69,17 +67,13 @@ export function LogsPage() {
   // 加载历史日志 + 建立连接
   useEffect(() => {
     api.getLogs(200).then(res => {
-      setLogs(res.data || []);
-      // 历史日志加载完后滚到底部
-      requestAnimationFrame(() => {
-        if (containerRef.current) {
-          containerRef.current.scrollTop = containerRef.current.scrollHeight;
-        }
-      });
+      const history = res.data || [];
+      // 历史日志反转，最新的在顶部
+      setLogs([...history].reverse());
     }).catch(e => toast.error(e.message));
-    
+
     connect();
-    
+
     return () => {
       if (connectionRef.current) {
         connectionRef.current.close();
@@ -87,22 +81,17 @@ export function LogsPage() {
     };
   }, [reconnectKey.current]);
 
-  // 自动滚动：延迟一帧确保 DOM/scrollHeight 已更新
+  // 反转模式：autoScroll 时保持 scrollTop=0（顶部），不需要滚到底
   useEffect(() => {
     if (!autoScroll || !containerRef.current) return;
-    const el = containerRef.current;
-    // requestAnimationFrame 确保浏览器 layout 完成后再滚动
-    const raf = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(raf);
+    containerRef.current.scrollTop = 0;
   }, [logs, autoScroll]);
 
   const handleScroll = () => {
     if (!containerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    const atBottom = scrollTop + clientHeight >= scrollHeight - 20;
-    if (!atBottom) {
+    const { scrollTop } = containerRef.current;
+    // 用户往下滚（scrollTop > 20px）时暂停追随
+    if (scrollTop > 20) {
       autoScrollRef.current = false;
       setAutoScroll(false);
     } else {
@@ -112,9 +101,9 @@ export function LogsPage() {
     }
   };
 
-  const scrollToBottom = () => {
+  const scrollToTop = () => {
     if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      containerRef.current.scrollTop = 0;
     }
     autoScrollRef.current = true;
     setAutoScroll(true);
@@ -125,35 +114,29 @@ export function LogsPage() {
     const next = !autoScroll;
     autoScrollRef.current = next;
     setAutoScroll(next);
-    if (next) {
-      scrollToBottom();
-    }
+    if (next) scrollToTop();
   };
 
-  // 清空日志：调 API 清后端 buffer → 清前端数组 → 断开重连
   const handleClear = async () => {
     try {
       await api.clearLogs();
     } catch (e) {
-      // 即使后端 API 失败也清前端
       console.warn('清空后端日志失败:', e);
     }
     setLogs([]);
-    // 断开当前连接并重新建立（重连时后端 buffer 已空，只推新日志）
     if (connectionRef.current) {
       connectionRef.current.close();
       connectionRef.current = null;
     }
-    skipHistoryRef.current = true;
     setTimeout(() => connect(), 300);
   };
 
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => {
-    const msg = (l.message || l.msg || '').toLowerCase();
+    const raw = l.message || l.msg || '';
     const level = (l.level || '').toLowerCase();
-    if (filter === 'error') return level === 'error' || /\[error\]|\b(error|fail|failed|failure|exception|panic|fatal)\b/i.test(l.message || l.msg || '');
-    if (filter === 'warn') return level === 'warn' || /\[warn\]|\bwarn(ing)?\b/i.test(l.message || l.msg || '');
-    if (filter === 'info') return level === 'info' || /\[info\]/i.test(l.message || l.msg || '');
+    if (filter === 'error') return level === 'error' || /\[error\]|\b(error|fail|failed|failure|exception|panic|fatal)\b/i.test(raw);
+    if (filter === 'warn') return level === 'warn' || /\[WARN\]/i.test(raw);
+    if (filter === 'info') return level === 'info' || /\[info\]/i.test(raw);
     return true;
   });
 
@@ -180,7 +163,6 @@ export function LogsPage() {
     h('div', { className: 'flex flex-wrap items-center gap-2 mb-3' },
       h('h2', { className: 'text-lg font-semibold' }, '实时日志'),
       h('div', { className: 'flex flex-wrap items-center gap-2 ml-auto' },
-        // 连接状态指示
         connType && h('span', { className: cn('px-2 py-0.5 rounded text-[10px] font-medium',
           connType === 'ws' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-600')
         }, connType === 'ws' ? 'WS' : 'SSE'),
@@ -193,14 +175,13 @@ export function LogsPage() {
         ),
         h('button', {
           onClick: toggleAutoScroll,
-          title: autoScroll ? '点击暂停自动追随' : '点击追随最新日志',
+          title: autoScroll ? '点击暂停自动追随最新' : '点击恢复追随最新',
           className: cn(
             'relative px-3 py-1 rounded text-xs font-medium transition-colors',
             autoScroll ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500 hover:text-slate-700'
           )
         },
-          autoScroll ? '⏬ 追随' : '⏸ 暂停',
-          // 未读计数气泡
+          autoScroll ? '⏫ 追随' : '⏸ 暂停',
           !autoScroll && unreadCount > 0 && h('span', {
             className: 'absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1'
           }, unreadCount > 99 ? '99+' : String(unreadCount))
@@ -211,7 +192,7 @@ export function LogsPage() {
         }, '🗑 清空')
       )
     ),
-    // 日志容器（relative wrapper for floating button）
+    // 日志容器
     h('div', { className: 'flex-1 relative' },
       h('div', {
         ref: containerRef,
@@ -231,13 +212,13 @@ export function LogsPage() {
               );
             })
       ),
-      // 浮动"回到底部 + 恢复追随"按钮（仅非追随状态时显示）
+      // 浮动"跳到最新"按钮（非追随时显示）
       !autoScroll && h('button', {
-        onClick: scrollToBottom,
-        title: '滚到底部并恢复追随最新日志',
-        className: 'absolute bottom-4 right-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium shadow-lg hover:bg-blue-700 transition-colors'
+        onClick: scrollToTop,
+        title: '跳到最新日志并恢复追随',
+        className: 'absolute top-4 right-6 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium shadow-lg hover:bg-blue-700 transition-colors'
       },
-        '↓ 跳到最新',
+        '↑ 跳到最新',
         unreadCount > 0 && h('span', {
           className: 'bg-white/20 rounded px-1 tabular-nums'
         }, '+' + (unreadCount > 99 ? '99+' : unreadCount))

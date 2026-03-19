@@ -45,23 +45,28 @@ func getMixinKey(orig string) string {
 }
 
 type wbiCache struct {
-	imgKey   string
-	subKey   string
+	imgKey    string
+	subKey    string
 	fetchedAt time.Time
-	mu       sync.Mutex
+	mu        sync.RWMutex
 }
 
 var wbiCacheInstance = &wbiCache{}
 
-// getWbiKeys 获取 img_key 和 sub_key
+// getWbiKeys 获取 img_key 和 sub_key（双重检查，网络 IO 在锁外执行）
 func (c *Client) getWbiKeys() (string, string, error) {
-	wbiCacheInstance.mu.Lock()
-	defer wbiCacheInstance.mu.Unlock()
+	const cacheTTL = 6 * time.Hour
 
-	// 缓存 6 小时（WBI keys 实测一天内稳定，减少 /nav 额外请求降低风控风险）
-	if wbiCacheInstance.imgKey != "" && time.Since(wbiCacheInstance.fetchedAt) < 6*time.Hour {
-		return wbiCacheInstance.imgKey, wbiCacheInstance.subKey, nil
+	// 第一次：RLock 快速读缓存
+	wbiCacheInstance.mu.RLock()
+	if wbiCacheInstance.imgKey != "" && time.Since(wbiCacheInstance.fetchedAt) < cacheTTL {
+		img, sub := wbiCacheInstance.imgKey, wbiCacheInstance.subKey
+		wbiCacheInstance.mu.RUnlock()
+		return img, sub, nil
 	}
+	wbiCacheInstance.mu.RUnlock()
+
+	// 缓存未命中，发网络请求（锁外执行，避免持锁阻塞其他协程）
 
 	// nav 请求也走令牌桶限流
 	if c.limiter != nil {
@@ -99,11 +104,17 @@ func (c *Client) getWbiKeys() (string, string, error) {
 	imgKey := extractKeyFromURL(imgURL)
 	subKey := extractKeyFromURL(subURL)
 
-	wbiCacheInstance.imgKey = imgKey
-	wbiCacheInstance.subKey = subKey
-	wbiCacheInstance.fetchedAt = time.Now()
+	// 写入缓存：Lock 前二次检查，防止并发时重复写入
+	wbiCacheInstance.mu.Lock()
+	if wbiCacheInstance.imgKey == "" || time.Since(wbiCacheInstance.fetchedAt) >= cacheTTL {
+		wbiCacheInstance.imgKey = imgKey
+		wbiCacheInstance.subKey = subKey
+		wbiCacheInstance.fetchedAt = time.Now()
+	}
+	img, sub := wbiCacheInstance.imgKey, wbiCacheInstance.subKey
+	wbiCacheInstance.mu.Unlock()
 
-	return imgKey, subKey, nil
+	return img, sub, nil
 }
 
 func extractKeyFromURL(u string) string {

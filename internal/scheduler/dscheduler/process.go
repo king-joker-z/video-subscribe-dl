@@ -131,10 +131,11 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		if info.Status == "done" {
 			s.removeProgress(progressKey)
 			s.emitEvent(DownloadEvent{
-				Type:     "completed",
-				VideoID:  dl.VideoID,
-				Title:    title,
-				FileSize: info.Downloaded,
+				Type:         "completed",
+				VideoID:      dl.VideoID,
+				Title:        title,
+				FileSize:     info.Downloaded,
+				DownloadedAt: time.Now().Format(time.RFC3339),
 			})
 		} else {
 			s.setProgress(progressKey, &info)
