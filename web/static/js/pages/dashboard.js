@@ -14,6 +14,7 @@ export function DashboardPage({ onNavigate }) {
   const [activeProgress, setActiveProgress] = useState([]);
   const [douyinCookieValid, setDouyinCookieValid] = useState(true);
   const [douyinCookieMsg, setDouyinCookieMsg] = useState('');
+  const [douyinPaused, setDouyinPaused] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -23,6 +24,7 @@ export function DashboardPage({ onNavigate }) {
       if (douyinStatus?.data) {
         setDouyinCookieValid(douyinStatus.data.cookie_valid !== false);
         setDouyinCookieMsg(douyinStatus.data.cookie_msg || '');
+        setDouyinPaused(!!douyinStatus.data.paused);
       }
       // 同步风控冷却倒计时
       if (dash.data?.cooldown?.active) {
@@ -225,7 +227,10 @@ export function DashboardPage({ onNavigate }) {
             h(Icon, { name: 'play', size: 14 }), triggering ? '触发中...' : '立即执行'),
           task?.status === 'paused'
             ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 B站')
-            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站')
+            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站'),
+          douyinPaused
+            ? h(Button, { onClick: () => api.resumeDouyin().then(() => { toast.success('抖音已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复抖音')
+            : h(Button, { onClick: () => api.pauseDouyin().then(() => { toast.success('抖音已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停抖音')
         )
       ),
 

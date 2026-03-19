@@ -80,6 +80,7 @@ type Server struct {
 	onDouyinCookieUpdate  func(string)
 	getDouyinPauseStatus  func() (bool, string, time.Time)
 	onDouyinResume        func()
+	onDouyinPause         func(reason string)
 	onBiliResume          func()
 	getDouyinCookieStatus func() (bool, string)
 
@@ -176,6 +177,9 @@ func (s *Server) setupRoutes() {
 		if s.onDouyinResume != nil {
 			s.apiRouter.SetDouyinResumeFunc(s.onDouyinResume)
 		}
+		if s.onDouyinPause != nil {
+			s.apiRouter.SetDouyinPauseFunc(s.onDouyinPause)
+		}
 		if s.onBiliResume != nil {
 			s.apiRouter.SetBiliResumeFunc(s.onBiliResume)
 		}
@@ -246,6 +250,10 @@ func (s *Server) SetDouyinPauseStatusFunc(fn func() (bool, string, time.Time)) {
 
 func (s *Server) SetDouyinResumeFunc(fn func()) {
 	s.onDouyinResume = fn
+}
+
+func (s *Server) SetDouyinPauseFunc(fn func(reason string)) {
+	s.onDouyinPause = fn
 }
 
 func (s *Server) SetBiliResumeFunc(fn func()) {

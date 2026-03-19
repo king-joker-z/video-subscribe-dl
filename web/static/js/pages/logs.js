@@ -151,9 +151,9 @@ export function LogsPage() {
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => {
     const msg = (l.message || l.msg || '').toLowerCase();
     const level = (l.level || '').toLowerCase();
-    if (filter === 'error') return level === 'error' || msg.includes('[error]') || /\b(error|fail|failed|failure|exception|panic|fatal)\b/i.test(msg);
-    if (filter === 'warn') return level === 'warn' || msg.includes('[warn]');
-    if (filter === 'info') return level === 'info' || msg.includes('[info]');
+    if (filter === 'error') return level === 'error' || /\[error\]|\b(error|fail|failed|failure|exception|panic|fatal)\b/i.test(l.message || l.msg || '');
+    if (filter === 'warn') return level === 'warn' || /\[warn\]|\bwarn(ing)?\b/i.test(l.message || l.msg || '');
+    if (filter === 'info') return level === 'info' || /\[info\]/i.test(l.message || l.msg || '');
     return true;
   });
 

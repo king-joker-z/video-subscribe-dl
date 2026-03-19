@@ -9,6 +9,7 @@ import (
 type DouyinStatusHandler struct {
 	getStatus       func() (paused bool, reason string, pausedAt time.Time)
 	resumeFunc      func()
+	pauseFunc       func(reason string)
 	getCookieStatus func() (bool, string)
 }
 
@@ -22,6 +23,10 @@ func (h *DouyinStatusHandler) SetStatusFunc(fn func() (bool, string, time.Time))
 
 func (h *DouyinStatusHandler) SetResumeFunc(fn func()) {
 	h.resumeFunc = fn
+}
+
+func (h *DouyinStatusHandler) SetPauseFunc(fn func(reason string)) {
+	h.pauseFunc = fn
 }
 
 // SetCookieStatusFunc 注入 Cookie 状态查询函数
@@ -83,5 +88,23 @@ func (h *DouyinStatusHandler) HandleResume(w http.ResponseWriter, r *http.Reques
 	h.resumeFunc()
 	apiOK(w, map[string]interface{}{
 		"message": "抖音下载已恢复",
+	})
+}
+
+// HandlePause POST /api/douyin/pause — 手动暂停抖音下载
+func (h *DouyinStatusHandler) HandlePause(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		apiError(w, CodeMethodNotAllow, "method not allowed")
+		return
+	}
+
+	if h.pauseFunc == nil {
+		apiError(w, CodeInternal, "pause function not configured")
+		return
+	}
+
+	h.pauseFunc("手动暂停")
+	apiOK(w, map[string]interface{}{
+		"message": "抖音下载已暂停",
 	})
 }

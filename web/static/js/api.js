@@ -139,6 +139,7 @@ export const api = {
   getDouyinCookieStatus: () => request('/api/douyin/cookie/status'),
   getDouyinStatus: () => request('/api/douyin/status'),
   resumeDouyin: () => request('/api/douyin/resume', { method: 'POST' }),
+  pauseDouyin: () => request('/api/douyin/pause', { method: 'POST' }),
   resumeBili: () => request('/api/bili/resume', { method: 'POST' }),
   getNotifyStatus: () => request("/api/notify/status"),
 

@@ -183,6 +183,7 @@ func main() {
 	server.SetDouyinCookieUpdateFunc(sched.RefreshDouyinUserCookie)
 	server.SetDouyinPauseStatusFunc(sched.GetDouyinPauseStatus)
 	server.SetDouyinResumeFunc(sched.ResumeDouyin)
+	server.SetDouyinPauseFunc(sched.PauseDouyin)
 	server.SetBiliResumeFunc(sched.ResumeBili)
 	server.SetDouyinCookieStatusFunc(sched.GetDouyinCookieStatus)
 	server.SetVersion(version)

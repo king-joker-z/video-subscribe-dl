@@ -135,6 +135,12 @@ func (d *DB) UpdateSource(s *Source) error {
 }
 
 func (d *DB) DeleteSource(id int64) error {
+	// 拒绝删除有活跃下载任务的订阅源，防止文件与 DB 进入不一致状态
+	var activeCount int
+	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'downloading'", id).Scan(&activeCount)
+	if activeCount > 0 {
+		return fmt.Errorf("该订阅源有 %d 个正在进行的下载任务，请等待完成后再删除", activeCount)
+	}
 	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
 	_, err := d.Exec("DELETE FROM sources WHERE id = ?", id)
 	return err

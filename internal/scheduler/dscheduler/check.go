@@ -235,7 +235,6 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		AwemeID    string
 		Title      string
 		Cover      string
-		Author     string
 		CreateTime int64
 		Duration   int
 	}
@@ -293,16 +292,11 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 			if title == "" {
 				title = fmt.Sprintf("douyin_%s", v.AwemeID)
 			}
-			authorName := v.Author.Nickname
-			if authorName == "" {
-				authorName = uploaderName
-			}
 
 			allVideos = append(allVideos, videoEntry{
 				AwemeID:    v.AwemeID,
 				Title:      title,
 				Cover:      v.Cover,
-				Author:     authorName,
 				CreateTime: v.CreateTime,
 				Duration:   v.Duration,
 			})
@@ -319,8 +313,6 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		maxCursor = result.MaxCursor
 		jitter := time.Duration(5000+rand.Intn(5000)) * time.Millisecond
 		s.sleepFn(jitter)
-		// 翻页间隔，防风控
-		s.sleepFn(time.Duration(2000+rand.Intn(2000)) * time.Millisecond)
 	}
 
 	log.Printf("[dscheduler·full-scan] %s: 第一阶段完成，共拉取 %d 个视频 (翻页 %d)", uploaderName, len(allVideos), page)
@@ -421,20 +413,34 @@ func (s *DouyinScheduler) CheckDouyinMix(src db.Source) {
 			continue
 		}
 
-		uploaderName := v.Author.Nickname
-		if uploaderName == "" {
-			uploaderName = src.Name
-		}
 		title := v.Desc
 		if title == "" {
 			title = fmt.Sprintf("douyin_%s", v.AwemeID)
+		}
+
+		// 简单关键词过滤
+		if src.DownloadFilter != "" && !filter.MatchesSimple(title, src.DownloadFilter) {
+			continue
+		}
+		// 高级规则过滤（仅标题预检）
+		advRules := filter.ParseRules(src.FilterRules)
+		if len(advRules) > 0 {
+			titleRules := make([]filter.Rule, 0)
+			for _, r := range advRules {
+				if r.Target == "title" {
+					titleRules = append(titleRules, r)
+				}
+			}
+			if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: title}) {
+				continue
+			}
 		}
 
 		dl := &db.Download{
 			SourceID:  src.ID,
 			VideoID:   v.AwemeID,
 			Title:     title,
-			Uploader:  uploaderName,
+			Uploader:  src.Name, // 固定用订阅源名，与下载目录归属一致
 			Thumbnail: v.Cover,
 			Status:    "pending",
 			Duration:  v.Duration / 1000,
