@@ -46,7 +46,12 @@ func (d *DB) CreateSource(s *Source) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	s.ID = id
+	return id, nil
 }
 
 func (d *DB) GetSources() ([]Source, error) {
