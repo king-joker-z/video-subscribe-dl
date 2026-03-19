@@ -121,7 +121,7 @@ func New(cfg Config) *DouyinScheduler {
 		progressMap:     make(map[string]*ProgressInfo),
 		eventCh:         make(chan DownloadEvent, 100),
 		cookieValid:     true,
-		downloadLimiter: douyin.NewRateLimiter(2, 1, 30*time.Second),
+		downloadLimiter: douyin.NewRateLimiter(3, 1, 15*time.Second),
 	}
 	return s
 }
