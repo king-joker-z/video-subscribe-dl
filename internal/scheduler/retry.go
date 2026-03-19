@@ -8,8 +8,19 @@ import (
 	"video-subscribe-dl/internal/db"
 )
 
-// retryOneDownload 执行单个失败下载的重试，按平台类型分发
+// retryOneDownload 执行单个失败下载的重试，按平台类型分发。
+// 调用前会二次确认 download 状态，避免并发重复处理已不是 pending/failed 的记录。
 func (s *Scheduler) retryOneDownload(dl db.Download) {
+	// 二次确认状态（避免并发重复处理）
+	current, err := s.db.GetDownload(dl.ID)
+	if err != nil || current == nil {
+		return
+	}
+	if current.Status != "pending" && current.Status != "failed" {
+		log.Printf("[retry] Download %d status is %s, skip", dl.ID, current.Status)
+		return
+	}
+
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
 		log.Printf("[retry-scheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)

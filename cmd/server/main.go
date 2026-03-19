@@ -80,9 +80,15 @@ func main() {
 	}
 	cookiePath, _ := database.GetSetting("cookie_path")
 
+	requestInterval := config.DefaultRequestInterval
+	if v, err := database.GetSetting("request_interval_sec"); err == nil && v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			requestInterval = n
+		}
+	}
 	dl := downloader.New(downloader.Config{
 		MaxConcurrent:   config.DefaultDownloadWorkers,
-		RequestInterval: config.DefaultRequestInterval,
+		RequestInterval: requestInterval,
 	}, biliClient)
 
 	// Apply download speed limit from settings

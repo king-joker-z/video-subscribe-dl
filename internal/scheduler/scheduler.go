@@ -1,9 +1,11 @@
 package scheduler
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -35,6 +37,9 @@ type Scheduler struct {
 
 	// cron 调度器
 	cronScheduler *cron.Cron
+
+	// 防重入：同时只允许一个 ProcessAllPending goroutine 运行
+	processPendingRunning int32
 }
 
 // New 创建顶层 Scheduler，同时初始化 BiliScheduler 和 DouyinScheduler 子调度器。
@@ -269,42 +274,58 @@ func (s *Scheduler) CheckNow() {
 	}()
 }
 
-// ProcessAllPending 把所有 pending 记录提交到下载队列
+// ProcessAllPending 把所有 pending 记录提交到下载队列。
+// 使用 atomic 防重入，避免多个 goroutine 同时运行导致重复提交。
 func (s *Scheduler) ProcessAllPending() {
 	if s.dl == nil {
+		return
+	}
+	// 防重入：同时只允许一个 goroutine 运行
+	if !atomic.CompareAndSwapInt32(&s.processPendingRunning, 0, 1) {
+		log.Printf("[process-pending] Already running, skip")
 		return
 	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer atomic.StoreInt32(&s.processPendingRunning, 0)
+
 		downloads, err := s.db.GetDownloadsByStatus("pending", 10000)
 		if err != nil {
 			log.Printf("[process-pending] Error: %v", err)
 			return
 		}
 		if len(downloads) == 0 {
-			log.Printf("[process-pending] No pending downloads")
 			return
 		}
-		batchSize := 3
-		log.Printf("[process-pending] Processing %d pending downloads (batch size: %d)", len(downloads), batchSize)
-		for i := 0; i < len(downloads); i += batchSize {
-			end := i + batchSize
-			if end > len(downloads) {
-				end = len(downloads)
-			}
-			batch := downloads[i:end]
-			for _, dl := range batch {
-				s.retryOneDownload(dl)
-				time.Sleep(1 * time.Second)
-			}
-			log.Printf("[process-pending] Batch %d-%d submitted, waiting for completion...", i+1, end)
-			for s.dl.IsBusy() {
-				time.Sleep(5 * time.Second)
+		log.Printf("[process-pending] Submitting %d pending downloads to queue", len(downloads))
+		submitted := 0
+		for _, dl := range downloads {
+			if err := s.submitDownload(dl); err != nil {
+				log.Printf("[process-pending] Submit failed for %d: %v", dl.ID, err)
+			} else {
+				submitted++
 			}
 		}
-		log.Printf("[process-pending] All %d pending downloads processed", len(downloads))
+		log.Printf("[process-pending] Submitted %d/%d downloads", submitted, len(downloads))
 	}()
+}
+
+// submitDownload 将单个 download 记录提交到对应平台下载器，不重复查 DB。
+func (s *Scheduler) submitDownload(dl db.Download) error {
+	src, err := s.db.GetSource(dl.SourceID)
+	if err != nil || src == nil {
+		return fmt.Errorf("source %d not found", dl.SourceID)
+	}
+	if src.Type == "douyin" || src.Type == "douyin_mix" {
+		s.douyin.RetryDownload(dl)
+		return nil
+	}
+	if s.bili != nil {
+		s.bili.RetryDownload(dl)
+		return nil
+	}
+	return fmt.Errorf("no scheduler for type %s", src.Type)
 }
 
 // CheckOneSource 只同步指定 source

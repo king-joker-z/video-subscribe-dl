@@ -44,6 +44,7 @@ var settingsKeys = []string{
 	"auth_token",
 	"douyin_cookie",
 	"filename_template", "cooldown_minutes", "download_codec",
+	"request_interval_sec",
 }
 
 // 敏感字段，不返回明文

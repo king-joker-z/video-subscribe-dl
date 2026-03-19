@@ -4,7 +4,8 @@ import "time"
 
 const (
 	// DefaultRequestInterval 下载器默认请求间隔（秒）
-	DefaultRequestInterval = 30
+	// 用于防封，避免请求过于密集。实际值可在 Web UI 设置中覆盖。
+	DefaultRequestInterval = 3
 
 	// DefaultCheckIntervalSec 源默认检查间隔（秒）
 	DefaultCheckIntervalSec = 1800
