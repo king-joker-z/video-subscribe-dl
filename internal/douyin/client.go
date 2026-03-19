@@ -471,11 +471,12 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 		return nil, err
 	}
 
-	// 跟随 302 重定向获取最终无水印地址
+	// 跟随 302 重定向获取最终无水印地址，并标记已 resolve（避免 process.go 二次 resolve 触发 403）
 	if video.VideoURL != "" {
 		if resolved, err := c.ResolveVideoURL(video.VideoURL); err == nil {
 			logger.Info("page scrape: resolved video URL via 302", "urlLen", len(resolved))
 			video.VideoURL = resolved
+			video.URLResolved = true
 		} else {
 			logger.Warn("page scrape: resolve 302 failed, keeping original URL", "error", err)
 		}

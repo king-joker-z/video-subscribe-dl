@@ -77,12 +77,18 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		return
 	}
 
-	videoURL, err := client.ResolveVideoURL(detail.VideoURL)
-	if err != nil {
-		log.Printf("[dscheduler] ResolveVideoURL failed: %v", err)
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
-		s.db.IncrementRetryCount(dl.ID, err.Error())
-		return
+	// page scrape 路径已在 getVideoDetailPage 内部跟过 302（URLResolved=true），无需再次 resolve
+	// API 路径返回的 VideoURL 是 CDN 间接地址，需要跟一次 302 获取直链
+	videoURL := detail.VideoURL
+	if !detail.URLResolved {
+		resolved, err := client.ResolveVideoURL(detail.VideoURL)
+		if err != nil {
+			log.Printf("[dscheduler] ResolveVideoURL failed: %v", err)
+			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+			s.db.IncrementRetryCount(dl.ID, err.Error())
+			return
+		}
+		videoURL = resolved
 	}
 
 	// srcName：订阅源名称，用于目录结构和 NFO studio/actor，与 B站行为一致

@@ -16,6 +16,9 @@ type DouyinVideo struct {
 	CommentCount int64      `json:"comment_count"`  // 评论数
 	IsNote       bool       `json:"is_note"`        // 是否为图集/笔记
 	Images       []string   `json:"images"`         // 图集图片 URL 列表
+	// URLResolved 标记 VideoURL 已经过 302 跟随，process.go 无需再次 ResolveVideoURL
+	// page scrape 路径已在 getVideoDetailPage 内部 resolve，设为 true 避免二次 resolve 触发 403
+	URLResolved  bool       `json:"-"`
 }
 
 // CreateTimeUnix 返回发布时间
