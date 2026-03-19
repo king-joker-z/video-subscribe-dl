@@ -148,6 +148,13 @@ func (d *DB) DeleteSource(id int64) error {
 
 // DeleteSourceWithFiles 删除订阅并清除本地文件（含缩略图）
 func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
+	// 拒绝删除有活跃下载任务的订阅源（与 DeleteSource 保持一致）
+	var activeCount int
+	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'downloading'", id).Scan(&activeCount)
+	if activeCount > 0 {
+		return 0, fmt.Errorf("该订阅源有 %d 个正在进行的下载任务，请等待完成后再删除", activeCount)
+	}
+
 	// 1. 查询所有 file_path + thumb_path
 	rows, err := d.Query("SELECT COALESCE(file_path,''), COALESCE(thumb_path,'') FROM downloads WHERE source_id = ?", id)
 	if err != nil {

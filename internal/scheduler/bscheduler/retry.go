@@ -191,17 +191,6 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	log.Printf("[bscheduler] Resubmitted %s (retry #%d)", dl.VideoID, dl.RetryCount+1)
 }
 
-// RetryByID 手动重试指定下载记录
-func (s *BiliScheduler) RetryByID(dlID int64) {
-	dl, err := s.db.GetDownload(dlID)
-	if err != nil || dl == nil {
-		log.Printf("[bscheduler] Download %d not found", dlID)
-		return
-	}
-	s.db.ResetRetryCount(dlID)
-	s.retryOneDownload(*dl)
-}
-
 // RedownloadByID 重新下载指定记录
 func (s *BiliScheduler) RedownloadByID(dlID int64) {
 	dl, err := s.db.GetDownload(dlID)

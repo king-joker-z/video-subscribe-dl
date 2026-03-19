@@ -21,7 +21,7 @@ import (
 // handleDouyinQuickDownload 处理抖音单视频快速下载
 func (h *QuickDownloadHandler) handleDouyinQuickDownload(w http.ResponseWriter, rawURL string) {
 	client := douyin.NewClient()
-	defer client.Close()
+	// 注意：client 会传给异步 goroutine，不能在此 defer Close，由 goroutine 负责关闭
 
 	// 解析分享链接，获取 aweme_id
 	resolved, err := client.ResolveShareURL(rawURL)
@@ -131,6 +131,9 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 	// 获取信号量（限制并发）
 	h.douyinSem <- struct{}{}
 	defer func() { <-h.douyinSem }()
+
+	// client 由调用方（handleDouyinQuickDownload）创建并传入，goroutine 负责关闭
+	defer client.Close()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -281,10 +284,11 @@ func (h *QuickDownloadHandler) executeDouyinDownload(dlID int64, awemeID string,
 
 	// 发送 SSE 事件通知前端
 	h.downloader.EmitEvent(downloader.DownloadEvent{
-		Type:     "completed",
-		BvID:     awemeID,
-		Title:    title,
-		FileSize: fileSize,
+		Type:         "completed",
+		BvID:         awemeID,
+		Title:        title,
+		FileSize:     fileSize,
+		DownloadedAt: time.Now().Format(time.RFC3339),
 	})
 
 	log.Printf("[quickdl·douyin] Completed: %s -> %s", awemeID, videoFilePath)
@@ -414,10 +418,11 @@ func (h *QuickDownloadHandler) executeDouyinNoteDownload(dlID int64, awemeID str
 
 	// 发送 SSE 事件通知前端
 	h.downloader.EmitEvent(downloader.DownloadEvent{
-		Type:     "completed",
-		BvID:     awemeID,
-		Title:    title,
-		FileSize: totalSize,
+		Type:         "completed",
+		BvID:         awemeID,
+		Title:        title,
+		FileSize:     totalSize,
+		DownloadedAt: time.Now().Format(time.RFC3339),
 	})
 
 	log.Printf("[quickdl·douyin-note] Completed: %s (%d/%d images, %.1f MB)", awemeID, successCount, len(detail.Images), float64(totalSize)/(1024*1024))
