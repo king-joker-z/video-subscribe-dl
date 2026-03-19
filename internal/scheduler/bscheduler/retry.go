@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"video-subscribe-dl/internal/bilibili"
-	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/nfo"
@@ -159,44 +158,6 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	})
 
 	log.Printf("[bscheduler] Resubmitted %s (retry #%d)", dl.VideoID, dl.RetryCount+1)
-}
-
-// RetryFailedDownloads 扫描失败下载并重试可重试的
-func (s *BiliScheduler) RetryFailedDownloads() {
-	const maxPerCycle = 5
-
-	marked, err := s.db.MarkPermanentFailed(config.MaxRetryCount)
-	if err != nil {
-		log.Printf("[bscheduler] Mark permanent failed error: %v", err)
-	} else if marked > 0 {
-		log.Printf("[bscheduler] Marked %d downloads as permanent_failed", marked)
-	}
-
-	retryable, err := s.db.GetRetryableDownloads(config.MaxRetryCount, maxPerCycle)
-	if err != nil {
-		log.Printf("[bscheduler] Get retryable downloads error: %v", err)
-		return
-	}
-
-	if len(retryable) == 0 {
-		return
-	}
-
-	log.Printf("[bscheduler] Found %d retryable failed downloads", len(retryable))
-
-	for _, dl := range retryable {
-		if s.dl != nil && s.dl.IsPaused() {
-			if !s.IsInCooldown() {
-				s.dl.Resume()
-				log.Printf("[bscheduler] 风控冷却结束，恢复下载器")
-			} else {
-				log.Printf("[bscheduler] Downloader paused (cooldown), stopping retry cycle")
-				return
-			}
-		}
-		s.retryOneDownload(dl)
-		time.Sleep(2 * time.Second)
-	}
 }
 
 // RetryByID 手动重试指定下载记录

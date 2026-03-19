@@ -115,10 +115,22 @@ func main() {
 			reconcileResult.OrphanCount, reconcileResult.MissingCount, reconcileResult.StaleCount)
 		log.Println("Run POST /api/scan/fix or use the UI to fix inconsistencies")
 		// 自动重置 stale downloading 状态
-		if reconcileResult.StaleCount > 0 {
+		if len(reconcileResult.StaleDownloading) > 0 {
 			for _, id := range reconcileResult.StaleDownloading {
 				database.ResetDownloadToPending(id)
 				log.Printf("Auto-reset stale download #%d to pending", id)
+			}
+		}
+		// 自动标记文件已迁移（DB completed 但本地文件不存在 → relocated）
+		// 只清空 file_path，保留去重有效性，不触发重新下载
+		if reconcileResult.MissingCount > 0 {
+			log.Printf("Auto-marking %d missing files as relocated...", reconcileResult.MissingCount)
+			for _, videoID := range reconcileResult.MissingFiles {
+				if err := database.MarkVideoRelocated(videoID); err != nil {
+					log.Printf("Auto-relocate failed for %s: %v", videoID, err)
+				} else {
+					log.Printf("Auto-marked relocated: %s", videoID)
+				}
 			}
 		}
 	}
