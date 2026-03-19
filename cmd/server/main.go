@@ -165,6 +165,7 @@ func main() {
 	server.SetDouyinCookieUpdateFunc(sched.RefreshDouyinUserCookie)
 	server.SetDouyinPauseStatusFunc(sched.GetDouyinPauseStatus)
 	server.SetDouyinResumeFunc(sched.ResumeDouyin)
+	server.SetDouyinCookieStatusFunc(sched.GetDouyinCookieStatus)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

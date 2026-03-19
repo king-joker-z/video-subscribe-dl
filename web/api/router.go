@@ -119,6 +119,11 @@ func (rt *Router) SetDouyinResumeFunc(fn func()) {
 	rt.douyinStatus.SetResumeFunc(fn)
 }
 
+// SetDouyinCookieStatusFunc 设置抖音 Cookie 状态查询回调
+func (rt *Router) SetDouyinCookieStatusFunc(fn func() (bool, string)) {
+	rt.douyinStatus.SetCookieStatusFunc(fn)
+}
+
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
 	rt.dashboard.SetCooldownInfoFunc(fn)
 	rt.metrics.SetCooldownInfoFunc(fn)

@@ -10,15 +10,15 @@ import (
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
-	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/downloader"
 	"video-subscribe-dl/internal/notify"
 	"video-subscribe-dl/internal/scheduler/bscheduler"
+	"video-subscribe-dl/internal/scheduler/dscheduler"
 )
 
 // Scheduler 顶层编排器：持有子平台 scheduler，统一管理生命周期和任务分发。
 // 所有 B 站平台相关逻辑委托给 bili (*bscheduler.BiliScheduler)。
-// 抖音相关字段/方法保留在顶层，供同包测试直接访问。
+// 所有抖音平台相关逻辑委托给 douyin (*dscheduler.DouyinScheduler)。
 type Scheduler struct {
 	db          *db.DB
 	dl          *downloader.Downloader
@@ -30,6 +30,9 @@ type Scheduler struct {
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
 
+	// 抖音子调度器（负责所有抖音平台逻辑）
+	douyin *dscheduler.DouyinScheduler
+
 	// cron 调度器
 	cronScheduler *cron.Cron
 
@@ -40,31 +43,9 @@ type Scheduler struct {
 	// 风控断点续检：被中断的 source 列表
 	pendingSourcesMu sync.Mutex
 	pendingSources   []db.Source
-
-	// ─── 抖音专属字段（测试直接访问，不可移动）────────────────────────────────
-
-	// 抖音风控冷却（时间截止）
-	rateLimitMu         sync.Mutex
-	douyinCooldownUntil time.Time
-
-	// 抖音暂停控制（手动恢复）
-	douyinPausedMu    sync.RWMutex
-	douyinPaused      bool
-	douyinPauseReason string
-	douyinPausedAt    time.Time
-
-	// Cookie 定期检测
-	lastDouyinCookieCheck time.Time
-
-	// 可注入依赖（测试用）
-	sleepFn         func(time.Duration)
-	newDouyinClient func() DouyinAPI
-
-	// 抖音下载频率限制器
-	douyinDownloadLimiter *douyin.RateLimiter
 }
 
-// New 创建顶层 Scheduler，同时初始化 BiliScheduler 子调度器。
+// New 创建顶层 Scheduler，同时初始化 BiliScheduler 和 DouyinScheduler 子调度器。
 func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath string) *Scheduler {
 	notifier := notify.New(database)
 	hotConfig := config.NewHotConfig()
@@ -80,17 +61,21 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		WG:          wg,
 	})
 
+	douyinSched := dscheduler.New(dscheduler.Config{
+		DB:          database,
+		DownloadDir: downloadDir,
+		Notifier:    notifier,
+	})
+
 	return &Scheduler{
-		db:                    database,
-		dl:                    dl,
-		downloadDir:           downloadDir,
-		notifier:              notifier,
-		stopCh:                make(chan struct{}),
-		bili:                  bili,
-		fullScanRunning:       make(map[int64]bool),
-		newDouyinClient:       defaultNewDouyinClient,
-		sleepFn:               time.Sleep,
-		douyinDownloadLimiter: douyin.NewRateLimiter(4, 1, 15*time.Second),
+		db:              database,
+		dl:              dl,
+		downloadDir:     downloadDir,
+		notifier:        notifier,
+		stopCh:          make(chan struct{}),
+		bili:            bili,
+		douyin:          douyinSched,
+		fullScanRunning: make(map[int64]bool),
 	}
 }
 
@@ -110,7 +95,7 @@ func (s *Scheduler) Start() {
 		// 委托给 BiliScheduler 做 B 站初始化工作
 		s.bili.Startup()
 
-		s.loadDouyinUserCookie()
+		s.douyin.LoadUserCookie()
 		s.ProcessAllPending()
 		s.checkAll()
 
@@ -166,8 +151,8 @@ func (s *Scheduler) Start() {
 
 func (s *Scheduler) Stop() {
 	s.bili.Stop()
-	if s.douyinDownloadLimiter != nil {
-		s.douyinDownloadLimiter.Stop()
+	if s.douyin != nil {
+		s.douyin.Stop()
 	}
 	close(s.stopCh)
 	s.wg.Wait()
@@ -286,11 +271,8 @@ func (s *Scheduler) checkSource(src db.Source) {
 	log.Printf("Checking: %s (%s) [type=%s]", src.Name, src.URL, src.Type)
 
 	switch src.Type {
-	case "douyin":
-		s.checkDouyin(src)
-		return
-	case "douyin_mix":
-		s.checkDouyinMix(src)
+	case "douyin", "douyin_mix":
+		s.douyin.CheckSource(src)
 		return
 	default:
 		// 所有 B 站类型委托给 bscheduler
@@ -374,7 +356,7 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			s.fullScanDouyin(*src)
+			s.douyin.FullScanDouyin(*src)
 		}()
 	default:
 		s.bili.FullScanSource(sourceID)
@@ -442,86 +424,68 @@ func (s *Scheduler) isBiliInCooldown() bool {
 
 // isDouyinInCooldown 检查抖音是否在风控冷却期内
 func (s *Scheduler) isDouyinInCooldown() bool {
-	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
-	return time.Now().Before(s.douyinCooldownUntil)
-}
-
-// triggerDouyinCooldown 触发抖音风控冷却
-func (s *Scheduler) triggerDouyinCooldown() {
-	s.rateLimitMu.Lock()
-	defer s.rateLimitMu.Unlock()
-	s.douyinCooldownUntil = time.Now().Add(config.CooldownDuration)
-	log.Printf("[WARN] 触发抖音风控，暂停抖音检查 %v（恢复时间: %s）",
-		config.CooldownDuration, s.douyinCooldownUntil.Format("15:04:05"))
+	return s.douyin.IsInCooldown()
 }
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用，合并两个平台）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	// 抖音冷却
-	s.rateLimitMu.Lock()
-	douyinUntil := s.douyinCooldownUntil
-	s.rateLimitMu.Unlock()
+	douyinIn, douyinRemaining := s.douyin.GetCooldownInfo()
 
 	// B 站冷却
-	var biliUntil time.Time
+	var biliSec int
 	if s.bili != nil {
-		biliIn, biliSec := s.bili.GetCooldownInfo()
+		biliIn, sec := s.bili.GetCooldownInfo()
 		if biliIn {
-			biliUntil = time.Now().Add(time.Duration(biliSec) * time.Second)
+			biliSec = sec
 		}
 	}
 
-	now := time.Now()
-	latest := douyinUntil
-	if biliUntil.After(latest) {
-		latest = biliUntil
+	// 取两个平台中剩余时间较长的
+	var douyinSec int
+	if douyinIn {
+		d, _ := time.ParseDuration(douyinRemaining)
+		douyinSec = int(d.Seconds())
 	}
-	if now.Before(latest) {
-		return true, int(time.Until(latest).Seconds())
+
+	if douyinSec > 0 || biliSec > 0 {
+		if douyinSec > biliSec {
+			return true, douyinSec
+		}
+		return true, biliSec
 	}
 	return false, 0
 }
 
-// ─── 抖音暂停控制 ──────────────────────────────────────────────────────────────
+// ─── 抖音暂停控制（委托给 dscheduler）────────────────────────────────────────
 
 // PauseDouyin 暂停抖音下载（风控触发，需手动恢复）
 func (s *Scheduler) PauseDouyin(reason string) {
-	s.douyinPausedMu.Lock()
-	defer s.douyinPausedMu.Unlock()
-	if s.douyinPaused {
-		return
-	}
-	s.douyinPaused = true
-	s.douyinPauseReason = reason
-	s.douyinPausedAt = time.Now()
-	log.Printf("[douyin] ⚠️ 抖音下载已暂停: %s", reason)
+	s.douyin.Pause(reason)
 }
 
 // ResumeDouyin 手动恢复抖音下载
 func (s *Scheduler) ResumeDouyin() {
-	s.douyinPausedMu.Lock()
-	defer s.douyinPausedMu.Unlock()
-	if !s.douyinPaused {
-		return
-	}
-	s.douyinPaused = false
-	log.Printf("[douyin] ✅ 抖音下载已恢复（暂停原因: %s，暂停时长: %v）",
-		s.douyinPauseReason, time.Since(s.douyinPausedAt).Round(time.Second))
-	s.douyinPauseReason = ""
-	s.douyinPausedAt = time.Time{}
+	s.douyin.Resume()
 }
 
 // IsDouyinPaused 检查抖音是否被暂停
 func (s *Scheduler) IsDouyinPaused() bool {
-	s.douyinPausedMu.RLock()
-	defer s.douyinPausedMu.RUnlock()
-	return s.douyinPaused
+	return s.douyin.IsPaused()
 }
 
 // GetDouyinPauseStatus 返回抖音暂停状态详情（供 API 使用）
 func (s *Scheduler) GetDouyinPauseStatus() (paused bool, reason string, pausedAt time.Time) {
-	s.douyinPausedMu.RLock()
-	defer s.douyinPausedMu.RUnlock()
-	return s.douyinPaused, s.douyinPauseReason, s.douyinPausedAt
+	return s.douyin.GetPauseStatus()
+}
+
+// RefreshDouyinUserCookie 热更新：从 DB 重新加载并应用抖音 Cookie
+func (s *Scheduler) RefreshDouyinUserCookie(cookie string) {
+	s.douyin.RefreshCookie(cookie)
+}
+
+// GetDouyinCookieStatus 返回抖音 Cookie 的当前有效性状态（供 API 注入使用）
+func (s *Scheduler) GetDouyinCookieStatus() (bool, string) {
+	st := s.douyin.GetDouyinCookieStatus()
+	return st.Valid, st.Msg
 }

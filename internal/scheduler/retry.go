@@ -16,9 +16,9 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
-	// 抖音类型使用独立的下载路径
+	// 抖音类型委托给 dscheduler
 	if src.Type == "douyin" || src.Type == "douyin_mix" {
-		s.retryOneDouyinDownload(dl)
+		s.douyin.RetryDownload(dl)
 		return
 	}
 

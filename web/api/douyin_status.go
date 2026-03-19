@@ -3,14 +3,13 @@ package api
 import (
 	"net/http"
 	"time"
-
-	"video-subscribe-dl/internal/scheduler"
 )
 
 // DouyinStatusHandler 抖音暂停状态 API
 type DouyinStatusHandler struct {
-	getStatus  func() (paused bool, reason string, pausedAt time.Time)
-	resumeFunc func()
+	getStatus       func() (paused bool, reason string, pausedAt time.Time)
+	resumeFunc      func()
+	getCookieStatus func() (bool, string)
 }
 
 func NewDouyinStatusHandler() *DouyinStatusHandler {
@@ -25,6 +24,11 @@ func (h *DouyinStatusHandler) SetResumeFunc(fn func()) {
 	h.resumeFunc = fn
 }
 
+// SetCookieStatusFunc 注入 Cookie 状态查询函数
+func (h *DouyinStatusHandler) SetCookieStatusFunc(fn func() (bool, string)) {
+	h.getCookieStatus = fn
+}
+
 // HandleStatus GET /api/douyin/status — 返回抖音暂停状态 + Cookie 有效性
 func (h *DouyinStatusHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
@@ -32,8 +36,14 @@ func (h *DouyinStatusHandler) HandleStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Cookie 有效性状态（来自 scheduler 全局状态）
-	cookieValid, cookieMsg := scheduler.GetDouyinCookieStatus()
+	// Cookie 有效性状态（通过注入函数获取）
+	var cookieValid bool
+	var cookieMsg string
+	if h.getCookieStatus != nil {
+		cookieValid, cookieMsg = h.getCookieStatus()
+	} else {
+		cookieValid = true // 默认有效，避免误报
+	}
 
 	if h.getStatus == nil {
 		apiOK(w, map[string]interface{}{

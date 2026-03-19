@@ -77,9 +77,10 @@ type Server struct {
 	onRedownload       func(int64)
 	getBiliClient      func() *bilibili.Client
 	onConfigReload     func()
-	onDouyinCookieUpdate func(string)
-	getDouyinPauseStatus func() (bool, string, time.Time)
-	onDouyinResume       func()
+	onDouyinCookieUpdate  func(string)
+	getDouyinPauseStatus  func() (bool, string, time.Time)
+	onDouyinResume        func()
+	getDouyinCookieStatus func() (bool, string)
 
 	version   string
 	buildTime string
@@ -174,6 +175,9 @@ func (s *Server) setupRoutes() {
 		if s.onDouyinResume != nil {
 			s.apiRouter.SetDouyinResumeFunc(s.onDouyinResume)
 		}
+		if s.getDouyinCookieStatus != nil {
+			s.apiRouter.SetDouyinCookieStatusFunc(s.getDouyinCookieStatus)
+		}
 		if s.notifier != nil {
 			s.apiRouter.SetNotifier(s.notifier)
 		}
@@ -238,6 +242,10 @@ func (s *Server) SetDouyinPauseStatusFunc(fn func() (bool, string, time.Time)) {
 
 func (s *Server) SetDouyinResumeFunc(fn func()) {
 	s.onDouyinResume = fn
+}
+
+func (s *Server) SetDouyinCookieStatusFunc(fn func() (bool, string)) {
+	s.getDouyinCookieStatus = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {
