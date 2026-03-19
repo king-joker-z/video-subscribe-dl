@@ -370,7 +370,13 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 			break
 		}
 		page++
-		time.Sleep(time.Duration(3000+rand.Intn(2000)) * time.Millisecond)
+		// 翻页间隔与常规扫描保持一致：5~10s，每3页额外休息10~15s（防风控）
+		sleepMs := 5000 + rand.Intn(5000)
+		if page%3 == 0 {
+			sleepMs += 10000 + rand.Intn(5000)
+			log.Printf("[bscheduler·full-scan] %s: 每3页大间隔，额外休息...", uploaderName)
+		}
+		time.Sleep(time.Duration(sleepMs) * time.Millisecond)
 	}
 
 	var missing []videoEntry
