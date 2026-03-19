@@ -23,11 +23,12 @@ func (s *DouyinScheduler) IsInCooldown() bool {
 }
 
 // GetCooldownInfo 返回冷却状态（供 API 使用）
-func (s *DouyinScheduler) GetCooldownInfo() (inCooldown bool, remaining string) {
+func (s *DouyinScheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	s.cooldownMu.Lock()
 	defer s.cooldownMu.Unlock()
-	if time.Now().Before(s.cooldownUntil) {
-		return true, time.Until(s.cooldownUntil).String()
+	remaining := time.Until(s.cooldownUntil)
+	if remaining > 0 {
+		return true, int(remaining.Seconds())
 	}
-	return false, ""
+	return false, 0
 }

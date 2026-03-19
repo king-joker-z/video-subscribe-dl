@@ -155,10 +155,10 @@ func main() {
 	if cred != nil && !cred.IsEmpty() {
 		sched.UpdateCredential(cred)
 	}
-	sched.Start()
-
-	// 一次性启动清理：扫描非法字符目录 + 重置全量扫描
+	// 一次性启动清理（必须在 Start() 之前：修复存量数据 + 清理非法字符目录）
 	sched.StartupCleanup()
+
+	sched.Start()
 
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)
 	server.SetCooldownInfoFunc(sched.GetCooldownInfo)

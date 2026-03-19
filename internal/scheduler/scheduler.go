@@ -35,14 +35,6 @@ type Scheduler struct {
 
 	// cron 调度器
 	cronScheduler *cron.Cron
-
-	// 全量扫描去重
-	fullScanRunning   map[int64]bool
-	fullScanRunningMu sync.Mutex
-
-	// 风控断点续检：被中断的 source 列表
-	pendingSourcesMu sync.Mutex
-	pendingSources   []db.Source
 }
 
 // New 创建顶层 Scheduler，同时初始化 BiliScheduler 和 DouyinScheduler 子调度器。
@@ -68,14 +60,13 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 	})
 
 	return &Scheduler{
-		db:              database,
-		dl:              dl,
-		downloadDir:     downloadDir,
-		notifier:        notifier,
-		stopCh:          make(chan struct{}),
-		bili:            bili,
-		douyin:          douyinSched,
-		fullScanRunning: make(map[int64]bool),
+		db:          database,
+		dl:          dl,
+		downloadDir: downloadDir,
+		notifier:    notifier,
+		stopCh:      make(chan struct{}),
+		bili:        bili,
+		douyin:      douyinSched,
 	}
 }
 
@@ -172,19 +163,6 @@ func (s *Scheduler) checkAll() {
 
 	// Retry failed downloads
 	s.retryFailedDownloads()
-
-	// 优先处理风控断点续检
-	s.pendingSourcesMu.Lock()
-	resumeSources := s.pendingSources
-	s.pendingSources = nil
-	s.pendingSourcesMu.Unlock()
-
-	if len(resumeSources) > 0 {
-		log.Printf("[scheduler] 风控断点续检: 恢复 %d 个未检查的 source", len(resumeSources))
-		s.checkSourceList(resumeSources)
-		s.ProcessAllPending()
-		return
-	}
 
 	globalInterval := 0
 	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
@@ -429,23 +407,14 @@ func (s *Scheduler) isDouyinInCooldown() bool {
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用，合并两个平台）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
-	// 抖音冷却
-	douyinIn, douyinRemaining := s.douyin.GetCooldownInfo()
+	_, douyinSec := s.douyin.GetCooldownInfo()
 
-	// B 站冷却
 	var biliSec int
 	if s.bili != nil {
 		biliIn, sec := s.bili.GetCooldownInfo()
 		if biliIn {
 			biliSec = sec
 		}
-	}
-
-	// 取两个平台中剩余时间较长的
-	var douyinSec int
-	if douyinIn {
-		d, _ := time.ParseDuration(douyinRemaining)
-		douyinSec = int(d.Seconds())
 	}
 
 	if douyinSec > 0 || biliSec > 0 {

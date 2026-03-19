@@ -26,12 +26,11 @@ func newTestScheduler(t *testing.T, _ interface{}) *Scheduler {
 	})
 
 	s := &Scheduler{
-		db:              database,
-		downloadDir:     t.TempDir(),
-		stopCh:          make(chan struct{}),
-		fullScanRunning: make(map[int64]bool),
-		notifier:        notifier,
-		douyin:          douyinSched,
+		db:          database,
+		downloadDir: t.TempDir(),
+		stopCh:      make(chan struct{}),
+		notifier:    notifier,
+		douyin:      douyinSched,
 	}
 	t.Cleanup(func() { douyinSched.Stop() })
 	return s
