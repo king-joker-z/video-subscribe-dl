@@ -85,20 +85,18 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		return
 	}
 
-	// uploaderDir 固定使用订阅源名称，避免共创/合拍视频因 API 返回别的作者导致目录跑偏
-	uploaderDir := douyin.SanitizePath(src.Name)
-	if uploaderDir == "" {
-		uploaderDir = douyin.SanitizePath(dl.Uploader)
+	// srcName：订阅源名称，用于目录结构和 NFO studio/actor，与 B站行为一致
+	srcName := src.Name
+	if srcName == "" {
+		srcName = dl.Uploader
 	}
+	uploaderDir := douyin.SanitizePath(srcName)
 	outputDir := filepath.Join(s.downloadDir, uploaderDir)
 
-	// uploaderName 用于 NFO 元数据：优先记录视频实际作者，兜底用订阅源名
+	// uploaderName 仅用于通知文案，记录视频的实际作者
 	uploaderName := detail.Author.Nickname
 	if uploaderName == "" {
-		uploaderName = dl.Uploader
-	}
-	if uploaderName == "" {
-		uploaderName = src.Name
+		uploaderName = srcName
 	}
 
 	title := detail.Desc
@@ -168,14 +166,14 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 			BvID:         dl.VideoID,
 			Title:        title,
 			Description:  detail.Desc,
-			UploaderName: uploaderName,
+			UploaderName: srcName, // 固定用订阅源名，保持目录/studio/actor 一致
 			UploadDate:   detail.CreateTimeUnix(),
 			Duration:     detail.Duration / 1000,
 			Thumbnail:    detail.Cover,
 			WebpageURL:   douyin.BuildVideoWebURL(dl.VideoID),
 			LikeCount:    detail.DiggCount,
 			ShareCount:   detail.ShareCount,
-			ReplyCount:   detail.CommentCount, // CommentCount → ReplyCount
+			ReplyCount:   detail.CommentCount,
 		}
 		if err := nfo.GenerateVideoNFO(meta, videoFilePath); err != nil {
 			log.Printf("[dscheduler] Generate NFO failed: %v", err)
@@ -183,7 +181,7 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	}
 
 	s.db.UpdateDownloadStatus(dl.ID, "completed", videoFilePath, fileSize, "")
-	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, detail.Duration/1000)
+	s.db.UpdateDownloadMeta(dl.ID, srcName, detail.Desc, detail.Cover, detail.Duration/1000)
 
 	s.notifier.Send(notify.EventDownloadComplete, "抖音视频下载完成: "+title,
 		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(fileSize)/(1024*1024)))
@@ -191,19 +189,17 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 
 // downloadDouyinNote 下载抖音图集
 func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, detail *douyin.DouyinVideo) {
-	// uploaderDir 固定使用订阅源名称
-	uploaderDir := douyin.SanitizePath(src.Name)
-	if uploaderDir == "" {
-		uploaderDir = douyin.SanitizePath(dl.Uploader)
+	// srcName：订阅源名称，用于目录结构和 NFO studio/actor
+	srcName := src.Name
+	if srcName == "" {
+		srcName = dl.Uploader
 	}
+	uploaderDir := douyin.SanitizePath(srcName)
 
-	// uploaderName 用于 NFO 元数据：优先记录视频实际作者
+	// uploaderName 仅用于通知文案
 	uploaderName := detail.Author.Nickname
 	if uploaderName == "" {
-		uploaderName = dl.Uploader
-	}
-	if uploaderName == "" {
-		uploaderName = src.Name
+		uploaderName = srcName
 	}
 
 	title := detail.Desc
@@ -289,7 +285,7 @@ func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, deta
 			BvID:         dl.VideoID,
 			Title:        title,
 			Description:  detail.Desc,
-			UploaderName: uploaderName,
+			UploaderName: srcName, // 固定用订阅源名
 			UploadDate:   detail.CreateTimeUnix(),
 			Thumbnail:    detail.Cover,
 			WebpageURL:   douyin.BuildNoteWebURL(dl.VideoID),
@@ -304,7 +300,7 @@ func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, deta
 	}
 
 	s.db.UpdateDownloadStatus(dl.ID, "completed", noteDir, totalSize, "")
-	s.db.UpdateDownloadMeta(dl.ID, uploaderName, detail.Desc, detail.Cover, 0)
+	s.db.UpdateDownloadMeta(dl.ID, srcName, detail.Desc, detail.Cover, 0)
 
 	s.notifier.Send(notify.EventDownloadComplete,
 		fmt.Sprintf("抖音图集下载完成: %s (%d张)", title, successCount),
