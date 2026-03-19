@@ -3,6 +3,7 @@ package bscheduler
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,17 +17,8 @@ import (
 // retryOneDownload 执行单个 B站下载的重试
 func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	if s.dl != nil && s.dl.IsPaused() {
-		if !s.IsInCooldown() {
-			s.dl.Resume()
-			log.Printf("[bscheduler] 风控冷却结束，恢复下载器")
-		} else {
-			s.rateLimitMu.Lock()
-			until := s.cooldownUntil
-			s.rateLimitMu.Unlock()
-			log.Printf("[bscheduler] Downloader paused (cooldown until %s), skipping retry for %s",
-				until.Format("15:04:05"), dl.VideoID)
-			return
-		}
+		log.Printf("[bscheduler] Downloader paused, skipping retry for %s", dl.VideoID)
+		return
 	}
 
 	src, err := s.db.GetSource(dl.SourceID)
@@ -100,11 +92,50 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 
 	isMultiPart := targetPageNum > 0
 	flat := false
+	var multiPartBase string
 	if isMultiPart {
 		videoTitle := detail.Title
-		multiPartBase := filepath.Join(outputDir, bilibili.SanitizeFilename(videoTitle)+" ["+actualBvID+"]")
+		multiPartBase = filepath.Join(outputDir, bilibili.SanitizeFilename(videoTitle)+" ["+actualBvID+"]")
 		outputDir = filepath.Join(multiPartBase, "Season 1")
 		flat = true
+		os.MkdirAll(outputDir, 0755)
+
+		// tvshow.nfo + poster/fanart（幂等：文件已存在则跳过）
+		if !src.SkipNFO {
+			tvshowNFOPath := filepath.Join(multiPartBase, "tvshow.nfo")
+			if _, err := os.Stat(tvshowNFOPath); os.IsNotExist(err) {
+				uploaderFace := ""
+				if upInfo != nil {
+					uploaderFace = upInfo.Face
+				} else {
+					uploaderFace = detail.Owner.Face
+				}
+				premiered := ""
+				if detail.PubDate > 0 {
+					premiered = time.Unix(detail.PubDate, 0).Format("2006-01-02")
+				}
+				tags, _ := s.getBili().GetVideoTags(actualBvID)
+				nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
+					Title:        detail.Title,
+					Plot:         detail.Desc,
+					UploaderName: uploaderName,
+					UploaderFace: uploaderFace,
+					Premiered:    premiered,
+					Poster:       dl.Thumbnail,
+					Tags:         tags,
+				}, multiPartBase)
+			}
+		}
+		if !src.SkipPoster && dl.Thumbnail != "" {
+			posterPath := filepath.Join(multiPartBase, "poster.jpg")
+			if _, err := os.Stat(posterPath); os.IsNotExist(err) {
+				bilibili.DownloadFile(dl.Thumbnail, posterPath)
+			}
+			fanartPath := filepath.Join(multiPartBase, "fanart.jpg")
+			if _, err := os.Stat(fanartPath); os.IsNotExist(err) {
+				bilibili.DownloadFile(dl.Thumbnail, fanartPath)
+			}
+		}
 	}
 
 	var episodeMeta *nfo.EpisodeMeta
@@ -183,16 +214,8 @@ func (s *BiliScheduler) RedownloadByID(dlID int64) {
 		return
 	}
 	if s.dl != nil && s.dl.IsPaused() {
-		if !s.IsInCooldown() {
-			s.dl.Resume()
-			log.Printf("[bscheduler] 风控冷却结束，恢复下载器")
-		} else {
-			s.rateLimitMu.Lock()
-			until := s.cooldownUntil
-			s.rateLimitMu.Unlock()
-			log.Printf("[bscheduler] Downloader paused (cooldown until %s), skipping", until.Format("15:04:05"))
-			return
-		}
+		log.Printf("[bscheduler] Downloader paused, skipping redownload for %d", dlID)
+		return
 	}
 	s.wg.Add(1)
 	go func() {
