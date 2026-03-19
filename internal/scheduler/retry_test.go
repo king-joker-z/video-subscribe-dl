@@ -45,7 +45,7 @@ func createTestSource(t *testing.T, database *db.DB, name, rawURL string) db.Sou
 		Name:    name,
 		Enabled: true,
 	}
-	if err := database.CreateSource(src); err != nil {
+	if _, err := database.CreateSource(src); err != nil {
 		t.Fatalf("createTestSource: %v", err)
 	}
 	return *src

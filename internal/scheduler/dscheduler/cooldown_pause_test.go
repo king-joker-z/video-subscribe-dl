@@ -114,8 +114,8 @@ func TestTriggerCooldown_SetsInCooldown(t *testing.T) {
 	if !inCooldown {
 		t.Error("GetCooldownInfo: expected inCooldown=true")
 	}
-	if remaining == "" {
-		t.Error("expected non-empty remaining duration string")
+	if remaining <= 0 {
+		t.Error("expected positive remaining seconds")
 	}
 }
 
@@ -136,8 +136,8 @@ func TestGetCooldownInfo_ExpiredCooldown(t *testing.T) {
 	if inCooldown {
 		t.Error("GetCooldownInfo: expected inCooldown=false for expired cooldown")
 	}
-	if remaining != "" {
-		t.Errorf("expected empty remaining for expired cooldown, got %q", remaining)
+	if remaining != 0 {
+		t.Errorf("expected 0 remaining for expired cooldown, got %d", remaining)
 	}
 }
 
