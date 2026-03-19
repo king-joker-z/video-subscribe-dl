@@ -240,13 +240,13 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	return downloads, nil
 }
 
-// GetAllDownloads 获取所有下载记录（用于对账）
+// GetAllDownloads 获取所有下载记录（用于对账），上限 50000 条
 func (d *DB) GetAllDownloads() ([]Download, error) {
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
 		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
-		FROM downloads
+		FROM downloads ORDER BY id DESC LIMIT 50000
 	`)
 	if err != nil {
 		return nil, err

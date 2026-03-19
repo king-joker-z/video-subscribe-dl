@@ -41,6 +41,56 @@ func (h *SourcesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	sourceType := r.URL.Query().Get("type")
 
+	// 附加每个源的视频统计（复用逻辑）
+	type SourceWithStats struct {
+		db.Source
+		VideoCount     int `json:"video_count"`
+		CompletedCount int `json:"completed_count"`
+		FailedCount    int `json:"failed_count"`
+		PendingCount   int `json:"pending_count"`
+	}
+	buildStats := func(sources []db.Source) []SourceWithStats {
+		result := make([]SourceWithStats, 0, len(sources))
+		for _, s := range sources {
+			stats := SourceWithStats{Source: s}
+			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ?", s.ID).Scan(&stats.VideoCount)
+			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('completed','relocated')", s.ID).Scan(&stats.CompletedCount)
+			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('failed','permanent_failed')", s.ID).Scan(&stats.FailedCount)
+			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'pending'", s.ID).Scan(&stats.PendingCount)
+			result = append(result, stats)
+		}
+		return result
+	}
+
+	// 分页模式
+	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+		page, err := strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			page = 1
+		}
+		pageSizeStr := r.URL.Query().Get("page_size")
+		pageSize, err := strconv.Atoi(pageSizeStr)
+		if err != nil || pageSize < 1 {
+			pageSize = 20
+		}
+		sources, total, err := h.db.GetSourcesPaged(sourceType, page, pageSize)
+		if err != nil {
+			apiError(w, CodeInternal, "获取订阅源失败: "+err.Error())
+			return
+		}
+		if sources == nil {
+			sources = []db.Source{}
+		}
+		result := buildStats(sources)
+		apiOK(w, map[string]interface{}{
+			"sources":   result,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		})
+		return
+	}
+
 	sources, err := h.db.GetSources()
 	if err != nil {
 		apiError(w, CodeInternal, "获取订阅源失败: "+err.Error())
@@ -64,25 +114,7 @@ func (h *SourcesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 附加每个源的视频统计
-	type SourceWithStats struct {
-		db.Source
-		VideoCount     int `json:"video_count"`
-		CompletedCount int `json:"completed_count"`
-		FailedCount    int `json:"failed_count"`
-		PendingCount   int `json:"pending_count"`
-	}
-
-	var result []SourceWithStats
-	for _, s := range sources {
-		stats := SourceWithStats{Source: s}
-		// 统计该源的视频数
-		h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ?", s.ID).Scan(&stats.VideoCount)
-		h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('completed','relocated')", s.ID).Scan(&stats.CompletedCount)
-		h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('failed','permanent_failed')", s.ID).Scan(&stats.FailedCount)
-		h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'pending'", s.ID).Scan(&stats.PendingCount)
-		result = append(result, stats)
-	}
+	result := buildStats(sources)
 	if result == nil {
 		result = []SourceWithStats{}
 	}

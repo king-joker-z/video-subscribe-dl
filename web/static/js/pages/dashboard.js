@@ -53,6 +53,7 @@ export function DashboardPage({ onNavigate }) {
   // 风控冷却倒计时
   useEffect(() => {
     if (cooldownRef.current) clearInterval(cooldownRef.current);
+    if (cooldownSec > 86400) return; // 超过1天=手动恢复模式，不启动倒计时
     if (cooldownSec > 0) {
       cooldownRef.current = setInterval(() => {
         setCooldownSec(prev => {

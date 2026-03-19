@@ -211,6 +211,41 @@ func (d *DB) GetSourceLatestVideoAt(id int64) (int64, error) {
 }
 
 // GetSourcesDueForCheck 返回到期需要检查的 enabled sources
+// GetSourcesPaged 分页获取订阅源列表
+func (d *DB) GetSourcesPaged(sourceType string, page, pageSize int) ([]Source, int, error) {
+	countSQL := "SELECT COUNT(*) FROM sources"
+	var args []interface{}
+	if sourceType != "" {
+		countSQL += " WHERE type = ?"
+		args = append(args, sourceType)
+	}
+	var total int
+	d.QueryRow(countSQL, args...).Scan(&total)
+
+	offset := (page - 1) * pageSize
+	dataSQL := "SELECT " + sourceColumns + " FROM sources"
+	if sourceType != "" {
+		dataSQL += " WHERE type = ?"
+	}
+	dataSQL += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	dataArgs := append(append([]interface{}{}, args...), pageSize, offset)
+
+	rows, err := d.Query(dataSQL, dataArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var sources []Source
+	for rows.Next() {
+		s, err := scanSource(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		sources = append(sources, s)
+	}
+	return sources, total, rows.Err()
+}
+
 func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 	var query string
 	if globalInterval > 0 {

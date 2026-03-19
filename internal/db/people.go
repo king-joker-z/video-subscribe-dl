@@ -1,6 +1,9 @@
 package db
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // PersonWithCount 带视频数量的 Person
 type PersonWithCount struct {
@@ -78,6 +81,11 @@ func (d *DB) GetPeopleWithVideoCount() ([]PersonWithCount, error) {
 // DeleteUploaderData 删除指定 UP 主的所有数据：downloads 记录 + people 记录
 // 不删除本地文件，仅清除 DB 数据，让 UI 上不再显示该 UP 主
 func (d *DB) DeleteUploaderData(name string) (int64, error) {
+	var cnt int
+	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE uploader = ? AND status = 'downloading'", name).Scan(&cnt)
+	if cnt > 0 {
+		return 0, fmt.Errorf("该 UP 主有 %d 个任务正在下载，请等待完成后再删除", cnt)
+	}
 	// 删除 downloads（所有状态）
 	res, err := d.Exec("DELETE FROM downloads WHERE uploader = ?", name)
 	if err != nil {

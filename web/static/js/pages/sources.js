@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Button, Badge, EmptyState, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
+import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
 const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集' };
@@ -318,12 +318,24 @@ export function SourcesPage({ onNavigate }) {
 
   const [douyinPaused, setDouyinPaused] = useState(null);
   const [checkingIds, setCheckingIds] = useState(new Set());
+  const [sourcePage, setSourcePage] = useState(1);
+  const [sourceTotal, setSourceTotal] = useState(0);
 
   const load = useCallback(async () => {
-    try { const res = await api.getSources(); setSources(res.data || []); }
+    try {
+      const res = await api.getSources({ page: sourcePage, page_size: 20 });
+      if (Array.isArray(res.data)) {
+        setSources(res.data);
+      } else if (res.data && res.data.sources) {
+        setSources(res.data.sources);
+        setSourceTotal(res.data.total || 0);
+      } else {
+        setSources([]);
+      }
+    }
     catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
-  }, []);
+  }, [sourcePage]);
 
   const loadDouyinStatus = useCallback(async () => {
     try { const res = await api.getDouyinStatus(); setDouyinPaused(res.data || null); }
@@ -707,6 +719,7 @@ export function SourcesPage({ onNavigate }) {
                 }, '查看视频', h(Icon, { name: 'chevron-right', size: 12 }))
               )
             ))
-          )
+          ),
+    sourceTotal > 20 && h(Pagination, { page: sourcePage, pageSize: 20, total: sourceTotal, onChange: setSourcePage })
   );
 }

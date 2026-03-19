@@ -20,7 +20,16 @@ export const api = {
   getDashboard: () => request('/api/dashboard'),
 
   // Sources
-  getSources: (type) => request('/api/sources' + (type ? `?type=${type}` : '')),
+  getSources: (params = {}) => {
+    // 兼容旧式字符串调用 getSources('up')
+    if (typeof params === 'string') params = { type: params };
+    const qs = new URLSearchParams();
+    if (params.type) qs.set('type', params.type);
+    if (params.page) qs.set('page', String(params.page));
+    if (params.page_size) qs.set('page_size', String(params.page_size));
+    const q = qs.toString();
+    return request('/api/sources' + (q ? '?' + q : ''));
+  },
   createSource: (body) => request('/api/sources', { method: 'POST', body: JSON.stringify(body) }),
   parseSource: (url) => request('/api/sources/parse', { method: 'POST', body: JSON.stringify({ url }) }),
   getSource: (id) => request(`/api/sources/${id}`),
