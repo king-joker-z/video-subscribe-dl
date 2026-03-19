@@ -113,6 +113,10 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		title = fmt.Sprintf("douyin_%s", dl.VideoID)
 	}
 	safeTitle := douyin.SanitizePath(title)
+	// SanitizePath 遇到全 emoji/特殊字符标题会返回 "unknown"，改为用 video ID 兜底
+	if safeTitle == "unknown" {
+		safeTitle = fmt.Sprintf("douyin_%s", dl.VideoID)
+	}
 	if len([]rune(safeTitle)) > 80 {
 		safeTitle = string([]rune(safeTitle)[:80])
 	}
@@ -216,6 +220,10 @@ func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, deta
 		title = fmt.Sprintf("douyin_%s", dl.VideoID)
 	}
 	safeTitle := douyin.SanitizePath(title)
+	// SanitizePath 遇到全 emoji/特殊字符标题会返回 "unknown"，改为用 video ID 兜底
+	if safeTitle == "unknown" {
+		safeTitle = fmt.Sprintf("douyin_%s", dl.VideoID)
+	}
 	if len([]rune(safeTitle)) > 80 {
 		safeTitle = string([]rune(safeTitle)[:80])
 	}

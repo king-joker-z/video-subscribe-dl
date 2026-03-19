@@ -75,8 +75,14 @@ func (s *Scheduler) RetryByID(dlID int64) {
 		log.Printf("[manual-retry] Download %d not found", dlID)
 		return
 	}
-	// 重置状态和重试计数
+	// 重置状态（包括 permanent_failed）和重试计数，确保 retryOneDownload 状态检查可通过
 	s.db.ResetRetryCount(dlID)
+	s.db.UpdateDownloadStatus(dlID, "failed", "", 0, "")
+	// 重新读取，保证 retryOneDownload 拿到最新状态
+	dl, err = s.db.GetDownload(dlID)
+	if err != nil || dl == nil {
+		return
+	}
 	s.retryOneDownload(*dl)
 }
 
