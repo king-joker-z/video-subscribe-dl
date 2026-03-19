@@ -107,7 +107,7 @@ func (h *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	sourceRows, err := h.db.Query(`
 		SELECT id, COALESCE(name,''), type, url
 		FROM sources
-		WHERE name LIKE ? OR url LIKE ?
+		WHERE (name LIKE ? OR url LIKE ?) AND enabled = 1
 		ORDER BY id DESC
 		LIMIT 5
 	`, like, like)

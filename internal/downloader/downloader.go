@@ -167,16 +167,23 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 	if job.OnStart != nil {
 		job.OnStart()
 	}
+	// 广播 started 事件，让前端立即将状态从 pending 更新为 downloading
+	d.emitEvent(DownloadEvent{
+		Type:  "started",
+		BvID:  job.BvID,
+		Title: job.Title,
+	})
 	result := d.downloadWithRetry(job)
 
 	// 广播下载事件给 SSE 订阅者
 	if result.Success {
 		atomic.AddInt64(&d.totalCompleted, 1)
 		d.emitEvent(DownloadEvent{
-			Type:     "completed",
-			BvID:     job.BvID,
-			Title:    job.Title,
-			FileSize: result.FileSize,
+			Type:         "completed",
+			BvID:         job.BvID,
+			Title:        job.Title,
+			FileSize:     result.FileSize,
+			DownloadedAt: time.Now().Format(time.RFC3339),
 		})
 	} else if result.Error != nil {
 		atomic.AddInt64(&d.totalFailed, 1)

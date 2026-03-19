@@ -36,6 +36,12 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	defer client.Close()
 
 	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")
+	// 广播 started 事件，让前端立即将状态从 pending 更新为 downloading
+	s.emitEvent(DownloadEvent{
+		Type:    "started",
+		VideoID: dl.VideoID,
+		Title:   dl.Title,
+	})
 
 	var detail *douyin.DouyinVideo
 	for attempt := 1; attempt <= 3; attempt++ {

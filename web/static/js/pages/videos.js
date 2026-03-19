@@ -80,12 +80,14 @@ export function VideosPage({ params = {} } = {}) {
     return () => window.removeEventListener('vsd:progress', handler);
   }, []);
 
-  // 监听全局下载事件：complete/failed 时局部更新状态，其他事件触发完整刷新
+  // 监听全局下载事件：started/completed/failed 局部更新状态，其他事件触发完整刷新
   useEffect(() => {
     const handler = (e) => {
       const evt = e.detail;
-      if (evt && (evt.type === 'completed' || evt.type === 'failed') && evt.bvid) {
-        // 局部更新对应视频的状态，避免全量刷新
+      if (!evt || !evt.bvid) { setTimeout(load, 500); return; }
+      if (evt.type === 'started') {
+        setVideos(prev => prev.map(v => v.video_id === evt.bvid ? { ...v, status: 'downloading' } : v));
+      } else if (evt.type === 'completed' || evt.type === 'failed') {
         const newStatus = evt.type === 'completed' ? 'completed' : 'failed';
         setVideos(prev => prev.map(v => {
           if (v.video_id !== evt.bvid) return v;

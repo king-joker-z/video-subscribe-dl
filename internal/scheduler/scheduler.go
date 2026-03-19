@@ -155,11 +155,12 @@ func (s *Scheduler) Start() {
 					default:
 					}
 					s.dl.EmitEvent(downloader.DownloadEvent{
-						Type:     evt.Type,
-						BvID:     evt.VideoID,
-						Title:    evt.Title,
-						FileSize: evt.FileSize,
-						Error:    evt.Error,
+						Type:         evt.Type,
+						BvID:         evt.VideoID,
+						Title:        evt.Title,
+						FileSize:     evt.FileSize,
+						Error:        evt.Error,
+						DownloadedAt: evt.DownloadedAt,
 					})
 				}
 			}

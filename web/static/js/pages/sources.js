@@ -432,9 +432,9 @@ export function SourcesPage({ onNavigate }) {
 
   const handleDelete = async (id, name) => {
     // Build a confirm dialog with a checkbox option
-    const confirmed = confirm('确定删除「' + name + '」？关联的下载记录也会被删除。');
+    const confirmed = confirm('确定删除订阅「' + name + '」？');
     if (!confirmed) return;
-    const withFiles = confirm('是否同时删除本地视频文件？\n\n点击「确定」= 同时删除本地文件\n点击「取消」= 仅删除订阅记录');
+    const withFiles = confirm('是否同时删除本地视频文件？\n\n点击「确定」= 同时删除本地文件和下载记录\n点击「取消」= 仅删除订阅，保留本地文件');
     try {
       await api.deleteSource(id, withFiles);
       toast.success(withFiles ? '已删除（含本地文件）' : '已删除');
