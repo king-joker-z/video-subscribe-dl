@@ -27,9 +27,10 @@ func (d *DB) CreateDownload(dl *Download) (int64, error) {
 
 func (d *DB) GetDownloads(limit int) ([]Download, error) {
 	rows, err := d.Query(`
-		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status, 
-		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''), 
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
+		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
+		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at,
+		       COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
 		FROM downloads ORDER BY created_at DESC LIMIT ?
 	`, limit)
 	if err != nil {
@@ -42,7 +43,8 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 		var dl Download
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage,
+			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		downloads = append(downloads, dl)

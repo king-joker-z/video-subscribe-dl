@@ -336,6 +336,11 @@ func (s *Scheduler) submitDownload(dl db.Download) error {
 	if err != nil || src == nil {
 		return fmt.Errorf("source %d not found", dl.SourceID)
 	}
+	// 跳过已禁用的订阅源（用户手动关闭后 pending 任务不再执行）
+	if !src.Enabled {
+		log.Printf("[process-pending] Source %d (%s) is disabled, skipping download %d", src.ID, src.Name, dl.ID)
+		return nil
+	}
 	if src.Type == "douyin" || src.Type == "douyin_mix" {
 		s.douyin.RetryDownload(dl)
 		return nil

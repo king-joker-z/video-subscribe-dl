@@ -14,13 +14,7 @@ func (s *Server) registerRoutes() {
 	s.apiRouter.Register(s.mux)
 
 	// ========== 辅助路由（定义在 server.go）==========
-	s.mux.HandleFunc("/api/progress/stream", s.handleProgressStream)
-	s.mux.HandleFunc("/api/queue/run", s.handleQueueRun)
-	s.mux.HandleFunc("/api/queue/pause", s.handleQueuePause)
-	s.mux.HandleFunc("/api/queue/resume", s.handleQueueResume)
-	s.mux.HandleFunc("/api/queue", s.handleQueue)
-	s.mux.HandleFunc("/api/notify/test", s.handleNotifyTest)
-	s.mux.HandleFunc("/health", s.handleHealth)
+	s.mux.HandleFunc("/health", s.handleHealth) // 健康检查（兼容旧监控探针）
 
 	// ========== 静态资源 & 首页 ==========
 	staticSub, _ := fs.Sub(staticFS, "static")

@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -503,57 +502,6 @@ func (s *Server) SetVersion(v string)      { s.version = v }
 func (s *Server) SetStartTime(t time.Time) { s.startTime = t }
 func (s *Server) SetBuildTime(t string)    { s.buildTime = t }
 
-func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, map[string]interface{}{
-		"version":    s.version,
-		"uptime":     time.Since(s.startTime).String(),
-		"go":         runtime.Version(),
-		"build_time": s.buildTime,
-	})
-}
-
-func (s *Server) handleProgressStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		jsonError(w, "streaming not supported", 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	if origin := getCORSOrigin(); origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-	}
-
-	fmt.Fprintf(w, "data: []\n\n")
-	flusher.Flush()
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	ctx := r.Context()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			progress := s.downloader.GetProgress()
-			data, err := json.Marshal(progress)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		}
-	}
-}
-
 func jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
@@ -565,69 +513,4 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// GET /api/queue
-func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-	stats, _ := s.db.GetStats()
-	stats["paused"] = 0
-	if s.downloader.IsPaused() {
-		stats["paused"] = 1
-	}
-	jsonResponse(w, stats)
-}
 
-func (s *Server) handleQueueRun(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-	log.Println("Manual check triggered via API")
-	if s.onCheckNow != nil {
-		go s.onCheckNow()
-	}
-	jsonResponse(w, map[string]bool{"ok": true})
-}
-
-func (s *Server) handleQueuePause(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-	s.downloader.Pause()
-	jsonResponse(w, map[string]bool{"ok": true})
-}
-
-func (s *Server) handleQueueResume(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-	s.downloader.Resume()
-	jsonResponse(w, map[string]bool{"ok": true})
-}
-
-func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		jsonError(w, "method not allowed", 405)
-		return
-	}
-	if s.notifier == nil {
-		jsonError(w, "notifier not initialized", 500)
-		return
-	}
-	if err := s.notifier.SendTest(); err != nil {
-		jsonError(w, "发送测试通知失败: "+err.Error(), 400)
-		return
-	}
-	jsonResponse(w, map[string]interface{}{
-		"ok":      true,
-		"message": "测试通知已发送",
-	})
-}
-
-func getCORSOrigin() string {
-	return os.Getenv("CORS_ORIGIN")
-}
