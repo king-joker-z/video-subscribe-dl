@@ -13,7 +13,7 @@ function Toggle({ checked, onChange, disabled = false }) {
     onClick: () => !disabled && onChange(!checked),
     className: cn(
       'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40',
-      checked ? 'bg-blue-500' : 'bg-slate-600',
+      checked ? 'bg-blue-500' : 'bg-slate-300',
       disabled && 'opacity-50 cursor-not-allowed'
     )
   },
@@ -31,7 +31,7 @@ function Select({ value, onChange, options, placeholder = '请选择...' }) {
   return h('select', {
     value: value || '',
     onChange: (e) => onChange(e.target.value),
-    className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500 appearance-none cursor-pointer'
+    className: 'flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500 appearance-none cursor-pointer'
   },
     h('option', { value: '' }, placeholder),
     options.map(opt =>
@@ -48,7 +48,7 @@ function NumberInput({ value, onChange, placeholder, min, max, step }) {
     placeholder,
     min, max, step: step || 1,
     onChange: (e) => onChange(e.target.value),
-    className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+    className: 'flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
   });
 }
 
@@ -159,9 +159,9 @@ export function SettingsPage() {
 
   // 通用行布局
   const RowLayout = ({ label, help, children }) =>
-    h('div', { className: 'flex flex-col sm:flex-row sm:items-center gap-2 py-3 border-b border-slate-700/30 last:border-b-0' },
+    h('div', { className: 'flex flex-col sm:flex-row sm:items-center gap-2 py-3 border-b border-slate-200 last:border-b-0' },
       h('div', { className: 'sm:w-48 flex-shrink-0' },
-        h('label', { className: 'text-sm font-medium text-slate-300' }, label),
+        h('label', { className: 'text-sm font-medium text-slate-700' }, label),
         help && h('div', { className: 'text-xs text-slate-500 mt-0.5' }, help)
       ),
       h('div', { className: 'flex-1 flex items-center' }, children)
@@ -173,7 +173,7 @@ export function SettingsPage() {
       h('input', {
         type, value: getValue(keyName), placeholder,
         onChange: (e) => handleChange(keyName, e.target.value),
-        className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500'
+        className: 'flex-1 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
       })
     );
 
@@ -208,7 +208,7 @@ export function SettingsPage() {
     h('div', { className: 'flex items-center justify-between' },
       h('h2', { className: 'text-lg font-semibold' }, '设置'),
       hasDirty && h('div', { className: 'flex items-center gap-2' },
-        h('span', { className: 'text-xs text-amber-400 flex items-center gap-1' },
+        h('span', { className: 'text-xs text-amber-600 flex items-center gap-1' },
           h(Icon, { name: 'alert-circle', size: 12 }), Object.keys(dirty).length + ' 项未保存'
         ),
         h(Button, { onClick: handleSave, disabled: saving, size: 'sm' }, saving ? '保存中...' : '保存更改')
@@ -217,17 +217,17 @@ export function SettingsPage() {
 
     // B 站账号
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'qr-code', size: 18, className: 'text-blue-400' }), 'B 站账号'
       ),
       credential && credential.has_credential
         ? h('div', { className: 'space-y-3' },
             h('div', { className: 'flex items-center gap-3' },
               h(Badge, { variant: 'success' }, '已登录'),
-              credential.username && h('span', { className: 'text-sm text-slate-300' }, credential.username),
+              credential.username && h('span', { className: 'text-sm text-slate-700' }, credential.username),
               credential.vip_label && h(Badge, { variant: 'warning' }, credential.vip_label)
             ),
-            credential.need_refresh && h('div', { className: 'text-xs text-amber-400 flex items-center gap-1' },
+            credential.need_refresh && h('div', { className: 'text-xs text-amber-600 flex items-center gap-1' },
               h(Icon, { name: 'alert-circle', size: 14 }), '凭证需要刷新'
             ),
             h('div', { className: 'text-xs text-slate-500' },
@@ -249,8 +249,8 @@ export function SettingsPage() {
 
     // 扫码弹窗
     showQR && h('div', { className: 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center', onClick: () => setShowQR(false) },
-      h('div', { className: 'bg-slate-800 rounded-xl p-6 max-w-sm mx-4', onClick: function(e) { e.stopPropagation(); } },
-        h('h3', { className: 'font-medium text-center mb-4' }, '打开 B 站 App 扫码登录'),
+      h('div', { className: 'bg-white rounded-xl p-6 max-w-sm mx-4', onClick: function(e) { e.stopPropagation(); } },
+        h('h3', { className: 'font-medium text-slate-800 text-center mb-4' }, '打开 B 站 App 扫码登录'),
         qrData && qrData.url
           ? h('div', { className: 'flex justify-center mb-4' },
               h('img', {
@@ -259,7 +259,7 @@ export function SettingsPage() {
               })
             )
           : h('div', { className: 'skeleton w-48 h-48 mx-auto rounded-lg' }),
-        h('p', { className: 'text-center text-sm text-slate-400' }, '等待扫码...'),
+        h('p', { className: 'text-center text-sm text-slate-600' }, '等待扫码...'),
         h('div', { className: 'flex justify-center mt-4' },
           h(Button, { onClick: () => setShowQR(false), variant: 'ghost', size: 'sm' }, '取消')
         )
@@ -268,7 +268,7 @@ export function SettingsPage() {
 
     // 抖音 Cookie 管理
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'settings', size: 18, className: 'text-blue-400' }), '抖音 Cookie'
       ),
       h('div', { className: 'space-y-3' },
@@ -285,13 +285,13 @@ export function SettingsPage() {
         ),
         // Cookie 输入框
         h('div', { className: 'space-y-1.5' },
-          h('label', { className: 'text-sm text-slate-400' }, '浏览器 Cookie'),
+          h('label', { className: 'text-sm text-slate-600' }, '浏览器 Cookie'),
           h('textarea', {
             value: douyinCookieInput,
             onChange: (e) => setDouyinCookieInput(e.target.value),
             placeholder: '从浏览器开发者工具复制抖音的 Cookie，例如: msToken=xxx; ttwid=xxx; sessionid=xxx; ...',
             rows: 3,
-            className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono resize-none'
+            className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-mono resize-none'
           })
         ),
         h('div', { className: 'text-xs text-slate-500' },
@@ -348,7 +348,7 @@ export function SettingsPage() {
 
     // 下载设置
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'download', size: 18, className: 'text-blue-400' }), '下载设置'
       ),
       h(SelectRow, {
@@ -386,10 +386,10 @@ export function SettingsPage() {
             value: getValue('filename_template'),
             placeholder: '{{.Title}} [{{.BvID}}]',
             onChange: (e) => handleTemplateChange(e.target.value),
-            className: 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono'
+            className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-mono'
           }),
           (templatePreview || getValue('filename_template')) && h('div', { className: 'text-xs text-slate-500 flex items-center gap-1.5' },
-            h('span', { className: 'text-slate-600' }, '预览:'),
+            h('span', { className: 'text-slate-500' }, '预览:'),
             h('span', { className: 'text-slate-400 font-mono' }, templatePreview || '...')
           )
         )
@@ -398,7 +398,7 @@ export function SettingsPage() {
 
     // 调度与高级
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'settings', size: 18, className: 'text-blue-400' }), '调度与高级'
       ),
       h(NumRow, { label: '检查间隔 (分钟)', keyName: 'check_interval_minutes', placeholder: '30', min: 1 }),
@@ -426,7 +426,7 @@ export function SettingsPage() {
 
     // 性能调优
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'hard-drive', size: 18, className: 'text-blue-400' }), '性能与限流'
       ),
       h(NumRow, { label: '请求限速 (次/分钟)', keyName: 'rate_limit_per_minute', placeholder: '200', help: 'API 速率限制（热更新生效）', min: 10 }),
@@ -438,7 +438,7 @@ export function SettingsPage() {
 
     // 存储管理
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'hard-drive', size: 18, className: 'text-blue-400' }), '存储管理'
       ),
       h(NumRow, { label: '保留天数', keyName: 'retention_days', placeholder: '0 = 永久保留', help: '超过天数的视频文件自动清理', min: 0 }),
@@ -447,7 +447,7 @@ export function SettingsPage() {
 
     // 通知设置 — 条件显示
     h(Card, null,
-      h('h3', { className: 'font-medium text-slate-200 mb-4 flex items-center gap-2' },
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
         h(Icon, { name: 'alert-circle', size: 18, className: 'text-blue-400' }), '通知设置'
       ),
       h(SelectRow, {
@@ -474,13 +474,13 @@ export function SettingsPage() {
         h(TextRow, { label: 'Bark Key', keyName: 'bark_key', type: 'password', placeholder: 'Device Key' })
       ),
       // 通用通知开关（任何通知类型选中后显示）
-      getNotifyType() && h('div', { className: 'mt-3 pt-3 border-t border-slate-700/30' },
+      getNotifyType() && h('div', { className: 'mt-3 pt-3 border-t border-slate-200' },
         h('div', { className: 'text-xs text-slate-500 mb-2' }, '通知事件'),
         h(ToggleRow, { label: '下载完成', keyName: 'notify_on_complete' }),
         h(ToggleRow, { label: '下载失败', keyName: 'notify_on_error' }),
         h(ToggleRow, { label: 'Cookie 过期', keyName: 'notify_on_cookie_expire' }),
         h(ToggleRow, { label: '同步完成', keyName: 'notify_on_sync' })
-        ,h('div', { className: 'mt-3 pt-3 border-t border-slate-700/30 flex items-center justify-between' },
+        ,h('div', { className: 'mt-3 pt-3 border-t border-slate-200 flex items-center justify-between' },
           h('span', { className: 'text-xs text-slate-500' }, '验证通知配置是否正常工作'),
           h(Button, {
             onClick: handleTestNotify,
@@ -493,8 +493,8 @@ export function SettingsPage() {
 
     // 底部保存按钮（浮动式）
     hasDirty && h('div', { className: 'sticky bottom-4 flex justify-end' },
-      h('div', { className: 'bg-slate-800/95 backdrop-blur-sm border border-slate-700/50 rounded-xl px-4 py-3 shadow-2xl flex items-center gap-3' },
-        h('span', { className: 'text-sm text-amber-400' }, Object.keys(dirty).length + ' 项更改未保存'),
+      h('div', { className: 'bg-white backdrop-blur-sm border border-slate-200 rounded-xl px-4 py-3 shadow-md flex items-center gap-3' },
+        h('span', { className: 'text-sm text-amber-600' }, Object.keys(dirty).length + ' 项更改未保存'),
         h(Button, { onClick: function() { setDirty({}); }, variant: 'ghost', size: 'sm' }, '放弃'),
         h(Button, { onClick: handleSave, disabled: saving, size: 'sm' }, saving ? '保存中...' : '保存更改')
       )

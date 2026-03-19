@@ -21,7 +21,7 @@ function UploaderAvatar({ name, hasAvatar }) {
 
   return h('img', {
     src: avatarUrl,
-    className: 'w-10 h-10 rounded-full flex-shrink-0 object-cover bg-slate-800',
+    className: 'w-10 h-10 rounded-full flex-shrink-0 object-cover bg-slate-200',
     referrerPolicy: 'no-referrer',
     loading: 'lazy',
     onError: () => setImgError(true)
@@ -100,13 +100,13 @@ export function UploadersPage({ onNavigate }) {
           h('input', {
             type: 'text', placeholder: '搜索 UP 主...',
             onChange: (e) => handleSearch(e.target.value),
-            className: 'bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-56'
+            className: 'bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 w-56'
           })
         ),
         h('select', {
           value: sort,
           onChange: (e) => { setSort(e.target.value); setPage(1); },
-          className: 'bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300'
+          className: 'bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700'
         },
           h('option', { value: 'recent' }, '最近活跃'),
           h('option', { value: 'total_desc' }, '视频最多'),
@@ -132,13 +132,13 @@ export function UploadersPage({ onNavigate }) {
                 h('div', { className: 'flex items-center gap-3 mb-3' },
                   h(UploaderAvatar, { name: u.uploader, hasAvatar: u.has_avatar }),
                   h('div', { className: 'min-w-0 flex-1' },
-                    h('div', { className: 'font-medium text-sm truncate text-slate-200' }, u.uploader),
+                    h('div', { className: 'font-medium text-sm truncate text-slate-800' }, u.uploader),
                     u.mid && h('div', { className: 'text-xs text-slate-500 mt-0.5' }, 'UID: ' + u.mid)
                   )
                 ),
                 h('div', { className: 'grid grid-cols-3 gap-2 text-center' },
                   h('div', null,
-                    h('div', { className: 'text-lg font-bold text-slate-200' }, u.total || 0),
+                    h('div', { className: 'text-lg font-bold text-slate-800' }, u.total || 0),
                     h('div', { className: 'text-xs text-slate-500' }, '总数')
                   ),
                   h('div', null,
@@ -150,7 +150,7 @@ export function UploadersPage({ onNavigate }) {
                     h('div', { className: 'text-xs text-slate-500' }, '失败')
                   ),
                 ),
-                (u.pending > 0) && h('div', { className: 'mt-3 pt-2 border-t border-slate-700/50' },
+                (u.pending > 0) && h('div', { className: 'mt-3 pt-2 border-t border-slate-200' },
                   h(Button, {
                     onClick: (e) => handleDownloadPending(u.uploader, e),
                     variant: 'secondary', size: 'sm',

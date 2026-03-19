@@ -85,7 +85,11 @@ export function toast(message, type = 'info') {
   const t = { id, message, type };
   toastListeners.forEach(fn => fn(t));
   setTimeout(() => {
-    toastListeners.forEach(fn => fn({ ...t, remove: true }));
+    // 先触发退出动画
+    toastListeners.forEach(fn => fn({ ...t, exiting: true }));
+    setTimeout(() => {
+      toastListeners.forEach(fn => fn({ ...t, remove: true }));
+    }, 300); // 动画时长
   }, 3000);
 }
 toast.success = (msg) => toast(msg, 'success');
@@ -112,6 +116,8 @@ const ICON_PATHS = {
   'search': 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
   'chevron-left': 'M15 18l-6-6 6-6',
   'chevron-right': 'M9 18l6-6-6-6',
+  'chevron-up': 'M18 15l-6-6-6 6',
+  'chevron-down': 'M6 9l6 6 6-6',
   'menu': 'M3 12h18M3 6h18M3 18h18',
   'external-link': 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3',
   'filter': 'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
@@ -122,6 +128,10 @@ const ICON_PATHS = {
   'qr-code': 'M3 3h7v7H3V3zM14 3h7v7h-7V3zM3 14h7v7H3v-7zM17 14h1v3h-1v-3zM14 17h3v4h-3v-4zM20 14h1v7h-4v-1h3v-6z',
   'file-x': 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9.5 12.5l5 5M14.5 12.5l-5 5',
   'alert-circle': 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 8v4M12 16h.01',
+  'alert-triangle': 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  'clock': 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+  'upload': 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
+  'x-circle': 'M22 12a10 10 0 1 0-20 0 10 10 0 0 0 20 0zM15 9l-6 6M9 9l6 6',
   'undo': 'M3 7v6h6M3 13a9 9 0 1 0 2.5-6.3L3 7',
   'square': 'M3 3h18v18H3V3z',
   'check-square': 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
@@ -135,11 +145,11 @@ export function Icon({ name, size = 18, className = '' }) {
 // UI 组件
 export function Badge({ children, variant = 'default', className = '' }) {
   const variants = {
-    default: 'bg-blue-500/20 text-blue-400',
-    success: 'bg-emerald-500/20 text-emerald-400',
-    error: 'bg-red-500/20 text-red-400',
-    warning: 'bg-amber-500/20 text-amber-400',
-    outline: 'border border-slate-600 text-slate-400',
+    default: 'bg-blue-100 text-blue-700',
+    success: 'bg-emerald-100 text-emerald-700',
+    error: 'bg-red-100 text-red-700',
+    warning: 'bg-amber-100 text-amber-700',
+    outline: 'border border-slate-300 text-slate-600',
   };
   return h('span', { className: cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', variants[variant] || variants.default, className) }, children);
 }
@@ -162,7 +172,7 @@ export function StatusBadge({ status }) {
   return h('span', { className: 'relative group/badge inline-flex' },
     h(Badge, { variant: s.variant }, s.label),
     s.tip && h('span', {
-      className: 'pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap rounded-md bg-slate-900 border border-slate-700 text-slate-200 text-[11px] px-2 py-1 shadow-lg opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 z-50 hidden sm:block'
+      className: 'pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 whitespace-nowrap rounded-md bg-white border border-slate-200 text-slate-700 text-[11px] px-2 py-1 shadow-lg opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 z-50 hidden sm:block'
     }, s.tip)
   );
 }
@@ -170,17 +180,17 @@ export function StatusBadge({ status }) {
 export function Card({ children, className = '', hover = false, onClick }) {
   return h('div', {
     onClick,
-    className: cn('bg-slate-800/60 border border-slate-700/50 rounded-xl p-5', hover && 'card-hover cursor-pointer', className)
+    className: cn('bg-white border border-slate-200 rounded-xl p-5 shadow-sm', hover && 'card-hover cursor-pointer', className)
   }, children);
 }
 
 export function Button({ children, onClick, variant = 'primary', size = 'md', disabled = false, className = '' }) {
   const variants = {
-    primary: 'bg-blue-500 hover:bg-blue-600 text-white',
-    secondary: 'bg-slate-700 hover:bg-slate-600 text-slate-200',
+    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    secondary: 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300',
     danger: 'bg-red-600 hover:bg-red-700 text-white',
-    ghost: 'hover:bg-slate-700/50 text-slate-300',
-    outline: 'border border-slate-600 hover:bg-slate-700/50 text-slate-300',
+    ghost: 'hover:bg-slate-100 text-slate-600',
+    outline: 'border border-slate-300 hover:bg-slate-100 text-slate-600',
   };
   const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-6 py-3' };
   return h('button', {
@@ -190,22 +200,22 @@ export function Button({ children, onClick, variant = 'primary', size = 'md', di
 }
 
 export function Skeleton({ className = '' }) {
-  return h('div', { className: cn('skeleton rounded-lg h-4', className) });
+  return h('div', { className: cn('rounded-lg h-4 bg-slate-200 animate-pulse', className) });
 }
 
 // 精细化 Skeleton：视频卡片（带封面图占位 + 标题 + 状态行）
 export function VideoCardSkeleton() {
-  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl overflow-hidden' },
+  return h('div', { className: 'bg-white border border-slate-200 rounded-xl overflow-hidden' },
     // 封面图占位（aspect-video）
-    h('div', { className: 'skeleton w-full aspect-video' }),
+    h('div', { className: 'bg-slate-200 animate-pulse rounded w-full aspect-video' }),
     h('div', { className: 'p-4 space-y-2.5' },
       // 标题行
-      h('div', { className: 'skeleton h-4 w-full rounded' }),
-      h('div', { className: 'skeleton h-3 w-2/3 rounded' }),
+      h('div', { className: 'bg-slate-200 animate-pulse rounded h-4 w-full' }),
+      h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-2/3' }),
       // 状态 badge + 大小
       h('div', { className: 'flex items-center gap-2 mt-1' },
-        h('div', { className: 'skeleton h-5 w-14 rounded-full' }),
-        h('div', { className: 'skeleton h-3 w-12 rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded-full h-5 w-14' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-12' }),
       )
     )
   );
@@ -213,49 +223,49 @@ export function VideoCardSkeleton() {
 
 // 精细化 Skeleton：订阅源卡片（标题 + badge + 4列统计 + 底部信息）
 export function SourceCardSkeleton() {
-  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
+  return h('div', { className: 'bg-white border border-slate-200 rounded-xl p-5 space-y-3' },
     // 顶部：标题 + 操作按钮
     h('div', { className: 'flex items-start justify-between' },
       h('div', { className: 'flex-1 space-y-2 mr-3' },
-        h('div', { className: 'skeleton h-4 w-3/4 rounded' }),
-        h('div', { className: 'skeleton h-5 w-16 rounded-full' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-4 w-3/4' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded-full h-5 w-16' }),
       ),
       h('div', { className: 'flex gap-1' },
-        h('div', { className: 'skeleton w-7 h-7 rounded' }),
-        h('div', { className: 'skeleton w-7 h-7 rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded w-7 h-7' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded w-7 h-7' }),
       )
     ),
     // 4列统计
     h('div', { className: 'grid grid-cols-4 gap-2' },
       ...[0,1,2,3].map(i => h('div', { key: i, className: 'text-center space-y-1' },
-        h('div', { className: 'skeleton h-6 w-8 mx-auto rounded' }),
-        h('div', { className: 'skeleton h-3 w-8 mx-auto rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-6 w-8 mx-auto' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-8 mx-auto' }),
       ))
     ),
     // 底部信息行
-    h('div', { className: 'pt-2 border-t border-slate-700/30 flex items-center gap-2' },
-      h('div', { className: 'skeleton h-3 w-20 rounded' }),
-      h('div', { className: 'skeleton h-3 w-16 rounded' }),
+    h('div', { className: 'pt-2 border-t border-slate-200 flex items-center gap-2' },
+      h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-20' }),
+      h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-16' }),
     )
   );
 }
 
 // 精细化 Skeleton：UP主卡片（头像 + 名字 + 3列统计）
 export function UploaderCardSkeleton() {
-  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
+  return h('div', { className: 'bg-white border border-slate-200 rounded-xl p-5 space-y-3' },
     // 头像 + 名字
     h('div', { className: 'flex items-center gap-3' },
-      h('div', { className: 'skeleton w-10 h-10 rounded-full flex-shrink-0' }),
+      h('div', { className: 'bg-slate-200 animate-pulse rounded-full w-10 h-10 flex-shrink-0' }),
       h('div', { className: 'flex-1 space-y-1.5' },
-        h('div', { className: 'skeleton h-4 w-3/4 rounded' }),
-        h('div', { className: 'skeleton h-3 w-1/2 rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-4 w-3/4' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-1/2' }),
       )
     ),
     // 3列统计
     h('div', { className: 'grid grid-cols-3 gap-2' },
       ...[0,1,2].map(i => h('div', { key: i, className: 'text-center space-y-1' },
-        h('div', { className: 'skeleton h-6 w-8 mx-auto rounded' }),
-        h('div', { className: 'skeleton h-3 w-8 mx-auto rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-6 w-8 mx-auto' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-8 mx-auto' }),
       ))
     )
   );
@@ -263,33 +273,33 @@ export function UploaderCardSkeleton() {
 
 // 精细化 Skeleton：仪表盘统计卡片（标签 + 大数字）
 export function DashboardStatSkeleton() {
-  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-3' },
-    h('div', { className: 'skeleton h-3 w-12 rounded' }),
-    h('div', { className: 'skeleton h-8 w-16 rounded' }),
+  return h('div', { className: 'bg-white border border-slate-200 rounded-xl p-5 space-y-3' },
+    h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-12' }),
+    h('div', { className: 'bg-slate-200 animate-pulse rounded h-8 w-16' }),
   );
 }
 
 // 精细化 Skeleton：设置分区卡片（标题 + 多个表单行）
 export function SettingsSectionSkeleton() {
-  return h('div', { className: 'bg-slate-800/60 border border-slate-700/50 rounded-xl p-5 space-y-4' },
-    h('div', { className: 'skeleton h-4 w-24 rounded mb-2' }),
-    ...[0,1,2].map(i => h('div', { key: i, className: 'flex items-center justify-between py-2 border-b border-slate-700/30 last:border-0' },
+  return h('div', { className: 'bg-white border border-slate-200 rounded-xl p-5 space-y-4' },
+    h('div', { className: 'bg-slate-200 animate-pulse rounded h-4 w-24 mb-2' }),
+    ...[0,1,2].map(i => h('div', { key: i, className: 'flex items-center justify-between py-2 border-b border-slate-200 last:border-0' },
       h('div', { className: 'space-y-1.5 flex-1 mr-4' },
-        h('div', { className: 'skeleton h-3.5 w-28 rounded' }),
-        h('div', { className: 'skeleton h-3 w-48 rounded' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3.5 w-28' }),
+        h('div', { className: 'bg-slate-200 animate-pulse rounded h-3 w-48' }),
       ),
-      h('div', { className: 'skeleton h-8 w-40 rounded-lg' }),
+      h('div', { className: 'bg-slate-200 animate-pulse rounded-lg h-8 w-40' }),
     ))
   );
 }
 
 export function EmptyState({ icon = 'video', message = '暂无数据', action }) {
-  return h('div', { className: 'flex flex-col items-center justify-center py-16 text-slate-500' },
+  return h('div', { className: 'flex flex-col items-center justify-center py-16 text-slate-400' },
     h(Icon, { name: icon, size: 48, className: 'mb-4 opacity-30' }),
     h('p', { className: 'text-lg mb-4' }, message),
     action && action.label && h('button', {
       onClick: action.onClick,
-      className: 'mt-2 px-4 py-1.5 rounded-lg text-sm bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors',
+      className: 'mt-2 px-4 py-1.5 rounded-lg text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors',
     }, action.label)
   );
 }
@@ -304,9 +314,9 @@ export function Pagination({ page, pageSize, total, onChange }) {
   return h('div', { className: 'flex items-center justify-between mt-6' },
     h('span', { className: 'text-sm text-slate-500' }, `共 ${total} 条`),
     h('div', { className: 'flex items-center gap-1' },
-      h('button', { onClick: () => onChange(page - 1), disabled: page <= 1, className: 'p-2 rounded-lg hover:bg-slate-700/50 disabled:opacity-30 text-slate-400' }, h(Icon, { name: 'chevron-left', size: 16 })),
-      pages.map(p => h('button', { key: p, onClick: () => onChange(p), className: cn('w-8 h-8 rounded-lg text-sm', p === page ? 'bg-blue-500 text-white' : 'hover:bg-slate-700/50 text-slate-400') }, p)),
-      h('button', { onClick: () => onChange(page + 1), disabled: page >= totalPages, className: 'p-2 rounded-lg hover:bg-slate-700/50 disabled:opacity-30 text-slate-400' }, h(Icon, { name: 'chevron-right', size: 16 }))
+      h('button', { onClick: () => onChange(page - 1), disabled: page <= 1, className: 'p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-500' }, h(Icon, { name: 'chevron-left', size: 16 })),
+      pages.map(p => h('button', { key: p, onClick: () => onChange(p), className: cn('w-8 h-8 rounded-lg text-sm', p === page ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-500') }, p)),
+      h('button', { onClick: () => onChange(page + 1), disabled: page >= totalPages, className: 'p-2 rounded-lg hover:bg-slate-100 disabled:opacity-30 text-slate-500' }, h(Icon, { name: 'chevron-right', size: 16 }))
     )
   );
 }

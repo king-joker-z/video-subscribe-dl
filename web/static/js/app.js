@@ -13,24 +13,63 @@ import { CommandPalette } from './components/command-palette.js';
 
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
+// ==================== 全局 SSE 单例 ====================
+// 所有组件共享同一个 EventSource，通过自定义 CustomEvent 分发
+let globalSSE = null;
+
+function ensureGlobalSSE() {
+  if (globalSSE && globalSSE.readyState !== EventSource.CLOSED) return;
+  globalSSE = new EventSource('/api/events');
+
+  globalSSE.addEventListener('progress', (e) => {
+    try {
+      window.dispatchEvent(new CustomEvent('vsd:progress', { detail: JSON.parse(e.data) }));
+    } catch {}
+  });
+
+  globalSSE.addEventListener('download_event', (e) => {
+    try {
+      window.dispatchEvent(new CustomEvent('vsd:download-event', { detail: JSON.parse(e.data) }));
+    } catch {}
+  });
+
+  globalSSE.addEventListener('log', (e) => {
+    try {
+      window.dispatchEvent(new CustomEvent('vsd:log', { detail: JSON.parse(e.data) }));
+    } catch {}
+  });
+
+  globalSSE.onerror = () => {
+    setTimeout(ensureGlobalSSE, 5000);
+  };
+}
+
 // ==================== Toast 容器 ====================
 function ToastContainer() {
   const [toasts, setToasts] = useState([]);
   useEffect(() => {
     const handler = (t) => {
-      if (t.remove) setToasts(prev => prev.filter(x => x.id !== t.id));
-      else setToasts(prev => [...prev.slice(-4), t]);
+      if (t.remove) {
+        setToasts(prev => prev.filter(x => x.id !== t.id));
+      } else if (t.exiting) {
+        setToasts(prev => prev.map(x => x.id === t.id ? { ...x, exiting: true } : x));
+      } else {
+        setToasts(prev => [...prev.slice(-4), t]);
+      }
     };
     toastListeners.push(handler);
     return () => { const idx = toastListeners.indexOf(handler); if (idx >= 0) toastListeners.splice(idx, 1); };
   }, []);
 
-  const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-500' };
-  return h('div', { className: 'fixed top-4 right-4 z-50 space-y-2' },
+  const colors = { success: 'bg-emerald-500', error: 'bg-red-500', info: 'bg-blue-500' };
+  return h('div', { className: 'fixed top-4 right-4 z-50 space-y-2 pointer-events-none' },
     toasts.map(t => h('div', {
       key: t.id,
-      className: cn('px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm', colors[t.type] || colors.info),
-      style: { animation: 'slideIn 0.3s ease' }
+      className: cn(
+        'px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm pointer-events-auto',
+        colors[t.type] || colors.info,
+        t.exiting ? 'toast-exit' : 'toast'
+      ),
     }, t.message))
   );
 }
@@ -48,11 +87,11 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }
 
   return h('aside', {
     className: cn(
-      'sidebar fixed top-0 left-0 h-full bg-slate-900/95 backdrop-blur border-r border-slate-700/50 z-40 flex flex-col',
+      'sidebar fixed top-0 left-0 h-full bg-white backdrop-blur border-r border-slate-200 z-40 flex flex-col',
       collapsed ? 'w-16' : 'w-56'
     )
   },
-    h('div', { className: cn('flex items-center gap-3 px-4 h-14 border-b border-slate-700/50', collapsed && 'justify-center') },
+    h('div', { className: cn('flex items-center gap-3 px-4 h-14 border-b border-slate-200', collapsed && 'justify-center') },
       h('div', {
         className: 'w-8 h-8 rounded-lg flex-shrink-0 overflow-hidden',
         style: { background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)' }
@@ -73,8 +112,8 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }
         )
       ),
       !collapsed && h('div', null,
-        h('div', { className: 'font-semibold text-sm text-slate-200 tracking-wide' }, 'Video DL'),
-        h('div', { className: 'text-[10px] text-slate-500' }, '订阅下载管理')
+        h('div', { className: 'font-semibold text-sm text-slate-900 tracking-wide' }, 'Video DL'),
+        h('div', { className: 'text-[10px] text-slate-400' }, '订阅下载管理')
       )
     ),
     // Search button
@@ -82,14 +121,14 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }
       h('button', {
         onClick: onSearchClick,
         className: cn(
-          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800/80 hover:text-slate-300 transition-colors border border-slate-700/50',
+          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors border border-slate-200',
           collapsed && 'justify-center'
         )
       },
         h(Icon, { name: 'search', size: 16 }),
         !collapsed && h('div', { className: 'flex-1 flex items-center justify-between' },
-          h('span', { className: 'text-slate-500' }, '搜索...'),
-          h('kbd', { className: 'text-[10px] text-slate-600 bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-700' }, '⌘K')
+          h('span', { className: 'text-slate-400' }, '搜索...'),
+          h('kbd', { className: 'text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200' }, '⌘K')
         )
       )
     ),
@@ -101,17 +140,17 @@ function Sidebar({ currentPage, onNavigate, collapsed, onToggle, onSearchClick }
         className: cn(
           'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all',
           collapsed && 'justify-center',
-          currentPage === item.id ? 'bg-blue-500/15 text-blue-400 font-medium' : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+          currentPage === item.id ? 'bg-blue-500/15 text-blue-600 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
         )
       },
         h(Icon, { name: item.icon, size: 18 }),
         !collapsed && h('span', null, item.label)
       ))
     ),
-    h('div', { className: 'p-2 border-t border-slate-700/50' },
+    h('div', { className: 'p-2 border-t border-slate-200' },
       h('button', {
         onClick: onToggle,
-        className: cn('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800/80 hover:text-slate-300 transition-colors', collapsed && 'justify-center')
+        className: cn('w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors', collapsed && 'justify-center')
       },
         h(Icon, { name: collapsed ? 'chevron-right' : 'chevron-left', size: 18 }),
         !collapsed && h('span', null, '收起')
@@ -129,10 +168,10 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
   // 底部 tab 页面不需要顶部汉堡菜单（tab bar 直接导航）
   const tabPages = ['dashboard', 'sources', 'videos', 'uploaders', 'settings'];
   const isTabPage = tabPages.includes(currentPage);
-  return h('header', { className: 'lg:hidden fixed top-0 left-0 right-0 h-14 bg-slate-900/95 backdrop-blur border-b border-slate-700/50 z-30 flex items-center px-4 gap-3' },
+  return h('header', { className: 'lg:hidden fixed top-0 left-0 right-0 h-14 bg-white backdrop-blur border-b border-slate-200 z-30 flex items-center px-4 gap-3' },
     // 非 tab 页面（logs）显示汉堡菜单，tab 页面显示占位
     !isTabPage
-      ? h('button', { onClick: onToggleSidebar, className: 'p-2 -ml-2 rounded-lg hover:bg-slate-800 text-slate-400' },
+      ? h('button', { onClick: onToggleSidebar, className: 'p-2 -ml-2 rounded-lg hover:bg-slate-100 text-slate-600' },
           h(Icon, { name: 'menu', size: 20 })
         )
       : h('div', { className: 'w-8' }),
@@ -151,7 +190,7 @@ function MobileTabBar({ currentPage, onNavigate }) {
   ];
 
   return h('nav', {
-    className: 'lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-slate-900/95 backdrop-blur border-t border-slate-700/50 z-30 flex items-stretch'
+    className: 'lg:hidden fixed bottom-0 left-0 right-0 h-14 bg-white backdrop-blur border-t border-slate-200 z-30 flex items-stretch'
   },
     tabs.map(tab =>
       h('button', {
@@ -160,14 +199,14 @@ function MobileTabBar({ currentPage, onNavigate }) {
         className: cn(
           'flex-1 flex flex-col items-center justify-center gap-0.5 text-[10px] transition-colors',
           currentPage === tab.id
-            ? 'text-blue-400'
-            : 'text-slate-500 hover:text-slate-300'
+            ? 'text-blue-600'
+            : 'text-slate-400 hover:text-slate-700'
         )
       },
         h('div', {
           className: cn(
             'flex items-center justify-center w-8 h-6 rounded-lg transition-colors',
-            currentPage === tab.id ? 'bg-blue-500/15' : ''
+            currentPage === tab.id ? 'bg-blue-100' : ''
           )
         },
           h(Icon, { name: tab.icon, size: 18 })
@@ -203,31 +242,28 @@ function GlobalDownloadBar({ sidebarCollapsed }) {
   const hideTimer = useRef(null);
 
   useEffect(() => {
-    let es;
-    try {
-      es = new EventSource('/api/events');
-      es.addEventListener('progress', (e) => {
-        try {
-          const list = JSON.parse(e.data); // ProgressInfo[]
-          const active = (list || []).filter(p => p.status !== 'done' && p.status !== 'error');
-          setProgressList(active);
-          if (active.length > 0) {
-            setVisible(true);
-            if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
-          } else {
-            if (!hideTimer.current) {
-              hideTimer.current = setTimeout(() => {
-                setVisible(false);
-                setProgressList([]);
-                hideTimer.current = null;
-              }, 2500);
-            }
+    const handler = (e) => {
+      try {
+        const list = e.detail || [];
+        const active = list.filter(p => p.status !== 'done' && p.status !== 'error');
+        setProgressList(active);
+        if (active.length > 0) {
+          setVisible(true);
+          if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
+        } else {
+          if (!hideTimer.current) {
+            hideTimer.current = setTimeout(() => {
+              setVisible(false);
+              setProgressList([]);
+              hideTimer.current = null;
+            }, 2500);
           }
-        } catch {}
-      });
-    } catch {}
+        }
+      } catch {}
+    };
+    window.addEventListener('vsd:progress', handler);
     return () => {
-      if (es) es.close();
+      window.removeEventListener('vsd:progress', handler);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, []);
@@ -262,36 +298,36 @@ function GlobalDownloadBar({ sidebarCollapsed }) {
       // 设置 CSS 变量（通过 style 注入，仅桌面端生效）
       h('style', null, `@media (min-width: 1024px) { :root { --global-dl-ml: ${mlStyle}; } } @media (max-width: 1023px) { :root { --global-dl-ml: 0px; } }`),
       h('div', {
-        className: 'relative bg-slate-800/95 backdrop-blur border-b border-blue-500/30 px-4 py-1.5 flex items-center gap-3 text-xs shadow-lg'
+        className: 'relative bg-white backdrop-blur border-b border-blue-200 px-4 py-1.5 flex items-center gap-3 text-xs shadow-lg'
       },
         // 旋转动画图标
-        h('div', { className: 'flex-shrink-0 w-3.5 h-3.5 text-blue-400 animate-spin' },
+        h('div', { className: 'flex-shrink-0 w-3.5 h-3.5 text-blue-500 animate-spin' },
           h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2.5' },
             h('path', { d: 'M21 12a9 9 0 11-6.219-8.56', strokeLinecap: 'round' })
           )
         ),
         // 计数 badge
         count > 1 && h('span', {
-          className: 'flex-shrink-0 bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-medium'
+          className: 'flex-shrink-0 bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-medium'
         }, `${count} 个`),
         // 标题
-        h('span', { className: 'flex-1 min-w-0 text-slate-300 truncate' },
+        h('span', { className: 'flex-1 min-w-0 text-slate-700 truncate' },
           count > 1 ? `${count} 个视频下载中 · ${truncate(primary.title, 24)}` : truncate(primary.title, 40)
         ),
         // 进度 + 速度
         h('div', { className: 'flex-shrink-0 flex items-center gap-2' },
-          totalSpeed > 0 && h('span', { className: 'text-slate-500 hidden sm:inline' }, formatSpeed(totalSpeed)),
-          h('span', { className: 'text-slate-400 tabular-nums w-10 text-right' }, `${avgPercent.toFixed(1)}%`),
-          h('span', { className: 'text-slate-500 hidden sm:inline text-[10px]' }, phaseLabel)
+          totalSpeed > 0 && h('span', { className: 'text-slate-400 hidden sm:inline' }, formatSpeed(totalSpeed)),
+          h('span', { className: 'text-slate-500 tabular-nums w-10 text-right' }, `${avgPercent.toFixed(1)}%`),
+          h('span', { className: 'text-slate-400 hidden sm:inline text-[10px]' }, phaseLabel)
         ),
         // 关闭按钮
         h('button', {
           onClick: () => { setVisible(false); },
-          className: 'flex-shrink-0 ml-1 p-0.5 rounded hover:bg-slate-700 text-slate-600 hover:text-slate-300 transition-colors'
+          className: 'flex-shrink-0 ml-1 p-0.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors'
         }, h(Icon, { name: 'x', size: 12 })),
         // 进度条（绝对定位在底部）
         h('div', {
-          className: 'absolute bottom-0 left-0 right-0 h-0.5 bg-slate-700/50'
+          className: 'absolute bottom-0 left-0 right-0 h-0.5 bg-slate-200'
         },
           h('div', {
             className: 'h-full bg-blue-500 transition-all duration-700',
@@ -320,28 +356,28 @@ function App() {
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const dragCounter = useRef(0);
 
-  // 全局 SSE 下载事件监听：下载完成/失败时弹 toast 通知
+  // 初始化全局 SSE 单例
   useEffect(() => {
-    let es;
-    try {
-      es = new EventSource('/api/events');
-      es.addEventListener('download_event', (e) => {
-        try {
-          const evt = JSON.parse(e.data);
-          if (evt.type === 'completed') {
-            const sizeStr = evt.file_size > 0 ? ` (${formatBytesCompact(evt.file_size)})` : '';
-            toast.success(`✅ 下载完成: ${truncate(evt.title, 40)}${sizeStr}`);
-            // 触发全局刷新事件，让当前页面自动更新数据
-            window.dispatchEvent(new CustomEvent('vsd:download-event', { detail: evt }));
-          } else if (evt.type === 'failed') {
-            const errStr = evt.error ? `: ${truncate(evt.error, 60)}` : '';
-            toast.error(`❌ 下载失败: ${truncate(evt.title, 40)}${errStr}`);
-            window.dispatchEvent(new CustomEvent('vsd:download-event', { detail: evt }));
-          }
-        } catch {}
-      });
-    } catch {}
-    return () => { if (es) es.close(); };
+    ensureGlobalSSE();
+  }, []);
+
+  // 监听全局下载事件：下载完成/失败时弹 toast 通知
+  useEffect(() => {
+    const handler = (e) => {
+      try {
+        const evt = e.detail;
+        if (!evt) return;
+        if (evt.type === 'completed') {
+          const sizeStr = evt.file_size > 0 ? ` (${formatBytesCompact(evt.file_size)})` : '';
+          toast.success(`✅ 下载完成: ${truncate(evt.title, 40)}${sizeStr}`);
+        } else if (evt.type === 'failed') {
+          const errStr = evt.error ? `: ${truncate(evt.error, 60)}` : '';
+          toast.error(`❌ 下载失败: ${truncate(evt.title, 40)}${errStr}`);
+        }
+      } catch {}
+    };
+    window.addEventListener('vsd:download-event', handler);
+    return () => window.removeEventListener('vsd:download-event', handler);
   }, []);
 
   // 全局快捷键 Ctrl+D 打开快速下载
@@ -469,7 +505,7 @@ function App() {
     }
   };
 
-  return h('div', { className: 'min-h-screen bg-slate-950 text-slate-100' },
+  return h('div', { className: 'min-h-screen bg-slate-50 text-slate-900' },
     h(ToastContainer),
     h(QuickDownloadDialog, { open: quickDlOpen, onClose: () => { setQuickDlOpen(false); setQuickDlUrl(''); }, initialUrl: quickDlUrl }),
     h(QuickDownloadFAB, { onClick: () => { setQuickDlUrl(''); setQuickDlOpen(true); } }),
@@ -501,7 +537,7 @@ function App() {
     // 主内容
     h('main', {
       className: cn(
-        'transition-all duration-200 pt-14 lg:pt-0',
+        'transition-all duration-200 pt-14 lg:pt-0 bg-slate-50',
         sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-56'
       )
     },

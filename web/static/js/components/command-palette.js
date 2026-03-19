@@ -187,12 +187,12 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
 
     // 面板
     h('div', {
-      className: 'relative w-full max-w-lg bg-slate-900 border border-slate-700/70 rounded-xl shadow-2xl overflow-hidden',
+      className: 'relative w-full max-w-lg bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden',
       style: { animation: 'slideIn 0.15s ease' },
     },
       // 搜索输入
-      h('div', { className: 'flex items-center gap-3 px-4 border-b border-slate-700/50' },
-        h(Icon, { name: 'search', size: 18, className: 'text-slate-500 flex-shrink-0' }),
+      h('div', { className: 'flex items-center gap-3 px-4 border-b border-slate-200' },
+        h(Icon, { name: 'search', size: 18, className: 'text-slate-400 flex-shrink-0' }),
         h('input', {
           ref: inputRef,
           type: 'text',
@@ -200,12 +200,12 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
           onChange: (e) => { setQuery(e.target.value); setSelectedIndex(0); },
           onKeyDown: handleKeyDown,
           placeholder: '搜索视频、UP主、订阅源，或跳转页面...',
-          className: 'flex-1 bg-transparent border-0 py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none',
+          className: 'flex-1 bg-transparent border-0 py-3.5 text-sm text-slate-800 placeholder-slate-400 focus:outline-none',
           autoComplete: 'off',
           spellCheck: false,
         }),
         loading && h('div', { className: 'w-4 h-4 border-2 border-slate-600 border-t-blue-400 rounded-full animate-spin' }),
-        h('kbd', { className: 'text-[10px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 flex-shrink-0' }, 'ESC')
+        h('kbd', { className: 'text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 flex-shrink-0' }, 'ESC')
       ),
 
       // 结果列表
@@ -220,7 +220,7 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
           : sortedTypes.map(type =>
               h(Fragment, { key: type },
                 // 分组标题
-                h('div', { className: 'px-4 pt-2 pb-1 text-[11px] font-medium text-slate-600 uppercase tracking-wider' },
+                h('div', { className: 'px-4 pt-2 pb-1 text-[11px] font-medium text-slate-500 uppercase tracking-wider' },
                   TYPE_LABELS[type] || type
                 ),
                 // 分组内的项
@@ -232,12 +232,12 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
                     onMouseEnter: () => setSelectedIndex(item._idx),
                     className: cn(
                       'w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors',
-                      item._idx === selectedIndex ? 'bg-blue-500/15 text-blue-300' : 'text-slate-300 hover:bg-slate-800/50'
+                      item._idx === selectedIndex ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
                     )
                   },
                     // 图标
                     h('div', { className: cn('flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center',
-                      item._idx === selectedIndex ? 'bg-blue-500/20' : 'bg-slate-800') },
+                      item._idx === selectedIndex ? 'bg-blue-100' : 'bg-slate-100') },
                       h(Icon, { name: item.icon || 'circle', size: 16, className: item._idx === selectedIndex ? 'text-blue-400' : 'text-slate-500' })
                     ),
                     // 标题和副标题
@@ -251,7 +251,7 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
                     }, item.status === 'completed' ? '已完成' : item.status === 'downloading' ? '下载中' : item.status === 'pending' ? '待处理' : item.status === 'failed' ? '失败' : item.status === 'charge_blocked' ? '充电' : item.status),
                     // Enter 提示
                     item._idx === selectedIndex && h('kbd', {
-                      className: 'text-[10px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 flex-shrink-0'
+                      className: 'text-[10px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 flex-shrink-0'
                     }, '↵')
                   )
                 )
@@ -260,17 +260,17 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
       ),
 
       // 底部快捷键提示
-      h('div', { className: 'flex items-center gap-4 px-4 py-2 border-t border-slate-700/50 text-[11px] text-slate-600' },
+      h('div', { className: 'flex items-center gap-4 px-4 py-2 border-t border-slate-200 text-[11px] text-slate-500' },
         h('span', { className: 'flex items-center gap-1' },
-          h('kbd', { className: 'bg-slate-800 px-1 py-0.5 rounded border border-slate-700' }, '↑↓'),
+          h('kbd', { className: 'bg-slate-100 px-1 py-0.5 rounded border border-slate-200' }, '↑↓'),
           ' 导航'
         ),
         h('span', { className: 'flex items-center gap-1' },
-          h('kbd', { className: 'bg-slate-800 px-1 py-0.5 rounded border border-slate-700' }, '↵'),
+          h('kbd', { className: 'bg-slate-100 px-1 py-0.5 rounded border border-slate-200' }, '↵'),
           ' 选择'
         ),
         h('span', { className: 'flex items-center gap-1' },
-          h('kbd', { className: 'bg-slate-800 px-1 py-0.5 rounded border border-slate-700' }, 'Esc'),
+          h('kbd', { className: 'bg-slate-100 px-1 py-0.5 rounded border border-slate-200' }, 'Esc'),
           ' 关闭'
         )
       )

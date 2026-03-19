@@ -43,16 +43,11 @@ export function DashboardPage({ onNavigate }) {
     return () => window.removeEventListener('vsd:download-event', handler);
   }, [load]);
 
-  // SSE 下载进度
+  // SSE 下载进度（通过全局单例）
   useEffect(() => {
-    let es;
-    try {
-      es = new EventSource('/api/events');
-      es.addEventListener('progress', (e) => {
-        try { setActiveProgress(JSON.parse(e.data) || []); } catch {}
-      });
-    } catch {}
-    return () => { if (es) es.close(); };
+    const handler = (e) => { try { setActiveProgress(e.detail || []); } catch {} };
+    window.addEventListener('vsd:progress', handler);
+    return () => window.removeEventListener('vsd:progress', handler);
   }, []);
 
   // 风控冷却倒计时
@@ -93,22 +88,22 @@ export function DashboardPage({ onNavigate }) {
   );
 
   const stats = [
-    { label: '订阅源', value: data?.sources || 0, color: 'text-blue-400' },
-    { label: '视频总数', value: data?.total_videos || 0, color: 'text-slate-200' },
-    { label: '已完成', value: data?.completed || 0, color: 'text-emerald-400' },
-    { label: '下载中', value: data?.downloading || 0, color: 'text-blue-400' },
-    { label: '失败', value: data?.failed || 0, color: 'text-red-400' },
-    { label: '待处理', value: data?.pending || 0, color: 'text-amber-400' },
-    { label: '充电专属', value: data?.charge_blocked || 0, color: 'text-yellow-500' },
-    { label: '24h 下载', value: data?.downloads_24h || 0, color: 'text-cyan-400' },
+    { label: '订阅源', value: data?.sources || 0, color: 'text-blue-600' },
+    { label: '视频总数', value: data?.total_videos || 0, color: 'text-slate-800' },
+    { label: '已完成', value: data?.completed || 0, color: 'text-emerald-600' },
+    { label: '下载中', value: data?.downloading || 0, color: 'text-blue-600' },
+    { label: '失败', value: data?.failed || 0, color: 'text-red-500' },
+    { label: '待处理', value: data?.pending || 0, color: 'text-amber-600' },
+    { label: '充电专属', value: data?.charge_blocked || 0, color: 'text-yellow-600' },
+    { label: '24h 下载', value: data?.downloads_24h || 0, color: 'text-cyan-600' },
   ];
 
   // 运行状态
   const getRunStatus = () => {
-    if (cooldownSec > 0) return { label: '风控冷却', color: 'text-orange-400', badge: 'cancelled' };
-    if (task?.status === 'running') return { label: '运行中', color: 'text-emerald-400', badge: 'downloading' };
-    if (task?.status === 'paused') return { label: '已暂停', color: 'text-amber-400', badge: 'cancelled' };
-    return { label: '空闲', color: 'text-slate-400', badge: 'completed' };
+    if (cooldownSec > 0) return { label: '风控冷却', color: 'text-orange-500', badge: 'cancelled' };
+    if (task?.status === 'running') return { label: '运行中', color: 'text-emerald-600', badge: 'downloading' };
+    if (task?.status === 'paused') return { label: '已暂停', color: 'text-amber-600', badge: 'cancelled' };
+    return { label: '空闲', color: 'text-slate-500', badge: 'completed' };
   };
   const runStatus = getRunStatus();
 
@@ -132,32 +127,32 @@ export function DashboardPage({ onNavigate }) {
   const cred = data?.credential || {};
   const getCredStatusStyle = () => {
     switch (cred.status) {
-      case 'ok': return { icon: '✅', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
-      case 'expired': return { icon: '⚠️', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
-      case 'error': return { icon: '❌', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' };
-      default: return { icon: '🔑', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
+      case 'ok': return { icon: '✅', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200' };
+      case 'expired': return { icon: '⚠️', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' };
+      case 'error': return { icon: '❌', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-200' };
+      default: return { icon: '🔑', color: 'text-slate-500', bg: 'bg-slate-50', border: 'border-slate-200' };
     }
   };
   const credStyle = getCredStatusStyle();
 
   return h('div', { className: 'page-enter space-y-6' },
     // 抖音 Cookie 失效横幅
-    !douyinCookieValid && h('div', { className: 'bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-center gap-3' },
-      h('div', { className: 'text-red-400 text-xl' }, '⚠️'),
+    !douyinCookieValid && h('div', { className: 'bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3' },
+      h('div', { className: 'text-red-500 text-xl' }, '⚠️'),
       h('div', { className: 'flex-1' },
-        h('div', { className: 'text-red-300 font-medium' }, '抖音 Cookie 已失效，视频无法下载'),
-        douyinCookieMsg && h('div', { className: 'text-red-400/70 text-sm mt-0.5' }, douyinCookieMsg)
+        h('div', { className: 'text-red-600 font-medium' }, '抖音 Cookie 已失效，视频无法下载'),
+        douyinCookieMsg && h('div', { className: 'text-red-500/70 text-sm mt-0.5' }, douyinCookieMsg)
       ),
       h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
     ),
     // 风控冷却横幅
-    cooldownSec > 0 && h('div', { className: 'bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center gap-3' },
-      h('div', { className: 'text-orange-400 text-xl' }, '⚠️'),
+    cooldownSec > 0 && h('div', { className: 'bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3' },
+      h('div', { className: 'text-orange-500 text-xl' }, '⚠️'),
       h('div', { className: 'flex-1' },
-        h('div', { className: 'text-orange-300 font-medium' }, 'B站风控冷却中'),
-        h('div', { className: 'text-orange-400/70 text-sm' }, '下载已自动暂停，冷却结束后恢复')
+        h('div', { className: 'text-orange-600 font-medium' }, 'B站风控冷却中'),
+        h('div', { className: 'text-orange-500/70 text-sm' }, '下载已自动暂停，冷却结束后恢复')
       ),
-      h('div', { className: 'text-2xl font-mono font-bold text-orange-300' }, formatCooldown(cooldownSec))
+      h('div', { className: 'text-2xl font-mono font-bold text-orange-500' }, formatCooldown(cooldownSec))
     ),
 
     // 凭证过期/未登录警告横幅
@@ -175,8 +170,7 @@ export function DashboardPage({ onNavigate }) {
       }, cred.status === 'expired' ? '重新登录' : '去登录')
     ),
 
-    // 统计卡片网格 - 手机端分两行：主要4个 + 次要4个；桌面端全部一行
-    // 桌面端：所有8个并排
+    // 统计卡片网格
     h('div', { className: 'hidden sm:grid grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4' },
       stats.map((s, i) => h(Card, { key: i },
         h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
@@ -192,7 +186,7 @@ export function DashboardPage({ onNavigate }) {
     ),
     // 手机端：次要4个（2x4，紧凑）
     h('div', { className: 'grid sm:hidden grid-cols-4 gap-2' },
-      stats.slice(4).map((s, i) => h('div', { key: i, className: 'bg-slate-800/50 rounded-lg px-2 py-2 text-center' },
+      stats.slice(4).map((s, i) => h('div', { key: i, className: 'bg-white border border-slate-200 rounded-lg px-2 py-2 text-center shadow-sm' },
         h('div', { className: cn('text-xl font-bold', s.color) }, s.value.toLocaleString()),
         h('div', { className: 'text-[10px] text-slate-500 mt-0.5' }, s.label)
       ))
@@ -202,16 +196,16 @@ export function DashboardPage({ onNavigate }) {
       // 任务状态
       h(Card, null,
         h('div', { className: 'flex items-center justify-between mb-4' },
-          h('h3', { className: 'font-medium text-slate-200' }, '任务状态'),
+          h('h3', { className: 'font-medium text-slate-800' }, '任务状态'),
           h('div', { className: 'flex items-center gap-2' },
             h('span', { className: cn('text-sm font-medium', runStatus.color) }, runStatus.label),
             h(StatusBadge, { status: runStatus.badge })
           )
         ),
         h('div', { className: 'space-y-3 text-sm' },
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '活动下载'), h('span', { className: 'text-slate-200' }, task?.active_downloads || 0)),
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '队列长度'), h('span', { className: 'text-slate-200' }, task?.queue_length || 0)),
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '运行时间'), h('span', { className: 'text-slate-200' }, task?.uptime || '--')),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '活动下载'), h('span', { className: 'text-slate-800' }, task?.active_downloads || 0)),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '队列长度'), h('span', { className: 'text-slate-800' }, task?.queue_length || 0)),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '运行时间'), h('span', { className: 'text-slate-800' }, task?.uptime || '--')),
         ),
         h('div', { className: 'flex gap-2 mt-4' },
           h(Button, { onClick: handleTrigger, disabled: triggering || cooldownSec > 0, size: 'sm' },
@@ -226,14 +220,14 @@ export function DashboardPage({ onNavigate }) {
       h(Card, null,
         h('div', { className: 'flex items-center gap-2 mb-4' },
           h('div', { className: 'text-lg' }, credStyle.icon),
-          h('h3', { className: 'font-medium text-slate-200' }, 'B站账号')
+          h('h3', { className: 'font-medium text-slate-800' }, 'B站账号')
         ),
         cred.status === 'ok' ? h('div', { className: 'space-y-3 text-sm' },
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '用户名'), h('span', { className: 'text-slate-200 font-medium' }, cred.username || '--')),
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '会员'), h('span', { className: cn('font-medium', cred.vip_active ? 'text-pink-400' : 'text-slate-200') }, cred.vip_label || '普通用户')),
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '最高画质'), h('span', { className: 'text-slate-200' }, cred.max_quality || '--')),
-          h('div', { className: 'flex justify-between text-slate-400' }, h('span', null, '状态'), h('span', { className: 'text-emerald-400' }, '正常')),
-          cred.updated_at && h('div', { className: 'flex justify-between text-slate-400' },
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '用户名'), h('span', { className: 'text-slate-800 font-medium' }, cred.username || '--')),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '会员'), h('span', { className: cn('font-medium', cred.vip_active ? 'text-pink-500' : 'text-slate-800') }, cred.vip_label || '普通用户')),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '最高画质'), h('span', { className: 'text-slate-800' }, cred.max_quality || '--')),
+          h('div', { className: 'flex justify-between text-slate-600' }, h('span', null, '状态'), h('span', { className: 'text-emerald-600' }, '正常')),
+          cred.updated_at && h('div', { className: 'flex justify-between text-slate-600' },
             h('span', null, '更新时间'), h('span', { className: 'text-slate-500 text-xs' }, cred.updated_at)
           ),
           h('div', { className: 'flex gap-2 mt-3' },
@@ -241,21 +235,21 @@ export function DashboardPage({ onNavigate }) {
               h(Icon, { name: 'sync', size: 14 }), refreshingCred ? '刷新中...' : '刷新凭证')
           )
         ) : cred.status === 'expired' ? h('div', { className: 'space-y-3' },
-          h('div', { className: 'text-amber-400 text-sm' }, '凭证已过期，请刷新或重新登录'),
-          cred.username && h('div', { className: 'text-sm text-slate-400' }, '上次登录: ' + cred.username),
+          h('div', { className: 'text-amber-600 text-sm' }, '凭证已过期，请刷新或重新登录'),
+          cred.username && h('div', { className: 'text-sm text-slate-500' }, '上次登录: ' + cred.username),
           h('div', { className: 'flex gap-2 mt-3' },
             h(Button, { onClick: handleRefreshCred, disabled: refreshingCred, size: 'sm' },
               refreshingCred ? '刷新中...' : '刷新凭证'),
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '重新登录')
           )
         ) : cred.status === 'error' ? h('div', { className: 'space-y-3' },
-          h('div', { className: 'text-red-400 text-sm' }, '凭证验证失败'),
+          h('div', { className: 'text-red-500 text-sm' }, '凭证验证失败'),
           h('div', { className: 'text-xs text-slate-500' }, '可能是网络问题，稍后会自动重试'),
           h('div', { className: 'flex gap-2 mt-3' },
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm', variant: 'secondary' }, '前往设置')
           )
         ) : h('div', { className: 'space-y-3' },
-          h('div', { className: 'text-slate-400 text-sm' }, '未登录，仅能下载 480P 视频'),
+          h('div', { className: 'text-slate-600 text-sm' }, '未登录，仅能下载 480P 视频'),
           h('div', { className: 'text-xs text-slate-500' }, '扫码登录后可下载高画质视频'),
           h('div', { className: 'flex gap-2 mt-3' },
             onNavigate && h(Button, { onClick: () => onNavigate('settings'), size: 'sm' },
@@ -267,15 +261,15 @@ export function DashboardPage({ onNavigate }) {
       // 磁盘
       h(Card, null,
         h('div', { className: 'flex items-center gap-2 mb-4' },
-          h(Icon, { name: 'hard-drive', size: 18, className: 'text-slate-500' }),
-          h('h3', { className: 'font-medium text-slate-200' }, '存储空间')
+          h(Icon, { name: 'hard-drive', size: 18, className: 'text-slate-400' }),
+          h('h3', { className: 'font-medium text-slate-800' }, '存储空间')
         ),
         data?.disk ? h(Fragment, null,
           h('div', { className: 'flex items-center justify-between mb-2' },
             h('span', { className: 'text-2xl font-bold' }, formatBytes(data.disk.available)),
             h('span', { className: 'text-sm text-slate-500' }, '共 ' + formatBytes(data.disk.total))
           ),
-          h('div', { className: 'w-full bg-slate-700 rounded-full h-2.5 mb-2' },
+          h('div', { className: 'w-full bg-slate-200 rounded-full h-2.5 mb-2' },
             h('div', { className: 'bg-blue-500 h-2.5 rounded-full progress-bar', style: { width: ((data.disk.used / data.disk.total) * 100).toFixed(1) + '%' } })
           ),
           h('div', { className: 'text-xs text-slate-500' }, `已用 ${formatBytes(data.disk.used)} (${((data.disk.used / data.disk.total) * 100).toFixed(1)}%)`),
@@ -287,12 +281,12 @@ export function DashboardPage({ onNavigate }) {
     // 活跃下载列表（带速度和 ETA）
     activeProgress.length > 0 && h(Card, null,
       h('div', { className: 'flex items-center justify-between mb-4' },
-        h('h3', { className: 'font-medium text-slate-200' }, '下载中'),
+        h('h3', { className: 'font-medium text-slate-800' }, '下载中'),
         h('div', { className: 'flex items-center gap-2' },
           h('span', { className: 'text-xs text-slate-500' }, activeProgress.length + ' 个任务'),
           (() => {
             const totalSpeed = activeProgress.reduce((sum, p) => sum + (p.speed || 0), 0);
-            return totalSpeed > 0 && h('span', { className: 'text-xs text-blue-400 font-medium' }, '总速度 ' + formatSpeed(totalSpeed));
+            return totalSpeed > 0 && h('span', { className: 'text-xs text-blue-600 font-medium' }, '总速度 ' + formatSpeed(totalSpeed));
           })()
         )
       ),
@@ -303,18 +297,18 @@ export function DashboardPage({ onNavigate }) {
               h('div', { className: 'text-sm truncate flex-1 min-w-0 mr-3' }, p.title || p.bvid),
               h('span', { className: 'text-xs text-slate-500 flex-shrink-0 tabular-nums' }, (p.percent || 0).toFixed(1) + '%')
             ),
-            h('div', { className: 'w-full bg-slate-700 rounded-full h-1.5' },
+            h('div', { className: 'w-full bg-slate-200 rounded-full h-1.5' },
               h('div', { className: cn('h-1.5 rounded-full progress-bar', p.phase === 'merge' ? 'bg-amber-500' : 'bg-blue-500'), style: { width: Math.min(100, p.percent || 0) + '%' } })
             ),
             h('div', { className: 'flex items-center gap-3 text-xs text-slate-500' },
               p.phase === 'merge'
-                ? h('span', { className: 'text-amber-400' }, '合并中...')
+                ? h('span', { className: 'text-amber-600' }, '合并中...')
                 : h(Fragment, null,
-                    p.speed > 0 && h('span', { className: 'text-blue-400 font-medium' }, formatSpeed(p.speed)),
+                    p.speed > 0 && h('span', { className: 'text-blue-600 font-medium' }, formatSpeed(p.speed)),
                     formatETA(p.downloaded, p.total, p.speed) && h('span', null, 'ETA ' + formatETA(p.downloaded, p.total, p.speed)),
                     p.total > 0 && h('span', null, formatBytes(p.downloaded) + ' / ' + formatBytes(p.total))
                   ),
-              h('span', { className: 'text-slate-600' },
+              h('span', { className: 'text-slate-400' },
                 p.phase === 'video' ? '视频' : p.phase === 'audio' ? '音频' : p.phase === 'merge' ? '合并' : p.phase
               )
             )
@@ -325,9 +319,9 @@ export function DashboardPage({ onNavigate }) {
 
     // 状态分布（纯 CSS 柱状图）
     total > 0 && statusDist.length > 0 && h(Card, null,
-      h('h3', { className: 'font-medium mb-4 text-slate-200' }, '视频状态分布'),
+      h('h3', { className: 'font-medium mb-4 text-slate-800' }, '视频状态分布'),
       // 堆叠条形图
-      h('div', { className: 'w-full h-6 rounded-full overflow-hidden flex mb-4', style: { backgroundColor: '#334155' } },
+      h('div', { className: 'w-full h-6 rounded-full overflow-hidden flex mb-4', style: { backgroundColor: '#e2e8f0' } },
         statusDist.map((s, i) =>
           h('div', {
             key: i,
@@ -346,17 +340,17 @@ export function DashboardPage({ onNavigate }) {
         statusDist.map((s, i) =>
           h('div', { key: i, className: 'flex items-center gap-2' },
             h('div', { style: { width: 12, height: 12, borderRadius: 3, backgroundColor: s.color } }),
-            h('span', { className: 'text-slate-400' }, `${s.label} `),
-            h('span', { className: 'text-slate-200 font-medium' }, s.value.toLocaleString()),
-            h('span', { className: 'text-slate-500 text-xs ml-1' }, `(${(s.value / total * 100).toFixed(1)}%)`)
+            h('span', { className: 'text-slate-600' }, `${s.label} `),
+            h('span', { className: 'text-slate-800 font-medium' }, s.value.toLocaleString()),
+            h('span', { className: 'text-slate-400 text-xs ml-1' }, `(${(s.value / total * 100).toFixed(1)}%)`)
           )
         )
       ),
 
       // 按月下载趋势（纯 CSS 柱状图）
       data?.by_month?.length > 0 && h(Fragment, null,
-        h('div', { className: 'border-t border-slate-700/50 mt-4 pt-4' }),
-        h('h4', { className: 'text-sm font-medium text-slate-400 mb-3' }, '月度下载趋势'),
+        h('div', { className: 'border-t border-slate-200 mt-4 pt-4' }),
+        h('h4', { className: 'text-sm font-medium text-slate-500 mb-3' }, '月度下载趋势'),
         h('div', { className: 'flex items-end gap-1', style: { height: 100 } },
           (() => {
             const maxCount = Math.max(...data.by_month.map(m => m.count), 1);
@@ -374,7 +368,7 @@ export function DashboardPage({ onNavigate }) {
                   },
                   title: `${m.month}: ${m.count} 个视频`
                 }),
-                h('span', { className: 'text-xs text-slate-600 mt-1' }, m.month.slice(5))
+                h('span', { className: 'text-xs text-slate-400 mt-1' }, m.month.slice(5))
               )
             );
           })()
@@ -384,10 +378,10 @@ export function DashboardPage({ onNavigate }) {
 
     // 最近下载
     data?.recent_downloads?.length > 0 && h(Card, null,
-      h('h3', { className: 'font-medium mb-4 text-slate-200' }, '最近下载'),
+      h('h3', { className: 'font-medium mb-4 text-slate-800' }, '最近下载'),
       h('div', { className: 'space-y-2' },
         data.recent_downloads.slice(0, 8).map((dl, i) =>
-          h('div', { key: dl.id, className: cn('flex items-center gap-3 py-2 border-b border-slate-700/30 last:border-0', i >= 5 && 'hidden sm:flex') },
+          h('div', { key: dl.id, className: cn('flex items-center gap-3 py-2 border-b border-slate-200 last:border-0', i >= 5 && 'hidden sm:flex') },
             h('div', { className: 'flex-1 min-w-0' },
               h('div', { className: 'text-sm truncate' }, dl.title || dl.video_id),
               h('div', { className: 'text-xs text-slate-500 truncate' }, dl.uploader || '--')

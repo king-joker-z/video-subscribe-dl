@@ -73,14 +73,11 @@ export function VideosPage({ params = {} } = {}) {
     }
   }, [params.source_id, params.source_name]);
 
-  // SSE 进度
+  // SSE 进度（通过全局单例）
   useEffect(() => {
-    let es;
-    try {
-      es = new EventSource('/api/events');
-      es.addEventListener('progress', (e) => { try { setProgress(JSON.parse(e.data) || []); } catch {} });
-    } catch {}
-    return () => { if (es) es.close(); };
+    const handler = (e) => { try { setProgress(e.detail || []); } catch {} };
+    window.addEventListener('vsd:progress', handler);
+    return () => window.removeEventListener('vsd:progress', handler);
   }, []);
 
   // 监听全局下载事件，自动刷新视频列表
@@ -90,9 +87,9 @@ export function VideosPage({ params = {} } = {}) {
     return () => window.removeEventListener('vsd:download-event', handler);
   }, [load]);
 
-  // 定时自动刷新（15s），页面不可见时暂停，切回来立即刷一次
+  // 定时自动刷新（30s），页面不可见时暂停，切回来立即刷一次
   useEffect(() => {
-    const INTERVAL = 15000;
+    const INTERVAL = 30000; // 从 15000 改为 30000
     let timer = null;
 
     const schedule = () => {
@@ -157,10 +154,16 @@ export function VideosPage({ params = {} } = {}) {
     { value: 'failed', label: '失败' },
     { value: 'charge_blocked', label: '充电专属' },
     { value: 'pending', label: '待处理' },
+    { value: 'cancelled', label: '已取消' },
+    { value: 'relocated', label: '已迁移' },
     { value: 'deleted', label: '已删除' },
   ];
 
-  const getProgress = (videoId, videoVid) => progress.find(p => (p.download_id && String(p.download_id) === String(videoId)) || (videoVid && p.bvid && p.bvid === videoVid));
+  const getProgress = (videoId, videoVid) => progress.find(p =>
+    (p.download_id && String(p.download_id) === String(videoId)) ||
+    (videoVid && p.bvid && p.bvid === videoVid) ||
+    (videoVid && p.video_id && p.video_id === videoVid)
+  );
 
   const handleDetectCharge = async () => {
     try {
@@ -208,8 +211,8 @@ export function VideosPage({ params = {} } = {}) {
         }, uploader ? '下载该UP主Pending' : '下载全部Pending'),
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
         // 手机端隐藏视图切换（强制卡片视图）
-        !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
-        !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
+        !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
+        !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
       )
     ),
     // 筛选栏（手机端可折叠）
@@ -217,20 +220,20 @@ export function VideosPage({ params = {} } = {}) {
       // 手机端折叠控制行
       isMobile && h('button', {
         onClick: () => setFilterExpanded(v => !v),
-        className: 'flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors w-full'
+        className: 'flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition-colors w-full'
       },
         h(Icon, { name: filterExpanded ? 'chevron-up' : 'chevron-down', size: 14 }),
         h('span', null, filterExpanded ? '收起筛选' : '展开筛选'),
         // 有激活筛选时显示小徽章
-        (status || search || uploader || sourceId) && h('span', { className: 'ml-auto text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded-full' }, '已筛选')
+        (status || search || uploader || sourceId) && h('span', { className: 'ml-auto text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full' }, '已筛选')
       ),
     (filterExpanded || !isMobile) && h('div', { className: 'flex items-center gap-3 flex-wrap' },
       h('div', { className: 'relative' },
-        h(Icon, { name: 'search', size: 16, className: 'absolute left-3 top-1/2 -translate-y-1/2 text-slate-500' }),
+        h(Icon, { name: 'search', size: 16, className: 'absolute left-3 top-1/2 -translate-y-1/2 text-slate-400' }),
         h('input', {
           type: 'text', placeholder: '搜索标题/UP主...',
           onChange: (e) => handleSearch(e.target.value),
-          className: 'bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500 w-64'
+          className: 'bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 w-64'
         })
       ),
       h('div', { className: 'flex gap-1 flex-wrap' },
@@ -238,22 +241,22 @@ export function VideosPage({ params = {} } = {}) {
           h('button', {
             key: f.value,
             onClick: () => { setStatus(f.value); setPage(1); },
-            className: cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors', status === f.value ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-slate-300')
+            className: cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors', status === f.value ? 'bg-blue-500/20 text-blue-600' : 'text-slate-500 hover:text-slate-700')
           }, f.label)
         ),
         uploader && h('button', {
           onClick: () => { setUploader(''); setPage(1); location.hash = '#/videos'; },
-          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-500/20 text-purple-400 flex items-center gap-1'
+          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-100 text-purple-700 flex items-center gap-1'
         }, 'UP主: ' + uploader, ' ', h(Icon, { name: 'x', size: 12 })),
         sourceId && h('button', {
           onClick: () => { setSourceId(''); setSourceName(''); setPage(1); location.hash = '#/videos'; },
-          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/20 text-cyan-400 flex items-center gap-1'
+          className: 'px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-100 text-cyan-700 flex items-center gap-1'
         }, '订阅源: ' + (sourceName || '#' + sourceId), ' ', h(Icon, { name: 'x', size: 12 }))
       ),
       h('select', {
         value: sort,
         onChange: (e) => { setSort(e.target.value); setPage(1); },
-        className: 'bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300'
+        className: 'bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-700'
       },
         h('option', { value: 'created_desc' }, '最新'),
         h('option', { value: 'created_asc' }, '最早'),
@@ -263,8 +266,8 @@ export function VideosPage({ params = {} } = {}) {
       ),
     )), // 结束 filterExpanded 条件 + 外层 space-y-2 div
     // 批量操作栏
-    selected.size > 0 && h('div', { className: 'flex items-center gap-2 flex-wrap bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2' },
-      h('span', { className: 'text-sm text-blue-400 mr-1' }, batchLoading ? '处理中...' : `已选 ${selected.size} 项`),
+    selected.size > 0 && h('div', { className: 'flex items-center gap-2 flex-wrap bg-blue-50 border border-blue-200 rounded-lg px-3 py-2' },
+      h('span', { className: 'text-sm text-blue-600 mr-1' }, batchLoading ? '处理中...' : `已选 ${selected.size} 项`),
       h(Button, { onClick: () => handleBatch('retry'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重试' },
         h(Icon, { name: 'refresh', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重试')
       ),
@@ -285,13 +288,13 @@ export function VideosPage({ params = {} } = {}) {
       ),
       h('button', {
         onClick: toggleAll,
-        className: 'text-xs text-blue-400/70 hover:text-blue-300 ml-auto mr-2',
+        className: 'text-xs text-blue-600/70 hover:text-blue-700 ml-auto mr-2',
         disabled: batchLoading,
         title: selected.size === videos.length ? '取消全选' : '全选当页'
       },
         selected.size === videos.length ? h(Icon, { name: 'check-square', size: 14 }) : h(Icon, { name: 'square', size: 14 })
       ),
-      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-300', disabled: batchLoading }, isMobile ? h(Icon, { name: 'x-circle', size: 14 }) : '清除选择')
+      h('button', { onClick: () => setSelected(new Set()), className: 'text-xs text-slate-500 hover:text-slate-700', disabled: batchLoading }, isMobile ? h(Icon, { name: 'x-circle', size: 14 }) : '清除选择')
     ),
     // 内容
     loading
@@ -316,7 +319,7 @@ export function VideosPage({ params = {} } = {}) {
           ? h('div', { className: 'overflow-x-auto' },
               h('table', { className: 'w-full' },
                 h('thead', null,
-                  h('tr', { className: 'text-left text-xs text-slate-500 border-b border-slate-700/50' },
+                  h('tr', { className: 'text-left text-xs text-slate-500 border-b border-slate-200' },
                     h('th', { className: 'pb-3 pr-3 w-8' },
                       h('input', { type: 'checkbox', checked: selected.size === videos.length && videos.length > 0, onChange: toggleAll, className: 'rounded' })
                     ),
@@ -333,7 +336,7 @@ export function VideosPage({ params = {} } = {}) {
                     const prog = getProgress(v.id, v.video_id);
                     return h('tr', {
                       key: v.id,
-                      className: 'border-b border-slate-700/30 hover:bg-slate-800/50 cursor-pointer',
+                      className: 'border-b border-slate-200 hover:bg-slate-50 cursor-pointer',
                       onClick: (e) => openDetail(v, e)
                     },
                       h('td', { className: 'py-3 pr-3' },
@@ -344,48 +347,56 @@ export function VideosPage({ params = {} } = {}) {
                           h('div', { className: 'text-sm truncate max-w-md' }, v.title || v.video_id),
                           prog && h('div', { className: 'mt-1 space-y-0.5' },
                             h('div', { className: 'flex items-center gap-2' },
-                              h('div', { className: 'w-24 bg-slate-700 rounded-full h-1' },
+                              h('div', { className: 'w-24 bg-slate-200 rounded-full h-1' },
                                 h('div', { className: 'bg-blue-500 h-1 rounded-full progress-bar', style: { width: (prog.percent || 0) + '%' } })
                               ),
                               h('span', { className: 'text-[10px] text-slate-500 tabular-nums' }, (prog.percent || 0).toFixed(1) + '%')
                             ),
                             (prog.speed > 0 || prog.total > 0) && h('div', { className: 'flex items-center gap-2 text-[10px] text-slate-500' },
-                              prog.speed > 0 && h('span', { className: 'text-blue-400 font-medium' }, formatSpeed(prog.speed)),
+                              prog.speed > 0 && h('span', { className: 'text-blue-500 font-medium' }, formatSpeed(prog.speed)),
                               formatETA(prog.downloaded, prog.total, prog.speed) && h('span', null, 'ETA ' + formatETA(prog.downloaded, prog.total, prog.speed)),
                               prog.total > 0 && h('span', null, formatBytes(prog.downloaded) + '/' + formatBytes(prog.total))
                             )
                           )
                         )
                       ),
-                      h('td', { className: 'py-3 pr-3 text-sm text-slate-400 hidden md:table-cell' }, v.uploader || '--'),
+                      h('td', { className: 'py-3 pr-3 text-sm text-slate-500 hidden md:table-cell' }, v.uploader || '--'),
                       h('td', { className: 'py-3 pr-3' }, h(StatusBadge, { status: v.status })),
                       h('td', { className: 'py-3 pr-3 text-xs text-slate-500 hidden lg:table-cell' }, v.file_size ? formatBytes(v.file_size) : '--'),
                       h('td', { className: 'py-3 pr-3 text-xs text-slate-500 hidden lg:table-cell' }, formatTime(v.created_at)),
                       h('td', { className: 'py-3' },
                         h('div', { className: 'flex items-center gap-1' },
+                          v.status === 'downloading' && h('button', {
+                            onClick: async (e) => {
+                              e.stopPropagation();
+                              try { await api.cancelVideo(v.id); toast.success('已取消'); load(); }
+                              catch (e) { toast.error(e.message); }
+                            },
+                            className: 'p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600', title: '取消下载'
+                          }, h(Icon, { name: 'x', size: 14 })),
                           v.status === 'pending' && h('button', {
-                            onClick: async () => { try { await api.redownloadVideo(v.id); toast.success('已触发下载'); load(); } catch (e) { toast.error(e.message); } },
-                            className: 'p-1.5 rounded hover:bg-green-900/50 text-slate-400 hover:text-green-400', title: '开始下载'
+                            onClick: async (e) => { e.stopPropagation(); try { await api.redownloadVideo(v.id); toast.success('已触发下载'); load(); } catch (e) { toast.error(e.message); } },
+                            className: 'p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-600', title: '开始下载'
                           }, h(Icon, { name: 'download', size: 14 })),
                           ((v.status === 'failed' || v.status === 'permanent_failed') && v.status !== 'charge_blocked') && h('button', {
-                            onClick: async () => { try { await api.retryVideo(v.id); toast.success('已重试'); load(); } catch (e) { toast.error(e.message); } },
-                            className: 'p-1.5 rounded hover:bg-slate-700 text-slate-400', title: '重试'
+                            onClick: async (e) => { e.stopPropagation(); try { await api.retryVideo(v.id); toast.success('已重试'); load(); } catch (e) { toast.error(e.message); } },
+                            className: 'p-1.5 rounded hover:bg-slate-100 text-slate-400', title: '重试'
                           }, h(Icon, { name: 'refresh', size: 14 })),
                           (v.status === 'completed' || v.status === 'relocated') && h('button', {
-                            onClick: async () => { if (confirm('将删除旧文件并重新下载，确认？')) { try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } } },
-                            className: 'p-1.5 rounded hover:bg-blue-900/50 text-slate-400 hover:text-blue-400', title: '重新下载'
+                            onClick: async (e) => { e.stopPropagation(); if (confirm('将删除旧文件并重新下载，确认？')) { try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600', title: '重新下载'
                           }, h(Icon, { name: 'refresh', size: 14 })),
                           (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0 && h('button', {
-                            onClick: async () => { if (confirm('删除本地文件（保留记录）？')) { try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } } },
-                            className: 'p-1.5 rounded hover:bg-orange-900/50 text-slate-400 hover:text-orange-400', title: '删除文件'
+                            onClick: async (e) => { e.stopPropagation(); if (confirm('删除本地文件（保留记录）？')) { try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-orange-50 text-slate-400 hover:text-orange-600', title: '删除文件'
                           }, h(Icon, { name: 'file-x', size: 14 })),
                           v.status === 'deleted' && h('button', {
-                            onClick: async () => { if (confirm('恢复并重新下载？')) { try { await api.restoreVideo(v.id); toast.success('已恢复'); load(); } catch (e) { toast.error(e.message); } } },
-                            className: 'p-1.5 rounded hover:bg-emerald-900/50 text-slate-400 hover:text-emerald-400', title: '恢复'
+                            onClick: async (e) => { e.stopPropagation(); if (confirm('恢复并重新下载？')) { try { await api.restoreVideo(v.id); toast.success('已恢复'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600', title: '恢复'
                           }, h(Icon, { name: 'undo', size: 14 })),
                           h('button', {
-                            onClick: async () => { if (confirm('确定删除？')) { try { await api.deleteVideo(v.id); toast.success('已删除'); load(); } catch (e) { toast.error(e.message); } } },
-                            className: 'p-1.5 rounded hover:bg-red-900/50 text-slate-400 hover:text-red-400', title: '删除'
+                            onClick: async (e) => { e.stopPropagation(); if (confirm('确定删除？')) { try { await api.deleteVideo(v.id); toast.success('已删除'); load(); } catch (e) { toast.error(e.message); } } },
+                            className: 'p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500', title: '删除'
                           }, h(Icon, { name: 'trash', size: 14 }))
                         )
                       )
@@ -433,7 +444,7 @@ function DouyinLogo({ size = 40 }) {
 
 // 视频卡片组件（带封面图）
 function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction, selected = false, onSelect }) {
-  const [imgError, setImgError] = useState(false);
+  const [imgError, setImgError] = React.useState(false);
   const thumbSrc = `/api/thumb/${v.id}`;
   const isDownloading = v.status === 'downloading';
   const platform = detectPlatform(v.video_id);
@@ -450,7 +461,7 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
         h(DouyinLogo, { size: 48 })
       );
     }
-    return h('div', { className: 'w-full h-full flex items-center justify-center text-slate-700' },
+    return h('div', { className: 'w-full h-full flex items-center justify-center text-slate-400' },
       h(Icon, { name: 'video', size: 32 })
     );
   };
@@ -461,14 +472,14 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
     onClick
   },
     // 封面图区域
-    h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-900 overflow-hidden' },
+    h('div', { className: 'relative -mx-5 -mt-5 mb-3 aspect-video bg-slate-100 overflow-hidden' },
       // 选择 checkbox（左上角覆盖层）
       onSelect && h('div', {
         className: 'absolute top-2 left-2 z-10',
         onClick: (e) => { e.stopPropagation(); onSelect(v.id); }
       },
         h('div', {
-          className: 'w-6 h-6 rounded-md flex items-center justify-center transition-all ' + (selected ? 'bg-blue-500 shadow-md' : 'bg-black/50 border-2 border-white/60 hover:border-white'),
+          className: 'w-6 h-6 rounded-md flex items-center justify-center transition-all ' + (selected ? 'bg-blue-500 shadow-md' : 'bg-black/40 border-2 border-white/60 hover:border-white'),
         },
           selected && h(Icon, { name: 'check', size: 12, className: 'text-white' })
         )
@@ -483,7 +494,7 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
           })
         : renderThumbFallback(),
       // 时长标签
-      v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/75 text-white text-xs px-1.5 py-0.5 rounded' },
+      v.duration > 0 && h('span', { className: 'absolute bottom-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded' },
         formatDurationShort(v.duration)
       ),
       // 进度条 + 速度信息（下载中状态加强视觉）
@@ -515,22 +526,26 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
         v.file_size > 0 && h('span', { className: 'text-xs text-slate-500' }, formatBytes(v.file_size))
       ),
       // 手机端快捷操作按钮（触摸区域加大，min-h-9）
-      isMobile && h('div', { className: 'flex items-center gap-2 mt-3 pt-2 border-t border-slate-700/40' },
+      isMobile && h('div', { className: 'flex items-center gap-2 mt-3 pt-2 border-t border-slate-200' },
+        v.status === 'downloading' && h('button', {
+          onClick: async (e) => { e.stopPropagation(); try { await api.cancelVideo(v.id); if (onAction) onAction(); } catch {} },
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-amber-50 text-amber-700 text-xs font-medium active:bg-amber-100'
+        }, h(Icon, { name: 'x', size: 14 }), '取消'),
         v.status === 'pending' && h('button', {
           onClick: async (e) => { e.stopPropagation(); try { await api.redownloadVideo(v.id); if (onAction) onAction(); } catch {} },
-          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-green-500/15 text-green-400 text-xs font-medium active:bg-green-500/30'
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-green-50 text-green-700 text-xs font-medium active:bg-green-100'
         }, h(Icon, { name: 'download', size: 14 }), '下载'),
         (v.status === 'failed' || v.status === 'permanent_failed') && h('button', {
           onClick: async (e) => { e.stopPropagation(); try { await api.retryVideo(v.id); if (onAction) onAction(); } catch {} },
-          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-slate-700/60 text-slate-300 text-xs font-medium active:bg-slate-700'
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-slate-100 text-slate-600 text-xs font-medium active:bg-slate-200'
         }, h(Icon, { name: 'refresh', size: 14 }), '重试'),
         (v.status === 'completed' || v.status === 'relocated') && h('button', {
           onClick: async (e) => { e.stopPropagation(); if (!confirm('删除本地文件（保留记录）？')) return; try { await api.deleteVideoFiles(v.id); if (onAction) onAction(); } catch {} },
-          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-orange-500/15 text-orange-400 text-xs font-medium active:bg-orange-500/30'
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-orange-50 text-orange-700 text-xs font-medium active:bg-orange-100'
         }, h(Icon, { name: 'file-x', size: 14 }), '删文件'),
         v.status === 'deleted' && h('button', {
           onClick: async (e) => { e.stopPropagation(); if (!confirm('恢复并重新下载？')) return; try { await api.restoreVideo(v.id); if (onAction) onAction(); } catch {} },
-          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-medium active:bg-emerald-500/30'
+          className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium active:bg-emerald-100'
         }, h(Icon, { name: 'undo', size: 14 }), '恢复')
       )
     )

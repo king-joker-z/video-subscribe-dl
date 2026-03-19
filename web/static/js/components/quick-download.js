@@ -180,16 +180,16 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
     onClick: (e) => { if (e.target === e.currentTarget) onClose(); }
   },
     h('div', {
-      className: 'bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden',
+      className: 'bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden',
       style: { animation: 'slideIn 0.2s ease' }
     },
       // Header
-      h('div', { className: 'flex items-center justify-between px-5 py-4 border-b border-slate-700/30' },
+      h('div', { className: 'flex items-center justify-between px-5 py-4 border-b border-slate-200' },
         h('div', { className: 'flex items-center gap-2' },
           h(Icon, { name: 'download', size: 18, className: 'text-blue-400' }),
-          h('h3', { className: 'font-medium text-slate-200' }, '快速下载')
+          h('h3', { className: 'font-medium text-slate-800' }, '快速下载')
         ),
-        h('button', { onClick: onClose, className: 'p-1 rounded-lg hover:bg-slate-700 text-slate-400' },
+        h('button', { onClick: onClose, className: 'p-1 rounded-lg hover:bg-slate-100 text-slate-500' },
           h(Icon, { name: 'x', size: 18 })
         )
       ),
@@ -205,7 +205,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
             onChange: (e) => { setUrl(e.target.value); setPreview(null); },
             onKeyDown: handleKeyDown,
             placeholder: '粘贴 B站/抖音 视频链接...',
-            className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
+            className: 'flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-800 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30'
           }),
           h(Button, {
             onClick: preview ? handleDownload : handlePreview,
@@ -222,7 +222,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
         // Tips
         !preview && !loading && h('div', { className: 'text-xs text-slate-500 space-y-1' },
           h('div', null, '支持格式:'),
-          h('div', { className: 'text-slate-600 space-y-0.5 ml-2' },
+          h('div', { className: 'text-slate-500 space-y-0.5 ml-2' },
             h('div', null, '• bilibili.com/video/BVxxxxxx'),
             h('div', null, '• b23.tv/xxxxxx（B站短链接）'),
             h('div', null, '• BV 号或 AV 号（如 BV1xx411c7mD、av12345）'),
@@ -232,10 +232,10 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
         ),
 
         // Preview Card
-        preview && h(Card, { className: 'bg-slate-900/50' },
+        preview && h(Card, { className: 'bg-slate-50' },
           h('div', { className: 'flex gap-3' },
             // 封面
-            preview.pic && h('div', { className: 'flex-shrink-0 w-32 h-20 rounded-lg overflow-hidden bg-slate-800' },
+            preview.pic && h('div', { className: 'flex-shrink-0 w-32 h-20 rounded-lg overflow-hidden bg-slate-100' },
               h('img', {
                 src: preview.pic.replace('http:', 'https:'),
                 className: 'w-full h-full object-cover',
@@ -245,16 +245,16 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
             ),
             // 信息
             h('div', { className: 'flex-1 min-w-0 space-y-1' },
-              h('div', { className: 'text-sm font-medium text-slate-200 line-clamp-2' }, preview.title),
-              h('div', { className: 'text-xs text-slate-400 flex items-center gap-2 flex-wrap' },
+              h('div', { className: 'text-sm font-medium text-slate-800 line-clamp-2' }, preview.title),
+              h('div', { className: 'text-xs text-slate-600 flex items-center gap-2 flex-wrap' },
                 h('span', null, preview.uploader),
                 // 平台标识
                 isDouyin && h('span', { className: 'text-xs px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400' }, '抖音'),
                 !isDouyin && preview.tname && h(Fragment, null,
-                  h('span', { className: 'text-slate-600' }, '·'),
+                  h('span', { className: 'text-slate-500' }, '·'),
                   h('span', null, preview.tname)
                 ),
-                h('span', { className: 'text-slate-600' }, '·'),
+                h('span', { className: 'text-slate-500' }, '·'),
                 h('span', null, formatDuration(preview.duration))
               ),
               h('div', { className: 'text-xs text-slate-500 flex items-center gap-3 flex-wrap' },
@@ -289,7 +289,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
       ),
 
       // Footer hint
-      h('div', { className: 'px-5 py-3 border-t border-slate-700/30 text-xs text-slate-600 flex items-center justify-between' },
+      h('div', { className: 'px-5 py-3 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between' },
         h('span', null, 'Enter 快速操作 · Esc 关闭 · Ctrl+D 开关'),
         preview && h('span', { className: 'text-slate-500' }, preview.bvid || preview.aweme_id || '')
       )
@@ -305,11 +305,11 @@ export function DropZoneOverlay({ active }) {
     style: { animation: 'fadeIn 0.15s ease' }
   },
     h('div', {
-      className: 'bg-slate-800/95 border-2 border-dashed border-blue-400 rounded-2xl p-12 text-center shadow-2xl'
+      className: 'bg-slate-100/95 border-2 border-dashed border-blue-400 rounded-2xl p-12 text-center shadow-2xl'
     },
       h(Icon, { name: 'download', size: 48, className: 'text-blue-400 mx-auto mb-4' }),
-      h('div', { className: 'text-lg font-medium text-slate-200 mb-1' }, '松开以下载视频'),
-      h('div', { className: 'text-sm text-slate-400' }, '支持 B站/抖音 视频链接')
+      h('div', { className: 'text-lg font-medium text-slate-800 mb-1' }, '松开以下载视频'),
+      h('div', { className: 'text-sm text-slate-600' }, '支持 B站/抖音 视频链接')
     )
   );
 }

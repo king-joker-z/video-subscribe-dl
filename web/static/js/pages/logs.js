@@ -46,21 +46,12 @@ export function LogsPage() {
   }, []);
 
   const fallbackToSSE = useCallback(() => {
-    // 使用 api.js 导出的 createEventSource（SSE 降级）
-    const es = createEventSource(
-      null, // onProgress — 日志页不需要
-      (entry) => setLogs(prev => [...prev.slice(-999), entry]),
-      () => {
-        setConnType('sse');
-        console.log('[logs] SSE 已连接');
-      }
-    );
-    es.onerror = () => {
-      setConnType('');
-      es.close();
-      setTimeout(() => connect(), 5000);
-    };
-    connectionRef.current = { close: () => es.close(), type: 'sse' };
+    // 使用全局 SSE 单例的 vsd:log 事件，不新建 EventSource
+    const handler = (e) => { onLog(e.detail); };
+    const onLog = (entry) => setLogs(prev => [...prev.slice(-999), entry]);
+    window.addEventListener('vsd:log', handler);
+    setConnType('sse');
+    connectionRef.current = { close: () => window.removeEventListener('vsd:log', handler), type: 'sse' };
   }, []);
 
   // 加载历史日志 + 建立连接
@@ -141,14 +132,14 @@ export function LogsPage() {
   });
 
   const levelColors = {
-    'ERROR': 'text-red-400',
-    'error': 'text-red-400',
-    'WARN': 'text-amber-400',
-    'warn': 'text-amber-400',
-    'INFO': 'text-blue-400',
-    'info': 'text-blue-400',
-    'DEBUG': 'text-slate-500',
-    'debug': 'text-slate-500',
+    'ERROR': 'text-red-500',
+    'error': 'text-red-500',
+    'WARN': 'text-amber-500',
+    'warn': 'text-amber-500',
+    'INFO': 'text-blue-500',
+    'info': 'text-blue-500',
+    'DEBUG': 'text-slate-400',
+    'debug': 'text-slate-400',
   };
 
   const filters = [
@@ -165,22 +156,22 @@ export function LogsPage() {
       h('div', { className: 'flex items-center gap-3' },
         // 连接状态指示
         connType && h('span', { className: cn('px-2 py-0.5 rounded text-[10px] font-medium',
-          connType === 'ws' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400')
+          connType === 'ws' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-600')
         }, connType === 'ws' ? 'WS' : 'SSE'),
         h('div', { className: 'flex gap-1' },
           filters.map(f => h('button', {
             key: f.value,
             onClick: () => setFilter(f.value),
-            className: cn('px-3 py-1 rounded text-xs font-medium', filter === f.value ? 'bg-blue-500/20 text-blue-400' : 'text-slate-500 hover:text-slate-300')
+            className: cn('px-3 py-1 rounded text-xs font-medium', filter === f.value ? 'bg-blue-100 text-blue-600' : 'text-slate-500 hover:text-slate-700')
           }, f.label))
         ),
         h('button', {
           onClick: () => setAutoScroll(!autoScroll),
-          className: cn('px-3 py-1 rounded text-xs font-medium', autoScroll ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-500')
+          className: cn('px-3 py-1 rounded text-xs font-medium', autoScroll ? 'bg-emerald-100 text-emerald-700' : 'text-slate-500')
         }, autoScroll ? '⏬ 自动滚动' : '⏸ 已暂停'),
         h('button', {
           onClick: handleClear,
-          className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-red-400 transition-colors'
+          className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-red-500 transition-colors'
         }, '🗑 清空')
       )
     ),
@@ -189,25 +180,25 @@ export function LogsPage() {
       h('div', {
         ref: containerRef,
         onScroll: handleScroll,
-        className: 'h-full bg-slate-900/80 border border-slate-700/50 rounded-xl p-4 overflow-y-auto font-mono text-xs leading-5'
+        className: 'h-full bg-slate-50 border border-slate-200 rounded-xl p-4 overflow-y-auto font-mono text-xs leading-5'
       },
         filteredLogs.length === 0
-          ? h('div', { className: 'text-slate-600 text-center py-8' }, '等待日志...')
+          ? h('div', { className: 'text-slate-400 text-center py-8' }, '等待日志...')
           : filteredLogs.map((l, i) => {
               const time = l.time ? new Date(l.time).toLocaleTimeString('zh-CN') : '';
               const level = l.level || '';
               const msg = l.message || l.msg || JSON.stringify(l);
-              return h('div', { key: i, className: 'flex gap-2 hover:bg-slate-800/50 py-0.5 px-1 rounded' },
-                time && h('span', { className: 'text-slate-600 flex-shrink-0' }, time),
-                level && h('span', { className: cn('flex-shrink-0 w-12', levelColors[level] || 'text-slate-400') }, level),
-                h('span', { className: 'text-slate-300 break-all' }, msg)
+              return h('div', { key: i, className: 'flex gap-2 hover:bg-slate-100 py-0.5 px-1 rounded' },
+                time && h('span', { className: 'text-slate-400 flex-shrink-0' }, time),
+                level && h('span', { className: cn('flex-shrink-0 w-12', levelColors[level] || 'text-slate-500') }, level),
+                h('span', { className: 'text-slate-700 break-all' }, msg)
               );
             })
       ),
       // 浮动"回到底部"按钮（仅 autoScroll=false 时显示）
       !autoScroll && h('button', {
         onClick: scrollToBottom,
-        className: 'absolute bottom-4 right-6 px-3 py-1.5 rounded-lg bg-slate-700 border border-slate-600 text-slate-300 text-xs font-medium shadow-lg hover:bg-slate-600 transition-colors flex items-center gap-1'
+        className: 'absolute bottom-4 right-6 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs font-medium shadow-lg hover:bg-slate-100 transition-colors flex items-center gap-1'
       }, '↓ 回到底部')
     )
   );

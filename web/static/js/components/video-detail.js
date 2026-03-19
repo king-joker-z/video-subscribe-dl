@@ -130,16 +130,16 @@ export function VideoDetailModal({ video, onClose, onAction }) {
     onClick: (e) => { if (e.target === e.currentTarget) onClose(); }
   },
     h('div', {
-      className: 'bg-slate-800 border border-slate-700/50 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden max-h-[80vh] flex flex-col',
+      className: 'bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden max-h-[80vh] flex flex-col',
       style: { animation: 'slideIn 0.2s ease' }
     },
       // Header
-      h('div', { className: 'flex items-center justify-between px-5 py-4 border-b border-slate-700/30 flex-shrink-0' },
+      h('div', { className: 'flex items-center justify-between px-5 py-4 border-b border-slate-200 flex-shrink-0' },
         h('div', { className: 'flex items-center gap-2 min-w-0 flex-1' },
           h(Icon, { name: 'video', size: 18, className: 'text-blue-400 flex-shrink-0' }),
-          h('h3', { className: 'font-medium text-slate-200 truncate' }, '视频详情')
+          h('h3', { className: 'font-medium text-slate-800 truncate' }, '视频详情')
         ),
-        h('button', { onClick: onClose, className: 'p-1 rounded-lg hover:bg-slate-700 text-slate-400 flex-shrink-0 ml-2' },
+        h('button', { onClick: onClose, className: 'p-1 rounded-lg hover:bg-slate-100 text-slate-500 flex-shrink-0 ml-2' },
           h(Icon, { name: 'x', size: 18 })
         )
       ),
@@ -164,7 +164,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
         ),
         h('div', { className: 'flex gap-4' },
           // Thumbnail (hidden when player is shown)
-          !showPlayer && !imgError && h('div', { className: 'flex-shrink-0 w-40 sm:w-48 rounded-lg overflow-hidden bg-slate-900 relative group cursor-pointer',
+          !showPlayer && !imgError && h('div', { className: 'flex-shrink-0 w-40 sm:w-48 rounded-lg overflow-hidden bg-slate-100 relative group cursor-pointer',
             onClick: canPlay ? () => setShowPlayer(true) : undefined
           },
             h('img', {
@@ -184,12 +184,12 @@ export function VideoDetailModal({ video, onClose, onAction }) {
           ),
           // Title & meta
           h('div', { className: 'flex-1 min-w-0 space-y-2' },
-            h('h4', { className: 'text-base font-medium text-slate-100 leading-snug' }, v.title || v.video_id),
+            h('h4', { className: 'text-base font-medium text-slate-900 leading-snug' }, v.title || v.video_id),
             h('div', { className: 'flex items-center gap-2 flex-wrap' },
               h(StatusBadge, { status: v.status }),
               v.source_id === 0 && h(Badge, { variant: 'outline' }, '快速下载')
             ),
-            h('div', { className: 'text-sm text-slate-400' }, v.uploader || '--'),
+            h('div', { className: 'text-sm text-slate-600' }, v.uploader || '--'),
             h('div', { className: 'flex items-center gap-3 text-xs text-slate-500 flex-wrap' },
               v.duration > 0 && h('span', null, '\u23F1 ' + formatDuration(v.duration)),
               v.file_size > 0 && h('span', null, '\uD83D\uDCBE ' + formatBytes(v.file_size)),
@@ -203,9 +203,9 @@ export function VideoDetailModal({ video, onClose, onAction }) {
         progress && h(DownloadProgressBar, { progress }),
 
         // Description
-        v.description && h('div', { className: 'bg-slate-900/50 rounded-lg px-4 py-3' },
+        v.description && h('div', { className: 'bg-slate-50 rounded-lg px-4 py-3' },
           h('div', { className: 'text-xs text-slate-500 mb-1' }, '简介'),
-          h('div', { className: 'text-sm text-slate-300 whitespace-pre-line leading-relaxed max-h-24 overflow-y-auto' }, v.description)
+          h('div', { className: 'text-sm text-slate-700 whitespace-pre-line leading-relaxed max-h-24 overflow-y-auto' }, v.description)
         ),
 
         // Download component indicators
@@ -228,12 +228,12 @@ export function VideoDetailModal({ video, onClose, onAction }) {
         // B站链接
         biliURL && h('a', {
           href: biliURL, target: '_blank', rel: 'noopener noreferrer',
-          className: 'inline-flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors'
+          className: 'inline-flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-600 transition-colors'
         }, h(Icon, { name: 'external-link', size: 14 }), '在 B 站查看'),
       ),
 
       // Footer actions
-      h('div', { className: 'px-5 py-4 border-t border-slate-700/30 flex items-center gap-2 flex-wrap flex-shrink-0' },
+      h('div', { className: 'px-5 py-4 border-t border-slate-200 flex items-center gap-2 flex-wrap flex-shrink-0' },
         canPlay && h(Button, {
           onClick: () => setShowPlayer(true),
           size: 'sm',
@@ -270,9 +270,9 @@ export function VideoDetailModal({ video, onClose, onAction }) {
 
 // 信息展示项
 function InfoItem({ label, value, mono = false }) {
-  return h('div', { className: 'bg-slate-900/30 rounded-lg px-3 py-2' },
+  return h('div', { className: 'bg-slate-50 rounded-lg px-3 py-2' },
     h('div', { className: 'text-xs text-slate-500 mb-0.5' }, label),
-    h('div', { className: cn('text-sm text-slate-300 truncate', mono && 'font-mono text-xs') }, value)
+    h('div', { className: cn('text-sm text-slate-700 truncate', mono && 'font-mono text-xs') }, value)
   );
 }
 
@@ -287,17 +287,17 @@ function DetailStatusBar({ status }) {
     { bit: 16, label: '字幕', icon: 'subtitles', color: 'cyan' },
   ];
 
-  return h('div', { className: 'bg-slate-900/50 rounded-lg px-4 py-3' },
+  return h('div', { className: 'bg-slate-50 rounded-lg px-4 py-3' },
     h('div', { className: 'text-xs text-slate-500 mb-2' }, '下载组件'),
     h('div', { className: 'flex items-center gap-2 flex-wrap' },
       components.map(c => {
         const has = (status & c.bit) !== 0;
         const colorMap = {
-          blue:    has ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
-          purple:  has ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
-          emerald: has ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
-          amber:   has ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
-          cyan:    has ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' : 'bg-slate-800/50 text-slate-600 border-slate-700/30',
+          blue:    has ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-slate-100 text-slate-500 border-slate-200',
+          purple:  has ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'bg-slate-100 text-slate-500 border-slate-200',
+          emerald: has ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-slate-100 text-slate-500 border-slate-200',
+          amber:   has ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-slate-100 text-slate-500 border-slate-200',
+          cyan:    has ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' : 'bg-slate-100 text-slate-500 border-slate-200',
         };
         return h('span', {
           key: c.bit,
@@ -318,17 +318,17 @@ function DownloadProgressBar({ progress: prog }) {
   const pct = prog.percent || 0;
   const hasTotal = prog.total > 0;
 
-  return h('div', { className: 'bg-blue-500/8 border border-blue-500/25 rounded-lg px-4 py-3 space-y-2' },
+  return h('div', { className: 'bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 space-y-2' },
     // 标题行 + 百分比
     h('div', { className: 'flex items-center justify-between' },
       h('div', { className: 'flex items-center gap-2' },
         h('div', { className: 'w-2 h-2 rounded-full bg-blue-400 animate-pulse' }),
-        h('span', { className: 'text-xs font-medium text-blue-300' }, '下载中')
+        h('span', { className: 'text-xs font-medium text-blue-600' }, '下载中')
       ),
-      h('span', { className: 'text-sm font-semibold text-blue-200 tabular-nums' }, pct.toFixed(1) + '%')
+      h('span', { className: 'text-sm font-semibold text-blue-700 tabular-nums' }, pct.toFixed(1) + '%')
     ),
     // 进度条
-    h('div', { className: 'h-2 bg-slate-700/60 rounded-full overflow-hidden' },
+    h('div', { className: 'h-2 bg-slate-200 rounded-full overflow-hidden' },
       h('div', {
         className: 'h-2 rounded-full transition-all duration-500 progress-bar',
         style: {
