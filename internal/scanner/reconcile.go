@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"video-subscribe-dl/internal/db"
 )
 
 // ReconcileResult 对账结果
