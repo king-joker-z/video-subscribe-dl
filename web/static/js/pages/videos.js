@@ -80,9 +80,22 @@ export function VideosPage({ params = {} } = {}) {
     return () => window.removeEventListener('vsd:progress', handler);
   }, []);
 
-  // 监听全局下载事件，自动刷新视频列表
+  // 监听全局下载事件：complete/failed 时局部更新状态，其他事件触发完整刷新
   useEffect(() => {
-    const handler = () => { setTimeout(load, 500); };
+    const handler = (e) => {
+      const evt = e.detail;
+      if (evt && (evt.type === 'completed' || evt.type === 'failed') && evt.bvid) {
+        // 局部更新对应视频的状态，避免全量刷新
+        const newStatus = evt.type === 'completed' ? 'completed' : 'failed';
+        setVideos(prev => prev.map(v =>
+          v.video_id === evt.bvid
+            ? { ...v, status: newStatus, error_message: evt.error || v.error_message }
+            : v
+        ));
+      } else {
+        setTimeout(load, 500);
+      }
+    };
     window.addEventListener('vsd:download-event', handler);
     return () => window.removeEventListener('vsd:download-event', handler);
   }, [load]);

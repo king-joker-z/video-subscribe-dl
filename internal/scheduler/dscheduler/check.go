@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/filter"
 )
 
 // CheckDouyin 检查抖音用户的新视频
@@ -134,21 +135,34 @@ func (s *DouyinScheduler) CheckDouyin(src db.Source) {
 					s.db.UpdateSource(&src)
 				}
 
-				uploaderName := v.Author.Nickname
-				if uploaderName == "" {
-					uploaderName = src.Name
-				}
-
 				title := v.Desc
 				if title == "" {
 					title = fmt.Sprintf("douyin_%s", v.AwemeID)
+				}
+
+				// 简单关键词过滤
+				if src.DownloadFilter != "" && !filter.MatchesSimple(title, src.DownloadFilter) {
+					continue
+				}
+				// 高级规则过滤（仅标题预检，无需获取详情）
+				advRules := filter.ParseRules(src.FilterRules)
+				if len(advRules) > 0 {
+					titleRules := make([]filter.Rule, 0)
+					for _, r := range advRules {
+						if r.Target == "title" {
+							titleRules = append(titleRules, r)
+						}
+					}
+					if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: title}) {
+						continue
+					}
 				}
 
 				dl := &db.Download{
 					SourceID:  src.ID,
 					VideoID:   v.AwemeID,
 					Title:     title,
-					Uploader:  uploaderName,
+					Uploader:  src.Name, // 固定用订阅源名，与下载目录归属一致
 					Thumbnail: v.Cover,
 					Status:    "pending",
 					Duration:  v.Duration / 1000,
@@ -305,6 +319,8 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		maxCursor = result.MaxCursor
 		jitter := time.Duration(5000+rand.Intn(5000)) * time.Millisecond
 		s.sleepFn(jitter)
+		// 翻页间隔，防风控
+		s.sleepFn(time.Duration(2000+rand.Intn(2000)) * time.Millisecond)
 	}
 
 	log.Printf("[dscheduler·full-scan] %s: 第一阶段完成，共拉取 %d 个视频 (翻页 %d)", uploaderName, len(allVideos), page)
@@ -331,11 +347,28 @@ func (s *DouyinScheduler) FullScanDouyin(src db.Source) {
 		if v.CreateTime > maxCreated {
 			maxCreated = v.CreateTime
 		}
+		// 简单关键词过滤
+		if src.DownloadFilter != "" && !filter.MatchesSimple(v.Title, src.DownloadFilter) {
+			continue
+		}
+		// 高级规则过滤（仅标题预检）
+		advRules := filter.ParseRules(src.FilterRules)
+		if len(advRules) > 0 {
+			titleRules := make([]filter.Rule, 0)
+			for _, r := range advRules {
+				if r.Target == "title" {
+					titleRules = append(titleRules, r)
+				}
+			}
+			if !filter.MatchesRules(titleRules, filter.VideoInfo{Title: v.Title}) {
+				continue
+			}
+		}
 		dl := &db.Download{
 			SourceID:  src.ID,
 			VideoID:   v.AwemeID,
 			Title:     v.Title,
-			Uploader:  v.Author,
+			Uploader:  src.Name, // 固定用订阅源名，与下载目录归属一致
 			Thumbnail: v.Cover,
 			Status:    "pending",
 			Duration:  v.Duration / 1000,

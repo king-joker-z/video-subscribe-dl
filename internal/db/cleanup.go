@@ -14,6 +14,7 @@ func (d *DB) GetOldCompletedDownloads(retentionDays int) ([]Download, error) {
 		FROM downloads
 		WHERE status = 'completed' AND downloaded_at < ? AND file_path != ''
 		ORDER BY downloaded_at ASC
+		LIMIT 500
 	`, cutoff)
 	if err != nil {
 		return nil, err

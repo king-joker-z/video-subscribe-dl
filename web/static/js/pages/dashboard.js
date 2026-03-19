@@ -224,8 +224,8 @@ export function DashboardPage({ onNavigate }) {
           h(Button, { onClick: handleTrigger, disabled: triggering || cooldownSec > 0, size: 'sm' },
             h(Icon, { name: 'play', size: 14 }), triggering ? '触发中...' : '立即执行'),
           task?.status === 'paused'
-            ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复')
-            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停')
+            ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 B站')
+            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站')
         )
       ),
 

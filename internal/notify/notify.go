@@ -83,12 +83,31 @@ func eventEmoji(event EventType) string {
 	}
 }
 
-// Send 发送通知（根据事件类型和 DB 开关判断是否真正发送）
+// sendOnce 实际执行一次通知分发（内部使用）
+func (n *Notifier) sendOnce(event EventType, title, message string) error {
+	return n.dispatch(event, title, message)
+}
+
+// Send 发送通知（根据事件类型和 DB 开关判断是否真正发送，失败自动重试 3 次）
 func (n *Notifier) Send(event EventType, title, message string) {
 	if !n.shouldSend(event) {
 		return
 	}
-	go n.dispatch(event, title, message)
+	go func() {
+		delays := []time.Duration{0, 2 * time.Second, 4 * time.Second}
+		for i, delay := range delays {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			if err := n.sendOnce(event, title, message); err == nil {
+				return
+			} else if i < len(delays)-1 {
+				log.Printf("[notify] 第%d次发送失败，%v 后重试: %v", i+1, delays[i+1], err)
+			} else {
+				log.Printf("[notify] 发送最终失败 (event=%s): %v", event, err)
+			}
+		}
+	}()
 }
 
 // SendTest 强制发送测试通知（忽略开关）
