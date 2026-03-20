@@ -44,7 +44,12 @@ export const api = {
     return request('/api/sources' + (q ? '?' + q : ''));
   },
   createSource: (body) => request('/api/sources', { method: 'POST', body: JSON.stringify(body) }),
-  parseSource: (url) => request('/api/sources/parse-url?q=' + btoa(unescape(encodeURIComponent(url))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')),
+  parseSource: (url) => {
+    const q = btoa(unescape(encodeURIComponent(url))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    // 极空间对 query string 过短的请求会 302，补一个固定填充参数确保总长度足够
+    const pad = 'x'.repeat(Math.max(0, 80 - q.length));
+    return request('/api/sources/parse-url?q=' + q + (pad ? '&_p=' + pad : ''));
+  },
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSource: (id, deleteFiles) => request(`/api/sources/${id}` + (deleteFiles ? '?deleteFiles=true' : ''), { method: 'DELETE' }),
