@@ -618,7 +618,7 @@ export function SourcesPage({ onNavigate }) {
             h('label', { className: 'text-sm text-slate-600 mb-1' }, 'B 站 / 抖音链接（必填）'),
             h('div', { className: 'flex gap-2' },
               h('input', {
-                type: 'text', value: newURL, placeholder: 'B站/抖音链接: bilibili.com/xxx | douyin.com/user/xxx | douyin.com/collection/{mix_id}',
+                type: 'text', value: newURL, placeholder: 'bilibili.com/video/BVxxx | bilibili.com/space/xxx | 合集/收藏夹链接',
                 onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
                 onKeyDown: (e) => e.key === 'Enter' && handleParse(),
                 className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
@@ -733,6 +733,16 @@ export function SourcesPage({ onNavigate }) {
               h('div', null,
                 h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
                 h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              ),
+              h('div', { className: 'grid grid-cols-2 gap-3' },
+                h('div', { className: 'flex items-center gap-2' },
+                  h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
+                  h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
+                ),
+                h('div', { className: 'flex items-center gap-2' },
+                  h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
+                  h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
+                )
               )
             ),
             h('div', { className: 'flex justify-end gap-2 pt-2' },
@@ -777,6 +787,16 @@ export function SourcesPage({ onNavigate }) {
               h('div', null,
                 h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
                 h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              ),
+              h('div', { className: 'grid grid-cols-2 gap-3' },
+                h('div', { className: 'flex items-center gap-2' },
+                  h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
+                  h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
+                ),
+                h('div', { className: 'flex items-center gap-2' },
+                  h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
+                  h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
+                )
               )
             ),
             h('div', { className: 'flex justify-end gap-2 pt-2' },

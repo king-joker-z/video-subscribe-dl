@@ -642,3 +642,39 @@ func (d *DB) GetDetailStatus(id int64) (int, error) {
 	err := d.QueryRow("SELECT COALESCE(detail_status, 0) FROM downloads WHERE id = ?", id).Scan(&status)
 	return status, err
 }
+
+// SourceStats 单个订阅源的视频统计
+type SourceStats struct {
+	Total     int
+	Completed int
+	Failed    int
+	Pending   int
+}
+
+// GetSourcesStats 一次查询获取所有 source 的视频统计（替代 N+1 COUNT 查询）
+func (d *DB) GetSourcesStats() (map[int64]*SourceStats, error) {
+	rows, err := d.Query(`
+		SELECT source_id,
+			COUNT(*) AS total,
+			SUM(CASE WHEN status IN ('completed','relocated') THEN 1 ELSE 0 END) AS completed,
+			SUM(CASE WHEN status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) AS failed,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
+		FROM downloads
+		GROUP BY source_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[int64]*SourceStats)
+	for rows.Next() {
+		var sourceID int64
+		s := &SourceStats{}
+		if err := rows.Scan(&sourceID, &s.Total, &s.Completed, &s.Failed, &s.Pending); err != nil {
+			return nil, err
+		}
+		result[sourceID] = s
+	}
+	return result, rows.Err()
+}

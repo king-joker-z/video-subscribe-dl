@@ -49,14 +49,19 @@ func (h *SourcesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		FailedCount    int `json:"failed_count"`
 		PendingCount   int `json:"pending_count"`
 	}
+	// 预加载所有 source 的统计数据（单次 GROUP BY 查询，避免 N+1）
+	statsMap, _ := h.db.GetSourcesStats()
+
 	buildStats := func(sources []db.Source) []SourceWithStats {
 		result := make([]SourceWithStats, 0, len(sources))
 		for _, s := range sources {
 			stats := SourceWithStats{Source: s}
-			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ?", s.ID).Scan(&stats.VideoCount)
-			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('completed','relocated')", s.ID).Scan(&stats.CompletedCount)
-			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('failed','permanent_failed')", s.ID).Scan(&stats.FailedCount)
-			h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'pending'", s.ID).Scan(&stats.PendingCount)
+			if st, ok := statsMap[s.ID]; ok {
+				stats.VideoCount = st.Total
+				stats.CompletedCount = st.Completed
+				stats.FailedCount = st.Failed
+				stats.PendingCount = st.Pending
+			}
 			result = append(result, stats)
 		}
 		return result

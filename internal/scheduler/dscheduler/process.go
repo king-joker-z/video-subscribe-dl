@@ -30,6 +30,10 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		log.Printf("[dscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
 		return
 	}
+	if !src.Enabled {
+		log.Printf("[dscheduler] Source %d (%s) is disabled, skipping download %s", src.ID, src.Name, dl.VideoID)
+		return
+	}
 
 	client := s.newClient()
 	defer client.Close()
