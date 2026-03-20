@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -480,7 +481,21 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	// 同时支持 GET（?url=...）和 POST（JSON body），兼容极空间等反代对 POST 的特殊处理
 	var rawInputURL string
 	if r.Method == "GET" {
-		rawInputURL = r.URL.Query().Get("url")
+		// 优先读 q 参数（base64 编码，绕过极空间对含域名 query string 的 redirect）
+		if q := r.URL.Query().Get("q"); q != "" {
+			decoded, err := base64.StdEncoding.DecodeString(q)
+			if err != nil {
+				// 兼容 URL-safe base64
+				decoded, err = base64.RawURLEncoding.DecodeString(q)
+			}
+			if err != nil {
+				apiError(w, CodeInvalidParam, "参数解码失败")
+				return
+			}
+			rawInputURL = string(decoded)
+		} else {
+			rawInputURL = r.URL.Query().Get("url")
+		}
 		if rawInputURL == "" {
 			apiError(w, CodeInvalidParam, "请提供 url 参数")
 			return
