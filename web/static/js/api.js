@@ -44,7 +44,7 @@ export const api = {
     return request('/api/sources' + (q ? '?' + q : ''));
   },
   createSource: (body) => request('/api/sources', { method: 'POST', body: JSON.stringify(body) }),
-  parseSource: (url) => request('/api/sources/parse-url?q=' + btoa(unescape(encodeURIComponent(url)))),
+  parseSource: (url) => request('/api/sources/parse-url?q=' + btoa(unescape(encodeURIComponent(url))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')),
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteSource: (id, deleteFiles) => request(`/api/sources/${id}` + (deleteFiles ? '?deleteFiles=true' : ''), { method: 'DELETE' }),
