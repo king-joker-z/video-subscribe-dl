@@ -176,9 +176,11 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("/api/sources/parse", parseHandler)
 	mux.HandleFunc("/api/sources/parse/", parseHandler)
-	// /api/resolve 是 /api/sources/parse 的别名，用于绕过极空间 nginx 对 /api/sources/parse 路径的 302 redirect
 	mux.HandleFunc("/api/resolve", parseHandler)
 	mux.HandleFunc("/api/resolve/", parseHandler)
+	// /api/sources/parse-url 挂在 /api/sources/ 前缀下，兼容极空间等反代对短路径的 redirect 问题
+	mux.HandleFunc("/api/sources/parse-url", parseHandler)
+	mux.HandleFunc("/api/sources/parse-url/", parseHandler)
 	// Sources Export/Import
 	mux.HandleFunc("/api/sources/export", rt.sources.HandleExport)
 	mux.HandleFunc("/api/sources/import", rt.sources.HandleImport)
