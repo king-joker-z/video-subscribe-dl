@@ -218,17 +218,28 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "douyin":
-		if source.Name == "" && source.URL != "" {
+		if source.URL != "" {
 			dyClient := douyin.NewClient()
 			defer dyClient.Close()
-			result, err := dyClient.ResolveShareURL(source.URL)
-			if err == nil && result.Type == douyin.URLTypeUser {
-				// 用 GetUserProfile 获取名称（比 GetUserVideos 更轻量可靠）
-				if profile, err := dyClient.GetUserProfile(result.SecUID); err == nil && profile.Nickname != "" {
-					source.Name = profile.Nickname
+			// 抖音号输入（不含 "://"，不含 "."）→ 先通过 QueryUser 查 sec_uid
+			if !strings.Contains(source.URL, "://") && !strings.Contains(source.URL, ".") {
+				uniqueID := strings.TrimPrefix(source.URL, "@")
+				uniqueID = strings.TrimSpace(uniqueID)
+				if profile, err := dyClient.GetUserByUniqueID(uniqueID); err == nil && profile.SecUID != "" {
+					if source.Name == "" {
+						source.Name = profile.Nickname
+					}
+					source.URL = "https://www.douyin.com/user/" + profile.SecUID
 				}
-				// 规范化 URL 格式
-				source.URL = "https://www.douyin.com/user/" + result.SecUID
+			} else if source.Name == "" {
+				// 正常 URL 解析
+				resolveResult, err := dyClient.ResolveShareURL(source.URL)
+				if err == nil && resolveResult.Type == douyin.URLTypeUser {
+					if profile, err := dyClient.GetUserProfile(resolveResult.SecUID); err == nil && profile.Nickname != "" {
+						source.Name = profile.Nickname
+					}
+					source.URL = "https://www.douyin.com/user/" + resolveResult.SecUID
+				}
 			}
 		}
 	default:
@@ -523,6 +534,30 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 			}
 			apiOK(w, result)
 			return
+		}
+	}
+
+	// 3.5 抖音号（uniqueID）：纯文本，不含 "://"，形如 "xxx" 或 "@xxx"
+	if !strings.Contains(rawURL, "://") && !strings.Contains(rawURL, ".") {
+		// 去掉前导 @
+		uniqueID := strings.TrimPrefix(rawURL, "@")
+		uniqueID = strings.TrimSpace(uniqueID)
+		if len(uniqueID) >= 4 && len(uniqueID) <= 30 {
+			dyClient := douyin.NewClient()
+			defer dyClient.Close()
+			if profile, err := dyClient.GetUserByUniqueID(uniqueID); err == nil && profile.SecUID != "" {
+				result["type"] = "douyin"
+				result["sec_uid"] = profile.SecUID
+				result["unique_id"] = profile.UniqueID
+				result["name"] = profile.Nickname
+				result["uploader"] = profile.Nickname
+				result["followers"] = profile.FollowerCount
+				apiOK(w, result)
+				return
+			} else if err != nil {
+				apiError(w, CodeInvalidParam, "抖音号 @"+uniqueID+" 查询失败: "+err.Error())
+				return
+			}
 		}
 	}
 

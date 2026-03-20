@@ -1029,6 +1029,107 @@ func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 	return videoURL, nil
 }
 
+// GetUserByUniqueID 通过抖音号（uniqueID/unique_id）查询用户，返回 DouyinUserProfile
+// 使用 /aweme/v1/web/query/user/ API + ABogus 签名
+func (c *DouyinClient) GetUserByUniqueID(uniqueID string) (*DouyinUserProfile, error) {
+	c.limiter.Acquire()
+
+	cookie := c.getSessionCookie()
+
+	params := c.buildBaseParams()
+	params.Set("unique_id", uniqueID)
+
+	queryStr := params.Encode()
+	ua := c.fingerprint.UserAgent
+	sr := signURLWithABogus(queryStr, ua)
+	apiURL := applySignResult(QueryUserAPI, queryStr, sr)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", cookie)
+	c.setFullHeaders(req)
+
+	resp, err := c.normalClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query user by uniqueID: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read query user: %w", err)
+	}
+
+	if len(body) < 200 {
+		logger.Info("GetUserByUniqueID small body", "body", string(body))
+	}
+
+	c.limiter.ReportResult(resp.StatusCode)
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("query user API returned %d: %s", resp.StatusCode, truncate(string(body), 200))
+	}
+
+	var apiResp struct {
+		StatusCode int `json:"status_code"`
+		UserList   []struct {
+			UserInfo struct {
+				UID          string `json:"uid"`
+				SecUID       string `json:"sec_uid"`
+				ShortID      string `json:"short_id"`
+				UniqueID     string `json:"unique_id"`
+				Nickname     string `json:"nickname"`
+				Signature    string `json:"signature"`
+				AvatarLarger struct {
+					URLList []string `json:"url_list"`
+				} `json:"avatar_larger"`
+				FollowerCount   int64  `json:"follower_count"`
+				FollowingCount  int64  `json:"following_count"`
+				TotalFavorited  int64  `json:"total_favorited"`
+				AwemeCount      int64  `json:"aweme_count"`
+				FavoritingCount int64  `json:"favoriting_count"`
+				IPLocation      string `json:"ip_location"`
+			} `json:"user_info"`
+		} `json:"user_list"`
+	}
+
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("parse query user: %w (body=%s)", err, truncate(string(body), 200))
+	}
+
+	if apiResp.StatusCode != 0 {
+		return nil, fmt.Errorf("query user API status_code=%d (uniqueID=%s)", apiResp.StatusCode, uniqueID)
+	}
+
+	if len(apiResp.UserList) == 0 {
+		return nil, fmt.Errorf("抖音号 @%s 未找到对应用户", uniqueID)
+	}
+
+	u := apiResp.UserList[0].UserInfo
+	profile := &DouyinUserProfile{
+		UID:             u.UID,
+		SecUID:          u.SecUID,
+		ShortID:         u.ShortID,
+		UniqueID:        u.UniqueID,
+		Nickname:        u.Nickname,
+		Signature:       u.Signature,
+		FollowerCount:   u.FollowerCount,
+		FollowingCount:  u.FollowingCount,
+		TotalFavorited:  u.TotalFavorited,
+		AwemeCount:      u.AwemeCount,
+		FavoritingCount: u.FavoritingCount,
+		IPLocation:      u.IPLocation,
+	}
+	if len(u.AvatarLarger.URLList) > 0 {
+		profile.AvatarURL = u.AvatarLarger.URLList[0]
+	}
+
+	logger.Info("GetUserByUniqueID completed", "uniqueID", uniqueID, "nickname", profile.Nickname, "secUID", profile.SecUID)
+	return profile, nil
+}
+
 // ---- 辅助函数 ----
 
 func ExtractSecUID(rawURL string) (string, error) {

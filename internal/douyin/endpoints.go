@@ -20,6 +20,9 @@ const (
 	// MixVideosAPI 合集视频列表 API（需 X-Bogus 签名 + Cookie）
 	MixVideosAPI = "https://www.douyin.com/aweme/v1/web/mix/aweme/"
 
+	// QueryUserAPI 通过抖音号（uniqueID）查询用户信息 API
+	QueryUserAPI = "https://www.douyin.com/aweme/v1/web/query/user/"
+
 	// UserLikedAPI 用户喜欢列表 API（需 X-Bogus 签名 + Cookie）
 	UserLikedAPI = "https://www.douyin.com/aweme/v1/web/aweme/favorite/"
 

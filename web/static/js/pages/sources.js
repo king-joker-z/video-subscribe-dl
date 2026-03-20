@@ -299,7 +299,9 @@ export function SourcesPage({ onNavigate }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [addTab, setAddTab] = useState("url"); // "url" | "import"
+  const [addPlatform, setAddPlatform] = useState("bili"); // "bili" | "douyin"
+  const [addBiliTab, setAddBiliTab] = useState("url"); // "url" | "import"
+  const [addDouyinTab, setAddDouyinTab] = useState("url"); // "url" | "uniqueid"
   const [newURL, setNewURL] = useState('');
   const [adding, setAdding] = useState(false);
   const [editSource, setEditSource] = useState(null);
@@ -427,6 +429,7 @@ export function SourcesPage({ onNavigate }) {
 
   const resetAddModal = () => {
     setShowAdd(false); setNewURL(''); setParseResult(null);
+    setAddPlatform('bili'); setAddBiliTab('url'); setAddDouyinTab('url');
     setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 1800 });
   };
 
@@ -594,14 +597,22 @@ export function SourcesPage({ onNavigate }) {
           h('button', { onClick: resetAddModal, className: 'p-1 rounded hover:bg-slate-100 text-slate-500' }, h(Icon, { name: 'x', size: 18 }))
         ),
 
-        // 选项卡切换
+        // 平台选择 Tab
         h('div', { className: 'flex gap-1 bg-slate-50 rounded-lg p-1' },
-          h('button', { onClick: () => setAddTab('url'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addTab === 'url' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '输入链接'),
-          h('button', { onClick: () => setAddTab('import'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addTab === 'import' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '从关注导入')
+          h('button', { onClick: () => setAddPlatform('bili'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'bili' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '📺 B站'),
+          h('button', { onClick: () => setAddPlatform('douyin'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'douyin' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🎵 抖音')
         ),
 
-        // === 输入链接选项卡 ===
-        addTab === 'url' && h('div', { className: 'space-y-4' },
+        // === B站 Tab ===
+        addPlatform === 'bili' && h('div', { className: 'space-y-4' },
+          // B站子 Tab
+          h('div', { className: 'flex gap-1 bg-slate-100 rounded-lg p-0.5' },
+            h('button', { onClick: () => setAddBiliTab('url'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addBiliTab === 'url' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '链接'),
+            h('button', { onClick: () => setAddBiliTab('import'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addBiliTab === 'import' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '从关注导入')
+          ),
+
+          // B站「链接」子 Tab
+          addBiliTab === 'url' && h('div', { className: 'space-y-4' },
           // URL 输入 + 解析按钮
           h('div', null,
             h('label', { className: 'text-sm text-slate-600 mb-1' }, 'B 站 / 抖音链接（必填）'),
@@ -673,10 +684,107 @@ export function SourcesPage({ onNavigate }) {
             h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
             h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
           )
-        ),
+          ),  // 关闭 B站「链接」子 Tab
 
-        // === 从关注导入选项卡 ===
-        addTab === 'import' && h(ImportFollowTab, { onDone: () => { resetAddModal(); load(); } })
+          // B站「从关注导入」子 Tab
+          addBiliTab === 'import' && h(ImportFollowTab, { onDone: () => { resetAddModal(); load(); } })
+        ),  // 关闭 B站大 Tab
+
+        // === 抖音 Tab ===
+        addPlatform === 'douyin' && h('div', { className: 'space-y-4' },
+          // 抖音子 Tab
+          h('div', { className: 'flex gap-1 bg-slate-100 rounded-lg p-0.5' },
+            h('button', { onClick: () => setAddDouyinTab('url'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addDouyinTab === 'url' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '链接'),
+            h('button', { onClick: () => setAddDouyinTab('uniqueid'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addDouyinTab === 'uniqueid' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '抖音号')
+          ),
+
+          // 抖音「链接」子 Tab（逻辑与原 URL Tab 一致，parse 时走抖音链接路径）
+          addDouyinTab === 'url' && h('div', { className: 'space-y-4' },
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '抖音链接'),
+              h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '支持：用户主页链接 douyin.com/user/xxx、分享短链 v.douyin.com/xxx'),
+              h('div', { className: 'flex gap-2' },
+                h('input', {
+                  type: 'text', value: newURL,
+                  placeholder: 'https://www.douyin.com/user/xxx 或 https://v.douyin.com/xxx',
+                  onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+                  onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+                  className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+                }),
+                h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
+              )
+            ),
+            parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
+                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+              ),
+              h('div', null,
+                h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
+                h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              ),
+              h('div', { className: 'flex items-center justify-between' },
+                h('label', { className: 'text-sm text-slate-600' }, '启用'),
+                h('button', {
+                  onClick: () => updateAddForm('enabled', !addForm.enabled),
+                  className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
+                }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+              ),
+              h('div', null,
+                h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
+                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              )
+            ),
+            h('div', { className: 'flex justify-end gap-2 pt-2' },
+              h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+              h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+            )
+          ),
+
+          // 抖音「抖音号」子 Tab
+          addDouyinTab === 'uniqueid' && h('div', { className: 'space-y-4' },
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '抖音号'),
+              h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '输入抖音 App 中显示的抖音号，如 "douyin_id123" 或 "@douyin_id123"'),
+              h('div', { className: 'flex gap-2' },
+                h('input', {
+                  type: 'text', value: newURL,
+                  placeholder: '抖音号，如 douyin_id123 或 @douyin_id123',
+                  onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+                  onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+                  className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+                }),
+                h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '查询中...' : '查询')
+              )
+            ),
+            parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h(Badge, { variant: 'warning' }, '抖音'),
+                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
+                parseResult.followers != null && h('span', { className: 'text-xs text-slate-400' }, parseResult.followers.toLocaleString() + ' 粉丝')
+              ),
+              h('div', null,
+                h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
+                h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              ),
+              h('div', { className: 'flex items-center justify-between' },
+                h('label', { className: 'text-sm text-slate-600' }, '启用'),
+                h('button', {
+                  onClick: () => updateAddForm('enabled', !addForm.enabled),
+                  className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
+                }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+              ),
+              h('div', null,
+                h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
+                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              )
+            ),
+            h('div', { className: 'flex justify-end gap-2 pt-2' },
+              h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+              h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+            )
+          )
+        )  // 关闭抖音大 Tab
       )
     ),
     // 列表
