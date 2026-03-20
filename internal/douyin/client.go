@@ -452,7 +452,12 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 	}
 
 	if isNote {
-		return c.getNoteDetail(videoID)
+		video, err := c.getNoteDetail(videoID)
+		if err == nil {
+			return video, nil
+		}
+		// getNoteDetail 失败时降级到页面解析（body 已在手）
+		logger.Info("getNoteDetail failed, falling back to page parse", "videoID", videoID, "error", err)
 	}
 
 	// 风控检测: 小 body 通常是验证码/captcha 页面
