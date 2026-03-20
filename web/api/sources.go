@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -138,6 +139,9 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		apiError(w, CodeInvalidParam, "请求参数错误: "+err.Error())
 		return
 	}
+
+	// 清洗 URL：提取纯 URL，去除抖音分享文本追加的社交内容（如 "9@2.com :1pm"）
+	source.URL = extractURL(source.URL)
 
 	// 默认 type
 	if source.Type == "" {
@@ -494,7 +498,8 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		client = bilibili.NewClient(cookie)
 	}
 
-	rawURL := rawInputURL
+	// 从输入中提取 URL（兼容抖音 App 分享时追加的社交文本，如 "https://... 9@2.com :1pm"）
+	rawURL := extractURL(rawInputURL)
 	result := map[string]interface{}{}
 
 	// 1. 收藏夹: space.bilibili.com/xxx/favlist?fid=yyy
@@ -627,6 +632,19 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站或抖音链接")
+}
+
+// reExtractURL 从文本中提取第一个 http(s):// URL，兼容抖音分享文本（"https://v.douyin.com/xxx/ 9@2.com :1pm"）
+var reExtractURL = regexp.MustCompile(`https?://[^\s]+`)
+
+// extractURL 从输入文本中提取 URL，若无则返回去除空白后的原始输入（兼容纯抖音号输入）
+func extractURL(input string) string {
+	input = strings.TrimSpace(input)
+	if m := reExtractURL.FindString(input); m != "" {
+		// 去掉末尾可能多余的中文标点（抖音分享文本有时会追加 "。、，" 等）
+		return strings.TrimRight(m, "。、，")
+	}
+	return input
 }
 
 // HandleByID 路由分发 /api/sources/:id
