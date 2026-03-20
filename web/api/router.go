@@ -168,7 +168,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		}
 	})
 	parseHandler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
+		if r.Method == "POST" || r.Method == "GET" {
 			rt.sources.HandleParse(w, r)
 		} else {
 			apiError(w, CodeMethodNotAllow, "method not allowed")
