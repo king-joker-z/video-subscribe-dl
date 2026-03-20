@@ -235,6 +235,9 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 						source.Name = profile.Nickname
 					}
 					source.URL = "https://www.douyin.com/user/" + profile.SecUID
+				} else if err != nil {
+					apiError(w, CodeInvalidParam, "抖音号查询失败，请确认抖音号正确或稍后重试: "+err.Error())
+					return
 				}
 			} else if source.Name == "" {
 				// 正常 URL 解析
@@ -576,11 +579,11 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 			case douyin.URLTypeUser:
 				result["type"] = "douyin"
 				result["sec_uid"] = resolved.SecUID
-				// 尝试获取用户名
-				videos, err := dyClient.GetUserVideos(resolved.SecUID, 0)
-				if err == nil && len(videos.Videos) > 0 {
-					result["name"] = videos.Videos[0].Author.Nickname
-					result["uploader"] = videos.Videos[0].Author.Nickname
+				// 用 GetUserProfile 获取用户名（比 GetUserVideos 更可靠，无视频也能拿到名称）
+				if profile, err := dyClient.GetUserProfile(resolved.SecUID); err == nil && profile.Nickname != "" {
+					result["name"] = profile.Nickname
+					result["uploader"] = profile.Nickname
+					result["followers"] = profile.FollowerCount
 				}
 				apiOK(w, result)
 				return

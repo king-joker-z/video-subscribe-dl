@@ -615,7 +615,7 @@ export function SourcesPage({ onNavigate }) {
           addBiliTab === 'url' && h('div', { className: 'space-y-4' },
           // URL 输入 + 解析按钮
           h('div', null,
-            h('label', { className: 'text-sm text-slate-600 mb-1' }, 'B 站 / 抖音链接（必填）'),
+            h('label', { className: 'text-sm text-slate-600 mb-1' }, 'B 站链接'),
             h('div', { className: 'flex gap-2' },
               h('input', {
                 type: 'text', value: newURL, placeholder: 'bilibili.com/video/BVxxx | bilibili.com/space/xxx | 合集/收藏夹链接',
