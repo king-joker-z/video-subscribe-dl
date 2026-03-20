@@ -178,15 +178,19 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/sources/parse/", parseHandler)
 	// Sources Export/Import
 	mux.HandleFunc("/api/sources/export", rt.sources.HandleExport)
+	mux.HandleFunc("/api/sources/export/", rt.sources.HandleExport)
 	mux.HandleFunc("/api/sources/import", rt.sources.HandleImport)
+	mux.HandleFunc("/api/sources/import/", rt.sources.HandleImport)
 
 	mux.HandleFunc("/api/sources/", rt.sources.HandleByID)
 
 	// Videos
 	mux.HandleFunc("/api/videos", rt.videos.HandleList)
-	mux.HandleFunc("/api/videos/detect-charge", func(w http.ResponseWriter, r *http.Request) {
+	detectChargeHandler := func(w http.ResponseWriter, r *http.Request) {
 		rt.videos.HandleDetectCharge(w, r)
-	})
+	}
+	mux.HandleFunc("/api/videos/detect-charge", detectChargeHandler)
+	mux.HandleFunc("/api/videos/detect-charge/", detectChargeHandler)
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 
@@ -204,11 +208,14 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	// Task
 	mux.HandleFunc("/api/task/status", rt.task.HandleStatus)
 	mux.HandleFunc("/api/task/trigger", rt.task.HandleTrigger)
+	mux.HandleFunc("/api/task/trigger/", rt.task.HandleTrigger)
 	mux.HandleFunc("/api/task/pause", rt.task.HandlePause)
+	mux.HandleFunc("/api/task/pause/", rt.task.HandlePause)
 	mux.HandleFunc("/api/task/resume", rt.task.HandleResume)
+	mux.HandleFunc("/api/task/resume/", rt.task.HandleResume)
 
 	// Settings
-	mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+	settingsHandler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			rt.settings.HandleGet(w, r)
@@ -217,19 +224,24 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		default:
 			apiError(w, CodeMethodNotAllow, "method not allowed")
 		}
-	})
+	}
+	mux.HandleFunc("/api/settings", settingsHandler)
+	mux.HandleFunc("/api/settings/", settingsHandler)
 
 	mux.HandleFunc("/api/settings/preview-template", rt.settings.HandlePreviewTemplate)
+	mux.HandleFunc("/api/settings/preview-template/", rt.settings.HandlePreviewTemplate)
 
 	// Credential & Login
 	mux.HandleFunc("/api/credential", rt.credential.HandleStatus)
 	mux.HandleFunc("/api/credential/refresh", rt.credential.HandleRefresh)
+	mux.HandleFunc("/api/credential/refresh/", rt.credential.HandleRefresh)
 	mux.HandleFunc("/api/login/qrcode/generate", rt.credential.HandleQRCodeGenerate)
+	mux.HandleFunc("/api/login/qrcode/generate/", rt.credential.HandleQRCodeGenerate)
 	mux.HandleFunc("/api/login/qrcode/poll", rt.credential.HandleQRCodePoll)
 
 	// Events (SSE) & Logs
 	mux.HandleFunc("/api/events", rt.events.HandleEvents)
-	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+	logsHandler := func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			rt.events.HandleLogs(w, r)
@@ -239,16 +251,21 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		default:
 			apiError(w, CodeMethodNotAllow, "method not allowed")
 		}
-	})
+	}
+	mux.HandleFunc("/api/logs", logsHandler)
+	mux.HandleFunc("/api/logs/", logsHandler)
 
 	// Me — 关注列表 & 收藏夹
 	mux.HandleFunc("/api/me/favorites", rt.me.HandleFavorites)
 	mux.HandleFunc("/api/me/uppers", rt.me.HandleUppers)
 	mux.HandleFunc("/api/me/subscribe", rt.me.HandleSubscribe)
+	mux.HandleFunc("/api/me/subscribe/", rt.me.HandleSubscribe)
 
 	// Quick Download
 	mux.HandleFunc("/api/download", rt.quickdl.HandleQuickDownload)
+	mux.HandleFunc("/api/download/", rt.quickdl.HandleQuickDownload)
 	mux.HandleFunc("/api/download/preview", rt.quickdl.HandlePreview)
+	mux.HandleFunc("/api/download/preview/", rt.quickdl.HandlePreview)
 
 	// Auth — token 登录
 	mux.HandleFunc("/api/login/token", rt.settings.HandleTokenLogin)
@@ -265,6 +282,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	// Notify
 	if rt.notify != nil {
 		mux.HandleFunc("/api/notify/test", rt.notify.HandleTest)
+		mux.HandleFunc("/api/notify/test/", rt.notify.HandleTest)
 		mux.HandleFunc("/api/notify/status", rt.notify.HandleStatus)
 	}
 
@@ -282,15 +300,19 @@ func (rt *Router) Register(mux *http.ServeMux) {
 
 	// Douyin Cookie Management
 	mux.HandleFunc("/api/douyin/cookie/validate", rt.douyinCookie.HandleValidate)
+	mux.HandleFunc("/api/douyin/cookie/validate/", rt.douyinCookie.HandleValidate)
 	mux.HandleFunc("/api/douyin/cookie/status", rt.douyinCookie.HandleStatus)
 
 	// Douyin Status (pause/resume)
 	mux.HandleFunc("/api/douyin/status", rt.douyinStatus.HandleStatus)
 	mux.HandleFunc("/api/douyin/resume", rt.douyinStatus.HandleResume)
+	mux.HandleFunc("/api/douyin/resume/", rt.douyinStatus.HandleResume)
 	mux.HandleFunc("/api/douyin/pause", rt.douyinStatus.HandlePause)
+	mux.HandleFunc("/api/douyin/pause/", rt.douyinStatus.HandlePause)
 
 	// Bili manual resume
 	mux.HandleFunc("/api/bili/resume", rt.task.HandleResumeBili)
+	mux.HandleFunc("/api/bili/resume/", rt.task.HandleResumeBili)
 
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)
