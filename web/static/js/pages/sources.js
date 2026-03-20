@@ -702,48 +702,14 @@ export function SourcesPage({ onNavigate }) {
           addDouyinTab === 'url' && h('div', { className: 'space-y-4' },
             h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '抖音链接'),
-              h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '支持：用户主页链接 douyin.com/user/xxx、分享短链 v.douyin.com/xxx'),
-              h('div', { className: 'flex gap-2' },
-                h('input', {
-                  type: 'text', value: newURL,
-                  placeholder: 'https://www.douyin.com/user/xxx 或 https://v.douyin.com/xxx',
-                  onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
-                  onKeyDown: (e) => e.key === 'Enter' && handleParse(),
-                  className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
-                }),
-                h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
-              )
-            ),
-            parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
-              h('div', { className: 'flex items-center gap-2' },
-                h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
-                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
-              ),
-              h('div', null,
-                h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
-                h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
-              ),
-              h('div', { className: 'flex items-center justify-between' },
-                h('label', { className: 'text-sm text-slate-600' }, '启用'),
-                h('button', {
-                  onClick: () => updateAddForm('enabled', !addForm.enabled),
-                  className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
-                }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
-              ),
-              h('div', null,
-                h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
-                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
-              ),
-              h('div', { className: 'grid grid-cols-2 gap-3' },
-                h('div', { className: 'flex items-center gap-2' },
-                  h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
-                  h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
-                ),
-                h('div', { className: 'flex items-center gap-2' },
-                  h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
-                  h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
-                )
-              )
+              h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '支持：用户主页 douyin.com/user/xxx、分享短链 v.douyin.com/xxx（含分享文本直接粘贴即可）'),
+              h('input', {
+                type: 'text', value: newURL,
+                placeholder: 'https://www.douyin.com/user/xxx 或 https://v.douyin.com/xxx',
+                onChange: (e) => { setNewURL(e.target.value); },
+                onKeyDown: (e) => e.key === 'Enter' && handleAdd(),
+                className: 'w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+              })
             ),
             h('div', { className: 'flex justify-end gap-2 pt-2' },
               h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
@@ -756,48 +722,13 @@ export function SourcesPage({ onNavigate }) {
             h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '抖音号'),
               h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '输入抖音 App 中显示的抖音号，如 "douyin_id123" 或 "@douyin_id123"'),
-              h('div', { className: 'flex gap-2' },
-                h('input', {
-                  type: 'text', value: newURL,
-                  placeholder: '抖音号，如 douyin_id123 或 @douyin_id123',
-                  onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
-                  onKeyDown: (e) => e.key === 'Enter' && handleParse(),
-                  className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
-                }),
-                h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '查询中...' : '查询')
-              )
-            ),
-            parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
-              h('div', { className: 'flex items-center gap-2' },
-                h(Badge, { variant: 'warning' }, '抖音'),
-                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
-                parseResult.followers != null && h('span', { className: 'text-xs text-slate-400' }, parseResult.followers.toLocaleString() + ' 粉丝')
-              ),
-              h('div', null,
-                h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
-                h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
-              ),
-              h('div', { className: 'flex items-center justify-between' },
-                h('label', { className: 'text-sm text-slate-600' }, '启用'),
-                h('button', {
-                  onClick: () => updateAddForm('enabled', !addForm.enabled),
-                  className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
-                }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
-              ),
-              h('div', null,
-                h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
-                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
-              ),
-              h('div', { className: 'grid grid-cols-2 gap-3' },
-                h('div', { className: 'flex items-center gap-2' },
-                  h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
-                  h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
-                ),
-                h('div', { className: 'flex items-center gap-2' },
-                  h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
-                  h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
-                )
-              )
+              h('input', {
+                type: 'text', value: newURL,
+                placeholder: '抖音号，如 douyin_id123 或 @douyin_id123',
+                onChange: (e) => { setNewURL(e.target.value); },
+                onKeyDown: (e) => e.key === 'Enter' && handleAdd(),
+                className: 'w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+              })
             ),
             h('div', { className: 'flex justify-end gap-2 pt-2' },
               h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
