@@ -243,14 +243,28 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 					apiError(w, CodeInvalidParam, "抖音号查询失败，请确认抖音号正确或稍后重试: "+err.Error())
 					return
 				}
-			} else if source.Name == "" {
-				// 正常 URL 解析
+			} else {
+				// 正常 URL 解析（包含 "://"）
 				resolveResult, err := dyClient.ResolveShareURL(source.URL)
-				if err == nil && resolveResult.Type == douyin.URLTypeUser {
-					if profile, err := dyClient.GetUserProfile(resolveResult.SecUID); err == nil && profile.Nickname != "" {
-						source.Name = profile.Nickname
+				if err == nil {
+					switch resolveResult.Type {
+					case douyin.URLTypeUser:
+						if source.Name == "" {
+							if profile, err := dyClient.GetUserProfile(resolveResult.SecUID); err == nil && profile.Nickname != "" {
+								source.Name = profile.Nickname
+							}
+						}
+						source.URL = "https://www.douyin.com/user/" + resolveResult.SecUID
+					case douyin.URLTypeVideo:
+						// 视频链接 → 提取作者 SecUID，转为用户订阅
+						detail, err := dyClient.GetVideoDetail(resolveResult.VideoID)
+						if err == nil && detail.Author.SecUID != "" {
+							if source.Name == "" {
+								source.Name = detail.Author.Nickname
+							}
+							source.URL = "https://www.douyin.com/user/" + detail.Author.SecUID
+						}
 					}
-					source.URL = "https://www.douyin.com/user/" + resolveResult.SecUID
 				}
 			}
 		}
@@ -603,15 +617,29 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 				apiOK(w, result)
 				return
 			case douyin.URLTypeVideo:
+				// 视频链接 → 提取作者信息，作为用户订阅（用户预期是订阅该作者）
 				detail, err := dyClient.GetVideoDetail(resolved.VideoID)
 				if err != nil {
-					apiError(w, CodeInvalidParam, "获取视频信息失败: "+err.Error())
+					apiError(w, CodeInvalidParam, "获取视频信息失败（可能是风控，请稍后重试）: "+err.Error())
 					return
 				}
 				result["type"] = "douyin"
-				result["video_id"] = resolved.VideoID
-				result["name"] = detail.Author.Nickname
-				result["uploader"] = detail.Author.Nickname
+				// 优先用 Author.SecUID 转成用户订阅，退化为视频订阅
+				if detail.Author.SecUID != "" {
+					result["sec_uid"] = detail.Author.SecUID
+					result["name"] = detail.Author.Nickname
+					result["uploader"] = detail.Author.Nickname
+					// 尝试获取完整 profile（粉丝数等），失败了也没关系
+					if profile, err2 := dyClient.GetUserProfile(detail.Author.SecUID); err2 == nil && profile.Nickname != "" {
+						result["name"] = profile.Nickname
+						result["uploader"] = profile.Nickname
+						result["followers"] = profile.FollowerCount
+					}
+				} else {
+					result["video_id"] = resolved.VideoID
+					result["name"] = detail.Author.Nickname
+					result["uploader"] = detail.Author.Nickname
+				}
 				apiOK(w, result)
 				return
 			}
