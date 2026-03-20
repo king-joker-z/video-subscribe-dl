@@ -45,10 +45,10 @@ export const api = {
   },
   createSource: (body) => request('/api/sources', { method: 'POST', body: JSON.stringify(body) }),
   parseSource: (url) => {
-    const q = btoa(unescape(encodeURIComponent(url))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    // 极空间对 query string 过短的请求会 302，补一个固定填充参数确保总长度足够
-    const pad = 'x'.repeat(Math.max(0, 80 - q.length));
-    return request('/api/sources/parse-url?q=' + q + (pad ? '&_p=' + pad : ''));
+    // 极空间反代会对 url 参数值不含 %3F+%26 的请求做 302，
+    // 在参数值末尾追加 &_=1 使其 encode 后含 %26，触发放行规则
+    const encoded = encodeURIComponent(url + '&_=1');
+    return request('/api/sources/parse-url?url=' + encoded);
   },
   getSource: (id) => request(`/api/sources/${id}`),
   updateSource: (id, body) => request(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

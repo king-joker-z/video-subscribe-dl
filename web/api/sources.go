@@ -683,6 +683,9 @@ var reExtractURL = regexp.MustCompile(`https?://[^\s]+`)
 // extractURL 从输入文本中提取 URL，若无则返回去除空白后的原始输入（兼容纯抖音号输入）
 func extractURL(input string) string {
 	input = strings.TrimSpace(input)
+	// 去掉前端为绕过极空间反代规则追加的 &_=1 后缀
+	input = strings.TrimSuffix(input, "&_=1")
+	input = strings.TrimSpace(input)
 	if m := reExtractURL.FindString(input); m != "" {
 		// 去掉末尾可能多余的中文标点（抖音分享文本有时会追加 "。、，" 等）
 		return strings.TrimRight(m, "。、，")
