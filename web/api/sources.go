@@ -459,15 +459,25 @@ func (h *SourcesHandler) HandleFullScan(w http.ResponseWriter, r *http.Request, 
 
 // POST /api/sources/parse — 解析 URL，返回类型和名称
 func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
-	if !MethodGuard("POST", w, r) {
-		return
-	}
-
-	var req struct {
-		URL string `json:"url"`
-	}
-	if err := parseJSON(r, &req); err != nil || req.URL == "" {
-		apiError(w, CodeInvalidParam, "请提供 url 参数")
+	// 同时支持 GET（?url=...）和 POST（JSON body），兼容极空间等反代对 POST 的特殊处理
+	var rawInputURL string
+	if r.Method == "GET" {
+		rawInputURL = r.URL.Query().Get("url")
+		if rawInputURL == "" {
+			apiError(w, CodeInvalidParam, "请提供 url 参数")
+			return
+		}
+	} else if r.Method == "POST" {
+		var req struct {
+			URL string `json:"url"`
+		}
+		if err := parseJSON(r, &req); err != nil || req.URL == "" {
+			apiError(w, CodeInvalidParam, "请提供 url 参数")
+			return
+		}
+		rawInputURL = req.URL
+	} else {
+		apiError(w, CodeMethodNotAllow, "method not allowed")
 		return
 	}
 
@@ -484,7 +494,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		client = bilibili.NewClient(cookie)
 	}
 
-	rawURL := req.URL
+	rawURL := rawInputURL
 	result := map[string]interface{}{}
 
 	// 1. 收藏夹: space.bilibili.com/xxx/favlist?fid=yyy
