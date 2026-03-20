@@ -337,7 +337,7 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	if err == nil {
 		return video, nil
 	}
-	logger.Warn("detail API failed, falling back to page scrape", "videoID", videoID, "error", err)
+	logger.Info("detail API failed, falling back to page scrape", "videoID", videoID, "error", err)
 
 	// 降级: 页面解析
 	return c.getVideoDetailPage(videoID)

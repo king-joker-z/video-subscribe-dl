@@ -4,10 +4,23 @@ const BASE = '';
 
 async function request(path, options = {}) {
   const url = BASE + path;
-  const res = await fetch(url, {
+  const isPost = options.method === 'POST' || options.method === 'PUT' || options.method === 'DELETE';
+
+  // 对写操作禁止自动跟随 redirect（防止反代 302 导致 POST 降级为 GET）
+  const fetchOpts = {
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
-  });
+    redirect: isPost ? 'manual' : 'follow',
+  };
+
+  let res = await fetch(url, fetchOpts);
+
+  // 如果收到 redirect（opaqueredirect type），手动用原方法请求带尾斜杠的路径
+  if (res.type === 'opaqueredirect' || (res.status >= 301 && res.status <= 308)) {
+    const redirectUrl = res.headers.get('Location') || (url.endsWith('/') ? url : url + '/');
+    res = await fetch(redirectUrl, { ...fetchOpts, redirect: 'follow' });
+  }
+
   const data = await res.json();
   if (data.code !== 0 && data.code !== undefined) {
     throw new Error(data.message || '请求失败');
