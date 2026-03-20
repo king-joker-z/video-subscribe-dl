@@ -599,14 +599,16 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 				return
 			case douyin.URLTypeVideo:
 				detail, err := dyClient.GetVideoDetail(resolved.VideoID)
-				if err == nil {
-					result["type"] = "douyin"
-					result["video_id"] = resolved.VideoID
-					result["name"] = detail.Author.Nickname
-					result["uploader"] = detail.Author.Nickname
-					apiOK(w, result)
+				if err != nil {
+					apiError(w, CodeInvalidParam, "获取视频信息失败: "+err.Error())
 					return
 				}
+				result["type"] = "douyin"
+				result["video_id"] = resolved.VideoID
+				result["name"] = detail.Author.Nickname
+				result["uploader"] = detail.Author.Nickname
+				apiOK(w, result)
+				return
 			}
 		}
 	}
