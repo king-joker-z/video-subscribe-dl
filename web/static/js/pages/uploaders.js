@@ -160,17 +160,17 @@ export function UploadersPage({ onNavigate }) {
                     h('div', { className: 'text-xs text-slate-500' }, '失败')
                   ),
                 ),
-                h('div', { className: 'mt-3 pt-2 border-t border-slate-200 flex gap-2' },
+                h('div', { className: 'mt-3 pt-2 border-t border-slate-200 flex flex-col gap-1.5' },
                   (u.pending > 0) && h(Button, {
                     onClick: (e) => handleDownloadPending(u.uploader, e),
                     variant: 'secondary', size: 'sm',
-                    className: 'flex-1 text-xs shrink-0'
+                    className: 'w-full text-xs'
                   }, `下载待处理 (${u.pending})`),
                   h(Button, {
                     onClick: (e) => handleDeleteUploader(u.uploader, e),
                     variant: 'secondary', size: 'sm',
-                    className: 'text-xs text-red-500 hover:text-red-600 hover:border-red-300 shrink-0'
-                  }, h(Icon, { name: 'trash', size: 12 }), '删除')
+                    className: 'w-full text-xs text-red-500 hover:text-red-600 hover:border-red-300'
+                  }, h(Icon, { name: 'trash', size: 12 }), ' 删除')
                 )
               )
             )

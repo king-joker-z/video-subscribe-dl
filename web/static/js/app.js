@@ -166,7 +166,7 @@ function MobileHeader({ currentPage, onToggleSidebar }) {
     uploaders: 'UP 主', settings: '设置', logs: '实时日志',
   };
   // 底部 tab 页面不需要顶部汉堡菜单（tab bar 直接导航）
-  const tabPages = ['dashboard', 'sources', 'videos', 'uploaders', 'settings'];
+  const tabPages = ['dashboard', 'sources', 'videos', 'uploaders', 'logs'];
   const isTabPage = tabPages.includes(currentPage);
   return h('header', { className: 'lg:hidden fixed top-0 left-0 right-0 h-14 bg-white backdrop-blur border-b border-slate-200 z-30 flex items-center px-4 gap-3' },
     // 非 tab 页面（logs）显示汉堡菜单，tab 页面显示占位
@@ -186,7 +186,7 @@ function MobileTabBar({ currentPage, onNavigate }) {
     { id: 'sources',   icon: 'rss',              label: '订阅源' },
     { id: 'videos',    icon: 'video',             label: '视频'   },
     { id: 'uploaders', icon: 'users',             label: 'UP主'   },
-    { id: 'settings',  icon: 'settings',          label: '设置'   },
+    { id: 'logs',      icon: 'terminal',          label: '日志'   },
   ];
 
   return h('nav', {
