@@ -262,7 +262,11 @@ func validateModelPage(doc *html.Node, modelBaseURL string) error {
 	}
 
 	// <title> 必须包含博主 slug（不区分大小写）
-	if !strings.Contains(strings.ToLower(titleText), strings.ToLower(slug)) {
+	// Pornhub title 中博主名用空格，URL slug 用连字符，需两种形式都检查
+	lowerTitle := strings.ToLower(titleText)
+	lowerSlug := strings.ToLower(slug)
+	lowerSlugSpaced := strings.ReplaceAll(lowerSlug, "-", " ") // diana-daniels → diana daniels
+	if !strings.Contains(lowerTitle, lowerSlug) && !strings.Contains(lowerTitle, lowerSlugSpaced) {
 		return fmt.Errorf("page title %q does not contain model slug %q, possible redirect to recommendation page", titleText, slug)
 	}
 	return nil
