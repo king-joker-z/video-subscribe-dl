@@ -267,6 +267,7 @@ func downloadHLSWithFFmpeg(ctx context.Context, m3u8URL, destPath string, dlID i
 		"-c", "copy",          // 流复制，不转码
 		"-bsf:a", "aac_adtstoasc", // ADTS → ASC（mp4 容器要求）
 		"-movflags", "+faststart",
+		"-f", "mp4",           // 显式指定 muxer，避免 .tmp 后缀导致格式识别失败
 		tmpPath,
 	}
 
