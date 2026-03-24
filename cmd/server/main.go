@@ -186,6 +186,11 @@ func main() {
 	server.SetDouyinPauseFunc(sched.PauseDouyin)
 	server.SetBiliResumeFunc(sched.ResumeBili)
 	server.SetDouyinCookieStatusFunc(sched.GetDouyinCookieStatus)
+	server.SetPHCookieUpdateFunc(sched.RefreshPHUserCookie)
+	server.SetPHPauseStatusFunc(sched.GetPHPauseStatus)
+	server.SetPHResumeFunc(sched.ResumePH)
+	server.SetPHPauseFunc(sched.PausePH)
+	server.SetPHCookieStatusFunc(sched.GetPHCookieStatus)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

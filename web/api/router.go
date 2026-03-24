@@ -30,6 +30,8 @@ type Router struct {
 	signReload   *SignReloadHandler
 	douyinCookie  *DouyinCookieHandler
 	douyinStatus  *DouyinStatusHandler
+	phCookie      *PHCookieHandler
+	phStatus      *PHStatusHandler
 	onSyncAll     func()
 }
 
@@ -52,6 +54,8 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		diag:         NewDiagHandler(database),
 		douyinCookie:  NewDouyinCookieHandler(database),
 		douyinStatus:  NewDouyinStatusHandler(),
+		phCookie:      NewPHCookieHandler(database),
+		phStatus:      NewPHStatusHandler(),
 	}
 }
 
@@ -132,6 +136,31 @@ func (rt *Router) SetBiliResumeFunc(fn func()) {
 // SetDouyinCookieStatusFunc 设置抖音 Cookie 状态查询回调
 func (rt *Router) SetDouyinCookieStatusFunc(fn func() (bool, string)) {
 	rt.douyinStatus.SetCookieStatusFunc(fn)
+}
+
+// SetPHStatusFunc 设置 PH 暂停状态查询回调
+func (rt *Router) SetPHStatusFunc(fn func() (bool, string, time.Time)) {
+	rt.phStatus.SetStatusFunc(fn)
+}
+
+// SetPHResumeFunc 设置 PH 恢复回调
+func (rt *Router) SetPHResumeFunc(fn func()) {
+	rt.phStatus.SetResumeFunc(fn)
+}
+
+// SetPHPauseFunc 设置 PH 手动暂停回调
+func (rt *Router) SetPHPauseFunc(fn func(reason string)) {
+	rt.phStatus.SetPauseFunc(fn)
+}
+
+// SetPHCookieUpdateFunc 设置 PH Cookie 更新回调
+func (rt *Router) SetPHCookieUpdateFunc(fn func(string)) {
+	rt.phCookie.SetCookieUpdateFunc(fn)
+}
+
+// SetPHCookieStatusFunc 设置 PH Cookie 状态查询回调
+func (rt *Router) SetPHCookieStatusFunc(fn func() (bool, string)) {
+	rt.phStatus.SetCookieStatusFunc(fn)
 }
 
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
@@ -300,4 +329,21 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	// Diagnostics
 	mux.HandleFunc("/api/diag/bili", rt.diag.HandleBili)
 	mux.HandleFunc("/api/diag/douyin", rt.diag.HandleDouyin)
+
+	// Pornhub Status (pause/resume)
+	mux.HandleFunc("/api/ph/status", rt.phStatus.HandleStatus)
+	mux.HandleFunc("/api/ph/resume", rt.phStatus.HandleResume)
+	mux.HandleFunc("/api/ph/pause", rt.phStatus.HandlePause)
+
+	// Pornhub Cookie Management
+	mux.HandleFunc("/api/ph/cookie", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "POST":
+			rt.phCookie.HandleSave(w, r)
+		case "DELETE":
+			rt.phCookie.HandleDelete(w, r)
+		default:
+			apiError(w, CodeMethodNotAllow, "method not allowed")
+		}
+	})
 }

@@ -33,6 +33,12 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// Pornhub 类型委托给 phscheduler
+	if src.Type == "pornhub" {
+		s.ph.RetryDownload(dl)
+		return
+	}
+
 	// B 站类型委托给 bscheduler
 	if s.bili != nil {
 		s.bili.RetryDownload(dl)

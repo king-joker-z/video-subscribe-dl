@@ -58,7 +58,7 @@ func (h *MetricsHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	dlStats := h.dl.Stats()
 
 	// 风控冷却
-	cooldown := map[string]bool{"bili": false, "douyin": false}
+	cooldown := map[string]bool{"bili": false, "douyin": false, "ph": false}
 	if h.getCooldownInfo != nil {
 		inCooldown, _ := h.getCooldownInfo()
 		if inCooldown {

@@ -1,0 +1,225 @@
+package phscheduler
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/nfo"
+	"video-subscribe-dl/internal/notify"
+	"video-subscribe-dl/internal/pornhub"
+)
+
+// retryOneDownload 执行单个 PH 下载（带进度 + 重试 + NFO）
+func (s *PHScheduler) retryOneDownload(dl db.Download) {
+	if s.IsPaused() {
+		log.Printf("[phscheduler] PH 下载已暂停，跳过 %s", dl.VideoID)
+		return
+	}
+
+	s.downloadLimiter.Acquire()
+
+	src, err := s.db.GetSource(dl.SourceID)
+	if err != nil || src == nil {
+		log.Printf("[phscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
+		return
+	}
+	if !src.Enabled {
+		log.Printf("[phscheduler] Source %d (%s) is disabled, skipping download %s", src.ID, src.Name, dl.VideoID)
+		return
+	}
+
+	client := s.newClient()
+	defer client.Close()
+	if s.cookie != "" {
+		client.SetCookie(s.cookie)
+	}
+
+	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")
+	// 广播 started 事件
+	s.emitEvent(DownloadEvent{
+		Type:    "started",
+		VideoID: dl.VideoID,
+		Title:   dl.Title,
+	})
+
+	// 构造视频页面 URL
+	videoPageURL := fmt.Sprintf("https://www.pornhub.com/view_video.php?viewkey=%s", dl.VideoID)
+
+	// 获取 MP4 直链（最多重试 3 次）
+	var mp4URL string
+	for attempt := 1; attempt <= 3; attempt++ {
+		mp4URL, err = client.GetVideoURL(videoPageURL)
+		if err == nil {
+			break
+		}
+		log.Printf("[phscheduler] GetVideoURL attempt %d failed for %s: %v", attempt, dl.VideoID, err)
+
+		if pornhub.IsUnavailable(err) {
+			// 内容不可用（删除/私有），标记为完成（跳过）
+			log.Printf("[phscheduler] Video %s is unavailable, marking as completed (skipped)", dl.VideoID)
+			s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: content unavailable")
+			return
+		}
+		if pornhub.IsRateLimit(err) {
+			reason := fmt.Sprintf("PH 限流触发: %v", err)
+			s.Pause(reason)
+			s.TriggerCooldown()
+			s.notifier.Send(notify.EventRateLimited, "Pornhub 限流触发",
+				"Pornhub 下载已暂停，请在 Web UI 手动恢复\n错误: "+err.Error())
+			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+			s.db.IncrementRetryCount(dl.ID, err.Error())
+			return
+		}
+
+		if attempt < 3 {
+			backoff := time.Duration(5*(1<<(attempt-1))) * time.Second
+			time.Sleep(backoff)
+		}
+	}
+	if err != nil {
+		log.Printf("[phscheduler] GetVideoURL failed after retries for %s: %v", dl.VideoID, err)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+		s.db.IncrementRetryCount(dl.ID, err.Error())
+		return
+	}
+
+	// 构建目录结构
+	srcName := src.Name
+	if srcName == "" {
+		srcName = dl.Uploader
+	}
+	if srcName == "" {
+		srcName = "pornhub"
+	}
+
+	title := dl.Title
+	if title == "" {
+		title = fmt.Sprintf("pornhub_%s", dl.VideoID)
+	}
+
+	videoDir := pornhub.BuildVideoDir(s.downloadDir, srcName, title, dl.VideoID)
+	if err := os.MkdirAll(videoDir, 0755); err != nil {
+		log.Printf("[phscheduler] mkdir failed for %s: %v", videoDir, err)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "mkdir failed: "+err.Error())
+		s.db.IncrementRetryCount(dl.ID, "mkdir failed: "+err.Error())
+		return
+	}
+
+	safeTitle := pornhub.SafePath(title, "pornhub_"+dl.VideoID)
+	videoFilePath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"].mp4")
+
+	// 进度推送
+	progressKey := fmt.Sprintf("pornhub:%d", dl.ID)
+	var pCb phProgressCallback
+	pCb = func(info ProgressInfo) {
+		if info.Status == "done" {
+			s.removeProgress(progressKey)
+			s.emitEvent(DownloadEvent{
+				Type:         "completed",
+				VideoID:      dl.VideoID,
+				Title:        title,
+				FileSize:     info.Downloaded,
+				DownloadedAt: time.Now().Format(time.RFC3339),
+			})
+		} else {
+			s.setProgress(progressKey, &info)
+		}
+	}
+
+	// 下载（最多重试 3 次，支持断点续传）
+	var fileSize int64
+	for attempt := 1; attempt <= 3; attempt++ {
+		ctx := s.rootCtx
+		fileSize, err = downloadPHFileWithProgress(ctx, mp4URL, videoFilePath, dl.ID, title, pCb)
+		if err == nil {
+			break
+		}
+		log.Printf("[phscheduler] Download attempt %d failed: %v", attempt, err)
+		s.removeProgress(progressKey)
+		if attempt < 3 {
+			backoff := time.Duration(10*(1<<(attempt-1))) * time.Second
+			time.Sleep(backoff)
+		}
+	}
+	if err != nil {
+		log.Printf("[phscheduler] Download failed after retries: %v", err)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+		s.db.IncrementRetryCount(dl.ID, err.Error())
+		return
+	}
+
+	log.Printf("[phscheduler] Downloaded: %s → %s (%.1f MB)", dl.VideoID, videoFilePath, float64(fileSize)/(1024*1024))
+
+	// 下载封面
+	if !src.SkipPoster && dl.Thumbnail != "" {
+		thumbPath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
+		if thumbErr := downloadThumb(dl.Thumbnail, thumbPath); thumbErr != nil {
+			log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
+		}
+	}
+
+	// 生成 NFO
+	if !src.SkipNFO {
+		meta := &nfo.VideoMeta{
+			Platform:     "pornhub",
+			BvID:         dl.VideoID,
+			Title:        title,
+			UploaderName: srcName,
+			WebpageURL:   videoPageURL,
+		}
+		if err := nfo.GenerateVideoNFO(meta, videoFilePath); err != nil {
+			log.Printf("[phscheduler] Generate NFO failed: %v", err)
+		}
+	}
+
+	s.db.UpdateDownloadStatus(dl.ID, "completed", videoFilePath, fileSize, "")
+	s.db.UpdateDownloadMeta(dl.ID, srcName, title, dl.Thumbnail, dl.Duration)
+
+	s.notifier.Send(notify.EventDownloadComplete, "Pornhub 视频下载完成: "+title,
+		fmt.Sprintf("博主: %s\n大小: %.1f MB", srcName, float64(fileSize)/(1024*1024)))
+}
+
+// downloadThumb 下载封面图到指定路径
+func downloadThumb(thumbURL, destPath string) error {
+	req, err := http.NewRequest("GET", thumbURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://www.pornhub.com/")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("thumb returned %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	return nil
+}

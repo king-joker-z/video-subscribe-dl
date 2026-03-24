@@ -83,6 +83,13 @@ type Server struct {
 	onBiliResume          func()
 	getDouyinCookieStatus func() (bool, string)
 
+	// PH callbacks
+	onPHCookieUpdate  func(string)
+	getPHPauseStatus  func() (bool, string, time.Time)
+	onPHResume        func()
+	onPHPause         func(reason string)
+	getPHCookieStatus func() (bool, string)
+
 	version   string
 	buildTime string
 	startTime time.Time
@@ -185,6 +192,22 @@ func (s *Server) setupRoutes() {
 		if s.getDouyinCookieStatus != nil {
 			s.apiRouter.SetDouyinCookieStatusFunc(s.getDouyinCookieStatus)
 		}
+		// PH callbacks
+		if s.onPHCookieUpdate != nil {
+			s.apiRouter.SetPHCookieUpdateFunc(s.onPHCookieUpdate)
+		}
+		if s.getPHPauseStatus != nil {
+			s.apiRouter.SetPHStatusFunc(s.getPHPauseStatus)
+		}
+		if s.onPHResume != nil {
+			s.apiRouter.SetPHResumeFunc(s.onPHResume)
+		}
+		if s.onPHPause != nil {
+			s.apiRouter.SetPHPauseFunc(s.onPHPause)
+		}
+		if s.getPHCookieStatus != nil {
+			s.apiRouter.SetPHCookieStatusFunc(s.getPHCookieStatus)
+		}
 		if s.notifier != nil {
 			s.apiRouter.SetNotifier(s.notifier)
 		}
@@ -261,6 +284,26 @@ func (s *Server) SetBiliResumeFunc(fn func()) {
 
 func (s *Server) SetDouyinCookieStatusFunc(fn func() (bool, string)) {
 	s.getDouyinCookieStatus = fn
+}
+
+func (s *Server) SetPHCookieUpdateFunc(fn func(string)) {
+	s.onPHCookieUpdate = fn
+}
+
+func (s *Server) SetPHPauseStatusFunc(fn func() (bool, string, time.Time)) {
+	s.getPHPauseStatus = fn
+}
+
+func (s *Server) SetPHResumeFunc(fn func()) {
+	s.onPHResume = fn
+}
+
+func (s *Server) SetPHPauseFunc(fn func(reason string)) {
+	s.onPHPause = fn
+}
+
+func (s *Server) SetPHCookieStatusFunc(fn func() (bool, string)) {
+	s.getPHCookieStatus = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

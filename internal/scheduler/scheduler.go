@@ -16,11 +16,13 @@ import (
 	"video-subscribe-dl/internal/notify"
 	"video-subscribe-dl/internal/scheduler/bscheduler"
 	"video-subscribe-dl/internal/scheduler/dscheduler"
+	"video-subscribe-dl/internal/scheduler/phscheduler"
 )
 
 // Scheduler 顶层编排器：持有子平台 scheduler，统一管理生命周期和任务分发。
 // 所有 B 站平台相关逻辑委托给 bili (*bscheduler.BiliScheduler)。
 // 所有抖音平台相关逻辑委托给 douyin (*dscheduler.DouyinScheduler)。
+// 所有 Pornhub 平台相关逻辑委托给 ph (*phscheduler.PHScheduler)。
 type Scheduler struct {
 	db          *db.DB
 	dl          *downloader.Downloader
@@ -34,6 +36,9 @@ type Scheduler struct {
 
 	// 抖音子调度器（负责所有抖音平台逻辑）
 	douyin *dscheduler.DouyinScheduler
+
+	// Pornhub 子调度器（负责所有 Pornhub 平台逻辑）
+	ph *phscheduler.PHScheduler
 
 	// cron 调度器
 	cronScheduler *cron.Cron
@@ -64,6 +69,12 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		Notifier:    notifier,
 	})
 
+	phSched := phscheduler.New(phscheduler.Config{
+		DB:          database,
+		DownloadDir: downloadDir,
+		Notifier:    notifier,
+	})
+
 	return &Scheduler{
 		db:          database,
 		dl:          dl,
@@ -72,6 +83,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		stopCh:      make(chan struct{}),
 		bili:        bili,
 		douyin:      douyinSched,
+		ph:          phSched,
 	}
 }
 
@@ -92,6 +104,7 @@ func (s *Scheduler) Start() {
 		s.bili.Startup()
 
 		s.douyin.LoadUserCookie()
+		s.ph.LoadUserCookie()
 		s.ProcessAllPending()
 		s.checkAll()
 
@@ -167,6 +180,38 @@ func (s *Scheduler) Start() {
 		}()
 	}
 
+	// 转发 phscheduler Pornhub 事件到 downloader SSE 通道
+	if s.dl != nil && s.ph != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			evtCh := s.ph.GetEventChan()
+			for {
+				select {
+				case <-s.stopCh:
+					return
+				case evt, ok := <-evtCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-s.stopCh:
+						return
+					default:
+					}
+					s.dl.EmitEvent(downloader.DownloadEvent{
+						Type:         evt.Type,
+						BvID:         evt.VideoID,
+						Title:        evt.Title,
+						FileSize:     evt.FileSize,
+						Error:        evt.Error,
+						DownloadedAt: evt.DownloadedAt,
+					})
+				}
+			}
+		}()
+	}
+
 	log.Println("Scheduler started (interval: 5min)")
 }
 
@@ -174,6 +219,9 @@ func (s *Scheduler) Stop() {
 	s.bili.Stop()
 	if s.douyin != nil {
 		s.douyin.Stop()
+	}
+	if s.ph != nil {
+		s.ph.Stop()
 	}
 	close(s.stopCh)
 	s.wg.Wait()
@@ -211,6 +259,10 @@ func (s *Scheduler) checkSourceList(sources []db.Source) {
 		switch src.Type {
 		case "douyin", "douyin_mix":
 			if s.isDouyinInCooldown() {
+				continue
+			}
+		case "pornhub":
+			if s.isPHInCooldown() {
 				continue
 			}
 		default:
@@ -252,6 +304,10 @@ func (s *Scheduler) checkAllForce() {
 			if s.isDouyinInCooldown() {
 				continue
 			}
+		case "pornhub":
+			if s.isPHInCooldown() {
+				continue
+			}
 		default:
 			if s.isBiliInCooldown() {
 				continue
@@ -276,6 +332,9 @@ func (s *Scheduler) checkSource(src db.Source) {
 	switch src.Type {
 	case "douyin", "douyin_mix":
 		s.douyin.CheckSource(src)
+		return
+	case "pornhub":
+		s.ph.CheckSource(src)
 		return
 	default:
 		// 所有 B 站类型委托给 bscheduler
@@ -346,6 +405,10 @@ func (s *Scheduler) submitDownload(dl db.Download) error {
 		s.douyin.RetryDownload(dl)
 		return nil
 	}
+	if src.Type == "pornhub" {
+		s.ph.RetryDownload(dl)
+		return nil
+	}
 	if s.bili != nil {
 		s.bili.RetryDownload(dl)
 		return nil
@@ -381,6 +444,12 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		go func() {
 			defer s.wg.Done()
 			s.douyin.FullScanDouyin(*src)
+		}()
+	case "pornhub":
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.ph.FullScanPHModel(*src)
 		}()
 	default:
 		s.bili.FullScanSource(sourceID)
@@ -455,7 +524,7 @@ func (s *Scheduler) isDouyinInCooldown() bool {
 	return s.douyin.IsInCooldown()
 }
 
-// GetCooldownInfo 返回风控冷却状态（供 API 使用，合并两个平台）
+// GetCooldownInfo 返回风控冷却状态（供 API 使用，合并三个平台）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	_, douyinSec := s.douyin.GetCooldownInfo()
 
@@ -467,11 +536,22 @@ func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 		}
 	}
 
-	if douyinSec > 0 || biliSec > 0 {
-		if douyinSec > biliSec {
-			return true, douyinSec
-		}
-		return true, biliSec
+	var phSec int
+	if s.ph != nil {
+		_, sec := s.ph.GetCooldownInfo()
+		phSec = sec
+	}
+
+	maxSec := douyinSec
+	if biliSec > maxSec {
+		maxSec = biliSec
+	}
+	if phSec > maxSec {
+		maxSec = phSec
+	}
+
+	if maxSec > 0 {
+		return true, maxSec
 	}
 	return false, 0
 }
@@ -528,4 +608,46 @@ func (s *Scheduler) RefreshDouyinUserCookie(cookie string) {
 func (s *Scheduler) GetDouyinCookieStatus() (bool, string) {
 	st := s.douyin.GetDouyinCookieStatus()
 	return st.Valid, st.Msg
+}
+
+// ─── 代理方法：Pornhub 平台 ────────────────────────────────────────────────────
+
+// PausePH 暂停 Pornhub 下载
+func (s *Scheduler) PausePH(reason string) {
+	s.ph.Pause(reason)
+}
+
+// ResumePH 手动恢复 Pornhub 下载
+func (s *Scheduler) ResumePH() {
+	s.ph.Resume()
+	s.ph.ClearCooldown()
+}
+
+// IsPHPaused 检查 Pornhub 是否被暂停
+func (s *Scheduler) IsPHPaused() bool {
+	return s.ph.IsPaused()
+}
+
+// GetPHPauseStatus 返回 Pornhub 暂停状态详情
+func (s *Scheduler) GetPHPauseStatus() (paused bool, reason string, pausedAt time.Time) {
+	return s.ph.GetPauseStatus()
+}
+
+// RefreshPHUserCookie 热更新：从 DB 重新加载并应用 PH Cookie
+func (s *Scheduler) RefreshPHUserCookie(cookie string) {
+	s.ph.RefreshCookie(cookie)
+}
+
+// GetPHCookieStatus 返回 PH Cookie 的当前有效性状态
+func (s *Scheduler) GetPHCookieStatus() (bool, string) {
+	st := s.ph.GetPHCookieStatus()
+	return st.Valid, st.Msg
+}
+
+// isPHInCooldown 检查 Pornhub 是否在风控冷却期内
+func (s *Scheduler) isPHInCooldown() bool {
+	if s.ph == nil {
+		return false
+	}
+	return s.ph.IsInCooldown()
 }

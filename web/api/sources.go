@@ -14,6 +14,7 @@ import (
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/douyin"
+	"video-subscribe-dl/internal/pornhub"
 )
 
 // SourcesHandler 订阅源 API
@@ -149,9 +150,12 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		source.Type = "up"
 	}
 
-	// 自动识别 URL 类型: 先检测抖音
+	// 自动识别 URL 类型: 先检测抖音，再检测 Pornhub
 	if douyin.IsDouyinURL(source.URL) {
 		source.Type = "douyin"
+	}
+	if isPornhubURL(source.URL) {
+		source.Type = "pornhub"
 	}
 	if source.Type == "up" && source.URL != "" {
 		if strings.Contains(source.URL, "favlist") {
@@ -269,6 +273,15 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	case "pornhub":
+		// 从博主主页 URL 自动获取名称
+		if source.Name == "" && source.URL != "" {
+			phClient := pornhubNewClient()
+			if info, err := phClient.GetModelInfo(source.URL); err == nil && info.Name != "" {
+				source.Name = info.Name
+			}
+			phClient.Close()
+		}
 	default:
 		if source.Name == "" && source.URL != "" {
 			if mid, err := bilibili.ExtractMID(source.URL); err == nil {
@@ -279,8 +292,8 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 关联全局 Cookie（抖音不需要）
-	if source.Type != "douyin" && source.CookiesFile == "" {
+	// 关联全局 Cookie（抖音和 Pornhub 不需要）
+	if source.Type != "douyin" && source.Type != "pornhub" && source.CookiesFile == "" {
 		if cookiePath, err := h.db.GetSetting("cookie_path"); err == nil && cookiePath != "" {
 			source.CookiesFile = cookiePath
 		}
@@ -674,7 +687,24 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站或抖音链接")
+	// Pornhub 博主主页
+	if isPornhubURL(rawURL) {
+		result["type"] = "pornhub"
+		result["url"] = rawURL
+		phClient := pornhubNewClient()
+		defer phClient.Close()
+		if info, err := phClient.GetModelInfo(rawURL); err == nil && info.Name != "" {
+			result["name"] = info.Name
+			result["uploader"] = info.Name
+			log.Printf("[source·parse] Pornhub model name: %s", info.Name)
+		} else if err != nil {
+			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
+		}
+		apiOK(w, result)
+		return
+	}
+
+	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站、抖音或 Pornhub 链接")
 }
 
 // reExtractURL 从文本中提取第一个 http(s):// URL，兼容抖音分享文本（"https://v.douyin.com/xxx/ 9@2.com :1pm"）
@@ -929,4 +959,16 @@ func (h *SourcesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[source/import] Import complete: created=%d, skipped=%d, errors=%d",
 		result.Created, result.Skipped, result.Errors)
 	apiOK(w, result)
+}
+
+// ─── Pornhub 辅助函数 ──────────────────────────────────────────────────────────
+
+// isPornhubURL 判断 URL 是否为 Pornhub 链接
+func isPornhubURL(rawURL string) bool {
+	return strings.Contains(rawURL, "pornhub.com")
+}
+
+// pornhubNewClient 创建一个用于 parse 阶段的 Pornhub 客户端（匿名，无 Cookie）
+func pornhubNewClient() *pornhub.Client {
+	return pornhub.NewClient("")
 }
