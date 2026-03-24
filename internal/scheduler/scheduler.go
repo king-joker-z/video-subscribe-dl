@@ -651,3 +651,11 @@ func (s *Scheduler) isPHInCooldown() bool {
 	}
 	return s.ph.IsInCooldown()
 }
+
+// GetPHCooldownInfo 返回 PH 冷却状态（供 metrics API 使用）
+func (s *Scheduler) GetPHCooldownInfo() (inCooldown bool, remainingSec int) {
+	if s.ph == nil {
+		return false, 0
+	}
+	return s.ph.GetCooldownInfo()
+}

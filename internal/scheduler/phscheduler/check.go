@@ -80,7 +80,11 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 		log.Printf("[phscheduler] 获取视频列表失败 (第%d次): %v", attempt, fetchErr)
 		if attempt < 3 {
 			backoff := time.Duration(5*(1<<(attempt-1))) * time.Second
-			time.Sleep(backoff)
+			select {
+			case <-s.rootCtx.Done():
+				return
+			case <-time.After(backoff):
+			}
 		}
 	}
 	if fetchErr != nil {

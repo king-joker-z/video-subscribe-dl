@@ -12,9 +12,10 @@ import (
 
 // MetricsHandler 运行时指标端点
 type MetricsHandler struct {
-	dl              *downloader.Downloader
-	startTime       time.Time
-	getCooldownInfo func() (bool, int)
+	dl                *downloader.Downloader
+	startTime         time.Time
+	getCooldownInfo   func() (bool, int)
+	getPHCooldownInfo func() (bool, int) // PH 冷却状态
 }
 
 // NewMetricsHandler 创建 MetricsHandler
@@ -30,9 +31,14 @@ func (h *MetricsHandler) SetStartTime(t time.Time) {
 	h.startTime = t
 }
 
-// SetCooldownInfoFunc 设置风控冷却信息回调
+// SetCooldownInfoFunc 设置风控冷却信息回调（B站）
 func (h *MetricsHandler) SetCooldownInfoFunc(fn func() (bool, int)) {
 	h.getCooldownInfo = fn
+}
+
+// SetPHCooldownInfoFunc 设置 PH 冷却信息回调
+func (h *MetricsHandler) SetPHCooldownInfoFunc(fn func() (bool, int)) {
+	h.getPHCooldownInfo = fn
 }
 
 // HandleMetrics GET /api/metrics — 返回运行时指标 JSON
@@ -63,6 +69,12 @@ func (h *MetricsHandler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 		inCooldown, _ := h.getCooldownInfo()
 		if inCooldown {
 			cooldown["bili"] = true
+		}
+	}
+	if h.getPHCooldownInfo != nil {
+		inCooldown, _ := h.getPHCooldownInfo()
+		if inCooldown {
+			cooldown["ph"] = true
 		}
 	}
 

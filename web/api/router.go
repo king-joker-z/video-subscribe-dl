@@ -167,6 +167,10 @@ func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
 	rt.dashboard.SetCooldownInfoFunc(fn)
 	rt.metrics.SetCooldownInfoFunc(fn)
 }
+
+func (rt *Router) SetPHCooldownInfoFunc(fn func() (bool, int)) {
+	rt.metrics.SetPHCooldownInfoFunc(fn)
+}
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
 func (rt *Router) SetBuildTime(t string)        { rt.task.SetBuildTime(t) }
 func (rt *Router) SetStartTime(t time.Time) {

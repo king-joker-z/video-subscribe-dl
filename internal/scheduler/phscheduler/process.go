@@ -92,7 +92,11 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 		if attempt < 3 {
 			backoff := time.Duration(5*(1<<(attempt-1))) * time.Second
-			time.Sleep(backoff)
+			select {
+			case <-s.rootCtx.Done():
+				return
+			case <-time.After(backoff):
+			}
 		}
 	}
 	if err != nil {
@@ -159,7 +163,11 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		s.removeProgress(progressKey)
 		if attempt < 3 {
 			backoff := time.Duration(10*(1<<(attempt-1))) * time.Second
-			time.Sleep(backoff)
+			select {
+			case <-s.rootCtx.Done():
+				return
+			case <-time.After(backoff):
+			}
 		}
 	}
 	if err != nil {

@@ -168,6 +168,7 @@ func main() {
 
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)
 	server.SetCooldownInfoFunc(sched.GetCooldownInfo)
+	server.SetPHCooldownInfoFunc(sched.GetPHCooldownInfo)
 	server.SetCheckNowFunc(sched.CheckNow)
 	server.SetCookieUpdateFunc(sched.UpdateCookie)
 	server.SetCredentialUpdateFunc(sched.UpdateCredential)

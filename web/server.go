@@ -65,6 +65,7 @@ type Server struct {
 
 	// Callbacks
 	getCooldownInfo    func() (bool, int)
+	getPHCooldownInfo  func() (bool, int)
 	onCheckNow         func()
 	onCookieUpdate     func(string)
 	onCredentialUpdate func(*bilibili.Credential)
@@ -164,6 +165,9 @@ func (s *Server) setupRoutes() {
 		if s.getCooldownInfo != nil {
 			s.apiRouter.SetCooldownInfoFunc(s.getCooldownInfo)
 		}
+		if s.getPHCooldownInfo != nil {
+			s.apiRouter.SetPHCooldownInfoFunc(s.getPHCooldownInfo)
+		}
 		s.apiRouter.SetBuildTime(s.buildTime)
 		s.apiRouter.SetStartTime(s.startTime)
 		if s.onSyncAll != nil {
@@ -216,6 +220,10 @@ func (s *Server) setupRoutes() {
 
 func (s *Server) SetCooldownInfoFunc(fn func() (bool, int)) {
 	s.getCooldownInfo = fn
+}
+
+func (s *Server) SetPHCooldownInfoFunc(fn func() (bool, int)) {
+	s.getPHCooldownInfo = fn
 }
 
 func (s *Server) SetCheckNowFunc(fn func()) {
