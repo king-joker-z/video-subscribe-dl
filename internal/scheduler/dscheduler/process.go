@@ -82,7 +82,7 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 
 	if detail.VideoURL == "" {
 		log.Printf("[dscheduler] Skipping post %s: no video URL and no images", dl.VideoID)
-		s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: no downloadable content")
+		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: no downloadable content")
 		return
 	}
 

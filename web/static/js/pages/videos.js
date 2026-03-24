@@ -174,6 +174,7 @@ export function VideosPage({ params = {} } = {}) {
     { value: 'failed', label: '失败' },
     { value: 'charge_blocked', label: '充电专属' },
     { value: 'pending', label: '待处理' },
+    { value: 'skipped', label: '已跳过' },
     { value: 'cancelled', label: '已取消' },
     { value: 'relocated', label: '已迁移' },
     { value: 'deleted', label: '已删除' },
