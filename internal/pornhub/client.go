@@ -26,7 +26,7 @@ const (
 
 var (
 	flashvarsVarRe = regexp.MustCompile(`(flashvars_\d+)`)
-	viewKeyRe      = regexp.MustCompile(`[?&]viewkey=([a-zA-Z0-9]+)`)
+	viewKeyRe      = regexp.MustCompile(`[?&]viewkey=([a-zA-Z0-9_]+)`)
 )
 
 // Client Pornhub HTTP 客户端

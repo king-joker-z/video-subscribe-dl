@@ -91,16 +91,21 @@ function EditModal({ source, onSave, onClose }) {
         )
       ),
 
-      // 画质
-      h('div', null,
+      // Pornhub 平台说明（画质/编码不适用）
+      source.type === 'pornhub' && h('div', { className: 'text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-2' },
+        '🔞 Pornhub 平台自动下载最高画质 MP4，画质偏好/视频编码设置无效。'
+      ),
+
+      // 画质（pornhub 不显示）
+      source.type !== 'pornhub' && h('div', null,
         h('label', { className: labelClass }, '画质偏好'),
         h('select', { value: form.download_quality, onChange: (e) => update('download_quality', e.target.value), className: inputClass },
           qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
         )
       ),
 
-      // 最低画质
-      h('div', null,
+      // 最低画质（pornhub 不显示）
+      source.type !== 'pornhub' && h('div', null,
         h('label', { className: labelClass }, '最低画质（留空不限制）'),
         h('select', { value: form.download_quality_min, onChange: (e) => update('download_quality_min', e.target.value), className: inputClass },
           h('option', { value: '' }, '不限制'),
@@ -108,8 +113,8 @@ function EditModal({ source, onSave, onClose }) {
         )
       ),
 
-      // 编码
-      h('div', null,
+      // 编码（pornhub 不显示）
+      source.type !== 'pornhub' && h('div', null,
         h('label', { className: labelClass }, '视频编码'),
         h('select', { value: form.download_codec, onChange: (e) => update('download_codec', e.target.value), className: inputClass },
           h('option', { value: 'all' }, '自动'),

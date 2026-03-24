@@ -56,8 +56,8 @@ func SanitizeName(name string) string {
 	name = phSpaceCollapser.ReplaceAllString(name, " ")
 	name = strings.TrimSpace(name)
 
-	// 最终兜底：空字符串
-	if name == "" {
+	// 最终兜底：空字符串 / 文件系统保留名
+	if name == "" || name == "." || name == ".." {
 		return "unknown"
 	}
 

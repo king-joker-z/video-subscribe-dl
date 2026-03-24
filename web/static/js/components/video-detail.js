@@ -37,6 +37,14 @@ function extractBVID(videoID) {
   return match ? match[1] : null;
 }
 
+function extractViewKey(videoID) {
+  if (!videoID) return null;
+  // viewkey 格式：纯字母数字，不是 BV 开头，不是纯数字（抖音）
+  if (/^BV/i.test(videoID) || /^\d+$/.test(videoID)) return null;
+  if (/^[a-zA-Z0-9_]{6,30}$/.test(videoID)) return videoID;
+  return null;
+}
+
 export function VideoDetailModal({ video, onClose, onAction }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +99,8 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const resolution = inferResolution(v.file_path);
   const bvid = extractBVID(v.video_id);
   const biliURL = bvid ? `https://www.bilibili.com/video/${bvid}` : null;
+  const viewKey = extractViewKey(v.video_id);
+  const phURL = viewKey ? `https://www.pornhub.com/view_video.php?viewkey=${viewKey}` : null;
   const streamURL = `/api/stream/${v.id}`;
   const canPlay = v.file_path && (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0;
   const isNativePlayable = canPlay && /\.(mp4|m4v|webm|mov)$/i.test(v.file_path);
@@ -230,6 +240,10 @@ export function VideoDetailModal({ video, onClose, onAction }) {
           href: biliURL, target: '_blank', rel: 'noopener noreferrer',
           className: 'inline-flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-600 transition-colors'
         }, h(Icon, { name: 'external-link', size: 14 }), '在 B 站查看'),
+        phURL && h('a', {
+          href: phURL, target: '_blank', rel: 'noopener noreferrer',
+          className: 'inline-flex items-center gap-1.5 text-sm text-red-400 hover:text-red-600 transition-colors'
+        }, h(Icon, { name: 'external-link', size: 14 }), '在 PH 查看'),
       ),
 
       // Footer actions

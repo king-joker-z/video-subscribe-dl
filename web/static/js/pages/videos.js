@@ -449,6 +449,7 @@ function detectPlatform(videoId) {
   if (!videoId) return 'unknown';
   if (/^BV[0-9A-Za-z]{10}$/.test(videoId) || /^av\d+$/i.test(videoId)) return 'bilibili';
   if (/^\d{15,20}$/.test(videoId)) return 'douyin';
+  if (/^ph[0-9a-f]+$/i.test(videoId) || /^[a-z0-9]{8,20}$/i.test(videoId)) return 'pornhub';
   return 'unknown';
 }
 
@@ -483,6 +484,11 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
     if (platform === 'douyin') {
       return h('div', { className: 'w-full h-full flex items-center justify-center', style: { background: '#010101' } },
         h(DouyinLogo, { size: 48 })
+      );
+    }
+    if (platform === 'pornhub') {
+      return h('div', { className: 'w-full h-full flex items-center justify-center', style: { background: '#1b1b1b' } },
+        h('span', { style: { fontSize: 28, lineHeight: 1 } }, '🔞')
       );
     }
     return h('div', { className: 'w-full h-full flex items-center justify-center text-slate-400' },
