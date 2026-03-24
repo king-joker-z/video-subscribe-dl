@@ -500,6 +500,13 @@ var clearInterval = function(){};
 		return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 	}
 
+	// DEBUG: dump mediaDefinitions 结构（调查 URL 格式，后续可移除）
+	if len(fv.MediaDefinitions) > 0 {
+		if dbg, _ := json.Marshal(fv.MediaDefinitions); dbg != nil {
+			log.Printf("[pornhub·debug] mediaDefinitions (%d entries): %s", len(fv.MediaDefinitions), string(dbg))
+		}
+	}
+
 	// 从 mediaDefinitions 中提取最高画质 MP4 直链
 	// Pornhub 有两种结构：
 	// 1. 新版（直接）：每条 mediaDefinition 本身就是可播放的 {videoUrl, quality, format}，format="mp4"
