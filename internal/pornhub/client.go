@@ -221,23 +221,9 @@ func extractModelName(doc *html.Node, modelURL string) string {
 	return ""
 }
 
-// validateModelPage 校验页面确实属于该博主，防止 Pornhub 静默重定向到推荐页
-// 检查策略：页面 <title> 必须包含 URL 路径最后一段（博主 slug），忽略大小写
+// validateModelPage 校验页面确实属于该博主，防止 Pornhub 静默重定向到首页/推荐页
+// 检查策略：若 title 命中已知的推荐页/首页特征，则判定为重定向，否则放行
 func validateModelPage(doc *html.Node, modelBaseURL string) error {
-	// 从 URL 中提取博主 slug（路径最后一段，去掉末尾斜杠）
-	u := strings.TrimRight(modelBaseURL, "/")
-	parts := strings.Split(u, "/")
-	slug := ""
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" {
-			slug = parts[i]
-			break
-		}
-	}
-	if slug == "" {
-		return nil // 无法提取 slug，跳过校验
-	}
-
 	// 提取 <title> 文本
 	var titleText string
 	var find func(*html.Node)
@@ -261,13 +247,17 @@ func validateModelPage(doc *html.Node, modelBaseURL string) error {
 		return nil // 无 title，跳过校验
 	}
 
-	// <title> 必须包含博主 slug（不区分大小写）
-	// Pornhub title 中博主名用空格，URL slug 用连字符，需两种形式都检查
+	// 已知的推荐页/首页 title 特征（命中任意一条则判定为重定向）
 	lowerTitle := strings.ToLower(titleText)
-	lowerSlug := strings.ToLower(slug)
-	lowerSlugSpaced := strings.ReplaceAll(lowerSlug, "-", " ") // diana-daniels → diana daniels
-	if !strings.Contains(lowerTitle, lowerSlug) && !strings.Contains(lowerTitle, lowerSlugSpaced) {
-		return fmt.Errorf("page title %q does not contain model slug %q, possible redirect to recommendation page", titleText, slug)
+	redirectSigns := []string{
+		"pornhub - the best free porn",
+		"free porn videos & sex movies",
+		"pornhub.com - the best free porn",
+	}
+	for _, sign := range redirectSigns {
+		if strings.Contains(lowerTitle, sign) {
+			return fmt.Errorf("page title %q looks like recommendation/home page (redirected), model url: %s", titleText, modelBaseURL)
+		}
 	}
 	return nil
 }
