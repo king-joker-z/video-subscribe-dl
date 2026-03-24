@@ -2,6 +2,7 @@ package phscheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -78,6 +79,12 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 			// 内容不可用（删除/私有），标记为完成（跳过）
 			log.Printf("[phscheduler] Video %s is unavailable, marking as completed (skipped)", dl.VideoID)
 			s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: content unavailable")
+			return
+		}
+		if errors.Is(err, pornhub.ErrParseFailed) {
+			// 页面解析失败（非标准视频/图片集/embed外链），不重试，直接标记跳过
+			log.Printf("[phscheduler] Video %s parse failed (non-standard content), skipping: %v", dl.VideoID, err)
+			s.db.UpdateDownloadStatus(dl.ID, "completed", "", 0, "skipped: "+err.Error())
 			return
 		}
 		if pornhub.IsRateLimit(err) {
