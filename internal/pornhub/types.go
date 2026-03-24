@@ -1,6 +1,9 @@
 package pornhub
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Video Pornhub 视频信息
 type Video struct {
@@ -19,18 +22,18 @@ type ModelInfo struct {
 }
 
 // MediaDefinition 视频媒体定义（来自 flashvars.mediaDefinitions）
+// quality 字段在不同视频中可能是 string 或 []string，用 RawMessage 兼容
 type MediaDefinition struct {
-	VideoURL string `json:"videoUrl"`
-	Format   string `json:"format"`
-	Quality  string `json:"quality"`
-	// 当 format=mp4 且 videoUrl 是间接 URL 时，GET 该 URL 返回 []VideoQuality
+	VideoURL string          `json:"videoUrl"`
+	Format   string          `json:"format"`
+	Quality  json.RawMessage `json:"quality"` // 可能是 "720p" 或 ["720p","1080p"]
 }
 
 // VideoQuality 从间接 URL 返回的画质条目
 type VideoQuality struct {
-	VideoURL string `json:"videoUrl"`
-	Quality  string `json:"quality"`
-	Format   string `json:"format"`
+	VideoURL string          `json:"videoUrl"`
+	Quality  json.RawMessage `json:"quality"` // 同 MediaDefinition，可能是 string 或数组
+	Format   string          `json:"format"`
 }
 
 // FlashVars flashvars JS 对象关键字段
