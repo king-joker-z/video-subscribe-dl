@@ -2,6 +2,7 @@ package phscheduler
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -29,7 +30,10 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	default:
 	}
 
-	s.downloadLimiter.Acquire()
+	if !s.downloadLimiter.Acquire() {
+		log.Printf("[phscheduler] rate limiter stopped, skip download %s", dl.VideoID)
+		return
+	}
 
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
@@ -225,17 +229,6 @@ func downloadThumb(thumbURL, destPath string) error {
 	}
 	defer f.Close()
 
-	buf := make([]byte, 64*1024)
-	for {
-		n, readErr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-		}
-		if readErr != nil {
-			break
-		}
-	}
-	return nil
+	_, err = io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)) // 封面最大 20 MB
+	return err
 }

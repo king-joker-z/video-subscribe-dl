@@ -56,13 +56,11 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 	// 获取视频列表（包含翻页）
 	var videos []pornhub.Video
 	var fetchErr error
-	consecutiveErrors := 0
 	for attempt := 1; attempt <= 3; attempt++ {
 		videos, fetchErr = client.GetModelVideos(src.URL)
 		if fetchErr == nil {
 			break
 		}
-		consecutiveErrors++
 		errMsg := fetchErr.Error()
 
 		isRateLimit := pornhub.IsRateLimit(fetchErr) ||

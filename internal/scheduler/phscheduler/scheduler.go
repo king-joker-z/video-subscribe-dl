@@ -136,7 +136,9 @@ func (s *PHScheduler) CheckSource(src db.Source) {
 // RetryDownload 重试单个 PH 下载记录（通过信号量限制并发）
 func (s *PHScheduler) RetryDownload(dl db.Download) {
 	s.workerSem <- struct{}{} // 获取 slot，满时阻塞
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		defer func() { <-s.workerSem }()
 		s.retryOneDownload(dl)
 	}()

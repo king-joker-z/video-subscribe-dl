@@ -42,45 +42,62 @@ func DefaultRateLimiter() *RateLimiter {
 	return NewRateLimiter(1, 1, 5*time.Second)
 }
 
-// Acquire 获取一个 token，阻塞直到成功
-func (rl *RateLimiter) Acquire() {
+// Acquire 获取一个 token，阻塞直到成功或 limiter 被 Stop
+// 返回 false 表示 limiter 已停止（调用方应放弃操作）
+func (rl *RateLimiter) Acquire() bool {
 	for {
 		rl.mu.Lock()
+		// 检查是否已 Stop
+		select {
+		case <-rl.stopCh:
+			rl.mu.Unlock()
+			return false
+		default:
+		}
 		// 检查是否在 penalty 期间
 		if !rl.penaltyUntil.IsZero() && time.Now().Before(rl.penaltyUntil) {
 			remaining := time.Until(rl.penaltyUntil)
 			rl.mu.Unlock()
-			time.Sleep(remaining)
+			select {
+			case <-rl.stopCh:
+				return false
+			case <-time.After(remaining):
+			}
 			continue
 		}
 		if rl.tokens > 0 {
 			rl.tokens--
 			rl.mu.Unlock()
-			return
+			return true
 		}
 		rl.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-rl.stopCh:
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 
 // AcquireWithBackoff 带指数退避的 token 获取
 // consecutiveErrors: 连续错误次数（0 = 无退避，等同于 Acquire）
 // 退避策略: 首次 5s, 第二次 10s, 第三次 20s, 最大 60s，±20% 随机抖动
-func (rl *RateLimiter) AcquireWithBackoff(consecutiveErrors int) {
+// 返回 false 表示 limiter 已停止
+func (rl *RateLimiter) AcquireWithBackoff(consecutiveErrors int) bool {
 	if consecutiveErrors > 0 {
-		baseDelay := 5.0 * math.Pow(2.0, float64(consecutiveErrors-1)) // 5s, 10s, 20s, 40s...
+		baseDelay := 5.0 * math.Pow(2.0, float64(consecutiveErrors-1))
 		if baseDelay > 60.0 {
 			baseDelay = 60.0
 		}
-
-		// ±20% 随机抖动
-		jitter := baseDelay * 0.2 * (2*rand.Float64() - 1) // [-20%, +20%]
+		jitter := baseDelay * 0.2 * (2*rand.Float64() - 1)
 		delay := time.Duration((baseDelay + jitter) * float64(time.Second))
-		time.Sleep(delay)
+		select {
+		case <-rl.stopCh:
+			return false
+		case <-time.After(delay):
+		}
 	}
-
-	// 然后正常获取 token
-	rl.Acquire()
+	return rl.Acquire()
 }
 
 // ReportResult 报告 HTTP 请求结果，用于状态码感知限流

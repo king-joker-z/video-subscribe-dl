@@ -19,11 +19,6 @@ func NewPHCookieHandler(database *db.DB) *PHCookieHandler {
 	return &PHCookieHandler{db: database}
 }
 
-// SetCookieRefreshFunc 设置 Cookie 热更新回调（已废弃，使用 SetCookieUpdateFunc）
-func (h *PHCookieHandler) SetCookieRefreshFunc(fn func(string)) {
-	h.onCookieRefresh = fn
-}
-
 // SetCookieUpdateFunc 设置 Cookie 热更新回调
 func (h *PHCookieHandler) SetCookieUpdateFunc(fn func(string)) {
 	h.onCookieRefresh = fn
