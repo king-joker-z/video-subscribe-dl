@@ -150,11 +150,10 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		source.Type = "up"
 	}
 
-	// 自动识别 URL 类型: 先检测抖音，再检测 Pornhub
+	// 自动识别 URL 类型: 先检测抖音，再检测 Pornhub（互斥，else if 保证不覆盖）
 	if douyin.IsDouyinURL(source.URL) {
 		source.Type = "douyin"
-	}
-	if isPornhubURL(source.URL) {
+	} else if isPornhubURL(source.URL) {
 		source.Type = "pornhub"
 	}
 	if source.Type == "up" && source.URL != "" {
