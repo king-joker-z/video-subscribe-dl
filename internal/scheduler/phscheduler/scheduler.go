@@ -144,6 +144,18 @@ func (s *PHScheduler) RetryDownload(dl db.Download) {
 	}()
 }
 
+// DispatchDownload 异步提交单个下载任务（非阻塞，workerSem 满时在 goroutine 内等待）
+// 用于扫描完成后直接投递新增任务，避免依赖 ProcessAllPending 的防重入锁
+func (s *PHScheduler) DispatchDownload(dl db.Download) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.workerSem <- struct{}{} // goroutine 内等待 slot，不阻塞调用方
+		defer func() { <-s.workerSem }()
+		s.retryOneDownload(dl)
+	}()
+}
+
 // IsPaused 返回 PH 是否被暂停
 func (s *PHScheduler) IsPaused() bool {
 	s.pausedMu.RLock()

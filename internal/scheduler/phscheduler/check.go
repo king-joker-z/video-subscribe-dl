@@ -135,10 +135,13 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 			Status:    "pending",
 			Duration:  v.Duration,
 		}
-		if _, err := s.db.CreateDownload(dl); err != nil {
+		if id, err := s.db.CreateDownload(dl); err != nil {
 			log.Printf("[phscheduler] 保存待下载记录失败 %s: %v", v.ViewKey, err)
 		} else {
 			pendingCreated++
+			// 直接投递下载，不依赖 ProcessAllPending 的全局锁
+			dl.ID = id
+			s.DispatchDownload(*dl)
 		}
 	}
 
@@ -239,9 +242,12 @@ func (s *PHScheduler) FullScanPHModel(src db.Source) {
 			Status:    "pending",
 			Duration:  v.Duration,
 		}
-		if _, err := s.db.CreateDownload(dl); err != nil {
+		if id, err := s.db.CreateDownload(dl); err != nil {
 			log.Printf("[phscheduler·full-scan] 创建下载记录失败 %s: %v", v.ViewKey, err)
 			continue
+		} else {
+			dl.ID = id
+			s.DispatchDownload(*dl)
 		}
 		created++
 
