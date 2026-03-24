@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"video-subscribe-dl/internal/db"
+	"video-subscribe-dl/internal/notify"
 	"video-subscribe-dl/internal/pornhub"
 )
 
@@ -71,8 +72,10 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 		if isRateLimit {
 			log.Printf("[phscheduler] ⚠️ 被限流 (第%d次): %v", attempt, fetchErr)
 			s.TriggerCooldown()
-			s.notifier.Send("rate_limited", "Pornhub 限流触发",
-				fmt.Sprintf("Pornhub 检查已暂停冷却 10 分钟\n错误: %v", fetchErr))
+			if s.notifier != nil {
+				s.notifier.Send(notify.EventRateLimited, "Pornhub 限流触发",
+					fmt.Sprintf("Pornhub 检查已暂停冷却 10 分钟\n错误: %v", fetchErr))
+			}
 			return
 		}
 

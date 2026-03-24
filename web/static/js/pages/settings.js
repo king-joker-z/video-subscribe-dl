@@ -65,6 +65,8 @@ export function SettingsPage() {
   const [douyinCookieStatus, setDouyinCookieStatus] = useState(null);
   const [validatingDouyinCookie, setValidatingDouyinCookie] = useState(false);
   const [savingDouyinCookie, setSavingDouyinCookie] = useState(false);
+  const [phCookieInput, setPhCookieInput] = useState('');
+  const [savingPhCookie, setSavingPhCookie] = useState(false);
   const [templatePreview, setTemplatePreview] = useState('');
   const previewTimer = React.useRef(null);
 
@@ -338,6 +340,52 @@ export function SettingsPage() {
                 toast.success('已清除用户 Cookie，恢复自动生成模式');
                 setDouyinCookieInput('');
                 load();
+              } catch (e) { toast.error(e.message); }
+            },
+            variant: 'ghost', size: 'sm'
+          }, '清除 Cookie')
+        )
+      )
+    ),
+
+    // Pornhub Cookie 管理
+    h(Card, null,
+      h('h3', { className: 'font-medium text-slate-800 mb-4 flex items-center gap-2' },
+        h(Icon, { name: 'settings', size: 18, className: 'text-red-400' }), 'Pornhub Cookie'
+      ),
+      h('div', { className: 'space-y-3' },
+        h('div', { className: 'text-xs text-slate-500 mb-2' }, '设置 Pornhub 登录 Cookie 可获取更高画质和私有内容。匿名模式也可下载公开视频。'),
+        h('div', null,
+          h('label', { className: 'text-sm text-slate-600' }, '浏览器 Cookie'),
+          h('textarea', {
+            value: phCookieInput,
+            onChange: (e) => setPhCookieInput(e.target.value),
+            placeholder: '从浏览器开发者工具复制 Pornhub 的 Cookie，例如: ss=xxx; bs=xxx; ...',
+            rows: 3,
+            className: 'w-full mt-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-mono'
+          }),
+          h('div', { className: 'text-xs text-slate-400 mt-1' }, '打开 Pornhub 网页版 → F12 → Network → 复制任意请求的 Cookie 请求头')
+        ),
+        h('div', { className: 'flex gap-2' },
+          h(Button, {
+            onClick: async () => {
+              if (!phCookieInput.trim()) { toast.error('请输入 Cookie'); return; }
+              setSavingPhCookie(true);
+              try {
+                await api.savePHCookie(phCookieInput.trim());
+                toast.success('Pornhub Cookie 已保存');
+                setPhCookieInput('');
+              } catch (e) { toast.error(e.message); }
+              finally { setSavingPhCookie(false); }
+            },
+            disabled: savingPhCookie || !phCookieInput.trim(),
+            size: 'sm'
+          }, savingPhCookie ? '保存中...' : '保存 Cookie'),
+          h(Button, {
+            onClick: async () => {
+              try {
+                await api.deletePHCookie();
+                toast.success('Pornhub Cookie 已清除');
               } catch (e) { toast.error(e.message); }
             },
             variant: 'ghost', size: 'sm'

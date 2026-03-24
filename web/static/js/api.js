@@ -159,6 +159,14 @@ export const api = {
   resumeDouyin: () => request('/api/douyin/resume', { method: 'POST' }),
   pauseDouyin: () => request('/api/douyin/pause', { method: 'POST' }),
   resumeBili: () => request('/api/bili/resume', { method: 'POST' }),
+
+  // Pornhub
+  getPHStatus: () => request('/api/ph/status'),
+  resumePH: () => request('/api/ph/resume', { method: 'POST' }),
+  pausePH: () => request('/api/ph/pause', { method: 'POST' }),
+  savePHCookie: (cookie) => request('/api/ph/cookie', { method: 'POST', body: JSON.stringify({ cookie }) }),
+  deletePHCookie: () => request('/api/ph/cookie', { method: 'DELETE' }),
+
   getNotifyStatus: () => request("/api/notify/status"),
 
   globalSearch: (q) => request(`/api/search?q=${encodeURIComponent(q)}`),

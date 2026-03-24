@@ -33,7 +33,8 @@ type Client struct {
 }
 
 // NewClient 创建 Client，自动读取 HTTPS_PROXY / HTTP_PROXY 代理
-func NewClient() *Client {
+// cookie 参数可为空（匿名模式）
+func NewClient(cookie ...string) *Client {
 	transport := &http.Transport{
 		MaxIdleConns:        10,
 		IdleConnTimeout:     90 * time.Second,
@@ -52,12 +53,16 @@ func NewClient() *Client {
 		}
 	}
 
-	return &Client{
+	c := &Client{
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   30 * time.Second,
 		},
 	}
+	if len(cookie) > 0 {
+		c.cookie = strings.TrimSpace(cookie[0])
+	}
+	return c
 }
 
 // SetCookie 设置用户 Cookie

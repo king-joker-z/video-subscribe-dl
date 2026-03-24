@@ -69,8 +69,10 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 			reason := fmt.Sprintf("PH 限流触发: %v", err)
 			s.Pause(reason)
 			s.TriggerCooldown()
-			s.notifier.Send(notify.EventRateLimited, "Pornhub 限流触发",
-				"Pornhub 下载已暂停，请在 Web UI 手动恢复\n错误: "+err.Error())
+			if s.notifier != nil {
+				s.notifier.Send(notify.EventRateLimited, "Pornhub 限流触发",
+					"Pornhub 下载已暂停，请在 Web UI 手动恢复\n错误: "+err.Error())
+			}
 			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 			s.db.IncrementRetryCount(dl.ID, err.Error())
 			return
@@ -102,6 +104,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		title = fmt.Sprintf("pornhub_%s", dl.VideoID)
 	}
 
+	// BuildVideoDir 已内含 "safeTitle [viewkey]" 子目录，视频文件直接放在该目录下
 	videoDir := pornhub.BuildVideoDir(s.downloadDir, srcName, title, dl.VideoID)
 	if err := os.MkdirAll(videoDir, 0755); err != nil {
 		log.Printf("[phscheduler] mkdir failed for %s: %v", videoDir, err)
@@ -111,7 +114,8 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	}
 
 	safeTitle := pornhub.SafePath(title, "pornhub_"+dl.VideoID)
-	videoFilePath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"].mp4")
+	// 文件名：safeTitle [viewkey].mp4，放在 videoDir 内
+	videoFilePath := filepath.Join(videoDir, safeTitle+".mp4")
 
 	// 进度推送
 	progressKey := fmt.Sprintf("pornhub:%d", dl.ID)
@@ -157,7 +161,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 	// 下载封面
 	if !src.SkipPoster && dl.Thumbnail != "" {
-		thumbPath := filepath.Join(videoDir, safeTitle+" ["+dl.VideoID+"]-poster.jpg")
+		thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
 		if thumbErr := downloadThumb(dl.Thumbnail, thumbPath); thumbErr != nil {
 			log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
 		}
@@ -178,10 +182,14 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	}
 
 	s.db.UpdateDownloadStatus(dl.ID, "completed", videoFilePath, fileSize, "")
-	s.db.UpdateDownloadMeta(dl.ID, srcName, title, dl.Thumbnail, dl.Duration)
+	// UpdateDownloadMeta(id, uploader, description, thumbnail, duration)
+	// description 留空，title 已在 downloads.title 字段
+	s.db.UpdateDownloadMeta(dl.ID, srcName, "", dl.Thumbnail, dl.Duration)
 
-	s.notifier.Send(notify.EventDownloadComplete, "Pornhub 视频下载完成: "+title,
-		fmt.Sprintf("博主: %s\n大小: %.1f MB", srcName, float64(fileSize)/(1024*1024)))
+	if s.notifier != nil {
+		s.notifier.Send(notify.EventDownloadComplete, "Pornhub 视频下载完成: "+title,
+			fmt.Sprintf("博主: %s\n大小: %.1f MB", srcName, float64(fileSize)/(1024*1024)))
+	}
 }
 
 // downloadThumb 下载封面图到指定路径

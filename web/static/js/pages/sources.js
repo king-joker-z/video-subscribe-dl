@@ -3,8 +3,8 @@ import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback } = React;
 
-const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集' };
-const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning' };
+const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集', pornhub: 'Pornhub' };
+const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning', pornhub: 'error' };
 
 const qualityOptions = [
   { value: 'best', label: '最高画质' },
@@ -299,7 +299,7 @@ export function SourcesPage({ onNavigate }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [addPlatform, setAddPlatform] = useState("bili"); // "bili" | "douyin"
+  const [addPlatform, setAddPlatform] = useState("bili"); // "bili" | "douyin" | "pornhub"
   const [addBiliTab, setAddBiliTab] = useState("url"); // "url" | "import"
   const [addDouyinTab, setAddDouyinTab] = useState("url"); // "url" | "uniqueid"
   const [newURL, setNewURL] = useState('');
@@ -578,7 +578,7 @@ export function SourcesPage({ onNavigate }) {
     ),
     // 类型筛选
     h('div', { className: 'flex flex-wrap gap-1.5' },
-      [['', '全部'], ['up', 'UP 主'], ['season', '合集'], ['favorite', '收藏夹'], ['watchlater', '稍后再看'], ['series', '系列'], ['douyin', '抖音'], ['douyin_mix', '抖音合集']].map(([val, label]) =>
+      [['', '全部'], ['up', 'UP 主'], ['season', '合集'], ['favorite', '收藏夹'], ['watchlater', '稍后再看'], ['series', '系列'], ['douyin', '抖音'], ['douyin_mix', '抖音合集'], ['pornhub', 'Pornhub']].map(([val, label]) =>
         h('button', {
           key: val,
           onClick: () => handleFilterType(val),
@@ -600,7 +600,8 @@ export function SourcesPage({ onNavigate }) {
         // 平台选择 Tab
         h('div', { className: 'flex gap-1 bg-slate-50 rounded-lg p-1' },
           h('button', { onClick: () => setAddPlatform('bili'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'bili' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '📺 B站'),
-          h('button', { onClick: () => setAddPlatform('douyin'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'douyin' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🎵 抖音')
+          h('button', { onClick: () => setAddPlatform('douyin'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'douyin' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🎵 抖音'),
+          h('button', { onClick: () => setAddPlatform('pornhub'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'pornhub' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🔞 PH')
         ),
 
         // === B站 Tab ===
@@ -741,7 +742,60 @@ export function SourcesPage({ onNavigate }) {
               h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
               h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
             )
-        )  // 关闭抖音大 Tab
+        ),  // 关闭抖音大 Tab
+
+        // === Pornhub Tab ===
+        addPlatform === 'pornhub' && h('div', { className: 'space-y-4' },
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-600 mb-1' }, 'Pornhub 博主链接'),
+            h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '支持博主主页：如 https://www.pornhub.com/model/xxx 或 /pornstar/xxx'),
+            h('div', { className: 'flex gap-2' },
+              h('input', {
+                type: 'text', value: newURL,
+                placeholder: 'https://www.pornhub.com/model/xxx',
+                onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+                onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+                className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+              }),
+              h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
+            )
+          ),
+          parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
+            h('div', { className: 'flex items-center gap-2' },
+              h(Badge, { variant: 'error' }, 'Pornhub'),
+              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
+              h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+            ),
+            h('div', { className: 'flex items-center justify-between' },
+              h('label', { className: 'text-sm text-slate-600' }, '启用'),
+              h('button', {
+                onClick: () => updateAddForm('enabled', !addForm.enabled),
+                className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
+              }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+            ),
+            h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
+              h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 3600), min: 600, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+            ),
+            h('div', { className: 'grid grid-cols-2 gap-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
+                h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
+              ),
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
+                h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
+              )
+            )
+          ),
+          h('div', { className: 'flex justify-end gap-2 pt-2' },
+            h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+          )
+        )  // 关闭 Pornhub 大 Tab
       )
     ),
     // 列表
