@@ -554,6 +554,26 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 	// 提取 #player 区域的 script 内容
 	scriptContent, err := extractPlayerScript(string(body))
 	if err != nil {
+		// 打印页面 title 帮助诊断（登录墙/删除/地区封锁）
+		if doc, parseErr := html.Parse(strings.NewReader(string(body))); parseErr == nil {
+			var titleText string
+			var findT func(*html.Node)
+			findT = func(n *html.Node) {
+				if titleText != "" {
+					return
+				}
+				if n.Type == html.ElementNode && n.Data == "title" && n.FirstChild != nil {
+					titleText = n.FirstChild.Data
+				}
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					findT(c)
+				}
+			}
+			findT(doc)
+			if titleText != "" {
+				log.Printf("[pornhub·client] GetVideoURL failed, page title: %q", titleText)
+			}
+		}
 		return "", fmt.Errorf("%w: %v", ErrParseFailed, err)
 	}
 
