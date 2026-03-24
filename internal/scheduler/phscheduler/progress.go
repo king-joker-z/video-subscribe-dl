@@ -133,7 +133,7 @@ func downloadPHFileWithProgress(ctx context.Context, fileURL, destPath string, d
 		if n > 0 {
 			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
 				f.Close()
-				os.Remove(tmpPath)
+				// 写入失败时保留 .tmp 文件，下次可以续传
 				return 0, fmt.Errorf("write: %w", writeErr)
 			}
 			written += int64(n)
@@ -162,14 +162,16 @@ func downloadPHFileWithProgress(ctx context.Context, fileURL, destPath string, d
 		}
 		if readErr != nil {
 			f.Close()
-			os.Remove(tmpPath)
+			// 读取中断时保留 .tmp 文件，下次可以续传
 			return 0, fmt.Errorf("read: %w", readErr)
 		}
 	}
 
 	f.Close()
 
-	if written == 0 || (written == startByte) {
+	// written 是从 startByte 开始累加的总字节数（含续传部分）
+	// 如果 written == startByte 说明本次实际下载了 0 字节（服务器返回空体）
+	if written <= startByte && written == 0 {
 		os.Remove(tmpPath)
 		return 0, fmt.Errorf("downloaded 0 bytes")
 	}

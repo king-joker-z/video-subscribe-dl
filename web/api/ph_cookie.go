@@ -43,18 +43,6 @@ type phSetCookieReq struct {
 	Cookie string `json:"cookie"`
 }
 
-// HandleCookie POST /api/ph/cookie — 保存 PH Cookie
-func (h *PHCookieHandler) HandleCookie(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "POST":
-		h.handleSetCookie(w, r)
-	case "DELETE":
-		h.handleDeleteCookie(w, r)
-	default:
-		apiError(w, CodeMethodNotAllow, "method not allowed")
-	}
-}
-
 // handleSetCookie 保存用户提供的 PH Cookie
 func (h *PHCookieHandler) handleSetCookie(w http.ResponseWriter, r *http.Request) {
 	var req phSetCookieReq

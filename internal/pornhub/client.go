@@ -143,7 +143,10 @@ func ExtractViewKey(videoURL string) string {
 
 // GetModelInfo 获取博主基本信息（名称）
 func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
-	// 规范化：去除末尾斜杠和 /videos 后缀
+	// 规范化：去掉 query string、末尾斜杠、/videos 后缀
+	if idx := strings.IndexByte(modelURL, '?'); idx != -1 {
+		modelURL = modelURL[:idx]
+	}
 	cleanURL := strings.TrimSuffix(strings.TrimSuffix(strings.TrimRight(modelURL, "/"), "/videos"), "/")
 
 	body, status, err := c.get(cleanURL)
@@ -216,7 +219,10 @@ func extractModelName(doc *html.Node, modelURL string) string {
 
 // GetModelVideos 获取博主视频列表（全量翻页）
 func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
-	// 规范化：去除末尾斜杠和 /videos 后缀，再加回
+	// 规范化：去掉 query string、末尾斜杠、/videos 后缀
+	if idx := strings.IndexByte(modelURL, '?'); idx != -1 {
+		modelURL = modelURL[:idx]
+	}
 	baseURL := strings.TrimSuffix(strings.TrimSuffix(strings.TrimRight(modelURL, "/"), "/videos"), "/")
 	videosURL := baseURL + "/videos"
 
@@ -449,7 +455,20 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 	}
 
 	// 构造并执行 JS
-	js := "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
+	// 注入最小 DOM/BOM stub，防止页面 JS 中 document/window/XMLHttpRequest 等引用导致 ReferenceError
+	domStub := `
+var window = this;
+var document = { getElementById: function(){ return null; }, querySelector: function(){ return null; }, querySelectorAll: function(){ return []; }, createElement: function(){ return {}; }, cookie: "" };
+var location = { href: "", hostname: "www.pornhub.com" };
+var navigator = { userAgent: "", language: "en-US" };
+var XMLHttpRequest = function(){};
+var console = { log: function(){}, warn: function(){}, error: function(){} };
+var setTimeout = function(){};
+var clearTimeout = function(){};
+var setInterval = function(){};
+var clearInterval = function(){};
+`
+	js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
 	vm := goja.New()
 	if _, err := vm.RunString(js); err != nil {
 		return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, err)

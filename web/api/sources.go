@@ -674,20 +674,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. UP 主主页: space.bilibili.com/xxx
-	mid, err := bilibili.ExtractMID(rawURL)
-	if err == nil && mid > 0 {
-		result["type"] = "up"
-		result["mid"] = mid
-		if info, err := client.GetUPInfo(mid); err == nil && info.Name != "" {
-			result["name"] = info.Name
-			result["uploader"] = info.Name
-		}
-		apiOK(w, result)
-		return
-	}
-
-	// Pornhub 博主主页
+	// 5. Pornhub 博主主页（放在 B站 ExtractMID 之前，避免被误匹配）
 	if isPornhubURL(rawURL) {
 		result["type"] = "pornhub"
 		result["url"] = rawURL
@@ -699,6 +686,19 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[source·parse] Pornhub model name: %s", info.Name)
 		} else if err != nil {
 			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
+		}
+		apiOK(w, result)
+		return
+	}
+
+	// 6. UP 主主页: space.bilibili.com/xxx
+	mid, err := bilibili.ExtractMID(rawURL)
+	if err == nil && mid > 0 {
+		result["type"] = "up"
+		result["mid"] = mid
+		if info, err := client.GetUPInfo(mid); err == nil && info.Name != "" {
+			result["name"] = info.Name
+			result["uploader"] = info.Name
 		}
 		apiOK(w, result)
 		return
