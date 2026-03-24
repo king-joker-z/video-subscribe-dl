@@ -287,8 +287,11 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 	var actors []actor
 	if meta.UploaderName != "" {
 		role := "UP主"
-		if platform == "douyin" {
+		switch platform {
+		case "douyin":
 			role = "作者"
+		case "pornhub":
+			role = "P主"
 		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,
@@ -393,8 +396,11 @@ func GenerateTVShowNFO(meta *TVShowMeta, dir string) error {
 	var actors []actor
 	if meta.UploaderName != "" {
 		role := "UP主"
-		if platform == "douyin" {
+		switch platform {
+		case "douyin":
 			role = "作者"
+		case "pornhub":
+			role = "P主"
 		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,

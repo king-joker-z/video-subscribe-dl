@@ -428,6 +428,8 @@ func (s *Scheduler) CheckOneSource(sourceID int64) {
 		defer s.wg.Done()
 		s.checkSource(*src)
 		log.Printf("Manual sync completed for source %d: %s", src.ID, src.Name)
+		// 手动触发单个源检查完后，立即处理新增的 pending 记录
+		s.ProcessAllPending()
 	}()
 }
 
@@ -450,6 +452,8 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		go func() {
 			defer s.wg.Done()
 			s.ph.FullScanPHModel(*src)
+			// 扫描完后立即触发 pending 下载，不等下次定时调度
+			s.ProcessAllPending()
 		}()
 	default:
 		s.bili.FullScanSource(sourceID)
