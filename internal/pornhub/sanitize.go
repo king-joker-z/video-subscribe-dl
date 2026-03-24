@@ -74,10 +74,10 @@ func SafePath(name, fallback string) string {
 	if clean == "" {
 		clean = "unknown"
 	}
-	// 截断至 80 字符
+	// 截断至 80 字符，截断后再次 TrimSpace（避免末尾空格）
 	runes := []rune(clean)
 	if len(runes) > 80 {
-		clean = string(runes[:80])
+		clean = strings.TrimSpace(string(runes[:80]))
 	}
 	return clean
 }
