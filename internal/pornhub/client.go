@@ -405,8 +405,16 @@ func extractMaxPage(doc *html.Node) int {
 }
 
 // extractVideos 从文档中解析视频列表
-// 选择器：.videoUList .videoPreviewBg > a 或 li.pcVideoListItem
+// 优先在主内容区（#videoInVideoList / .pcVideoListSection / #modelsVideoSection 等）查找
+// 避免抓到侧边栏推荐位里其他博主的视频
 func extractVideos(doc *html.Node) []Video {
+	// 1. 先找主内容区容器节点
+	mainContainer := findMainVideoContainer(doc)
+	root := doc
+	if mainContainer != nil {
+		root = mainContainer
+	}
+
 	var videos []Video
 	seen := map[string]bool{}
 
@@ -427,8 +435,47 @@ func extractVideos(doc *html.Node) []Video {
 			walk(c)
 		}
 	}
-	walk(doc)
+	walk(root)
 	return videos
+}
+
+// findMainVideoContainer 在文档中找到主内容区的视频列表容器节点
+// Pornhub 博主页面主内容区 id 通常含 videoInVideoList / modelsVideoSection / channelVideoSection 等
+func findMainVideoContainer(doc *html.Node) *html.Node {
+	var found *html.Node
+	mainIDs := []string{
+		"videoInVideoList",
+		"modelsVideoSection",
+		"channelVideoSection",
+		"pcVideoListSection",
+		"pornstarsVideoSection",
+		"usersVideoSection",
+	}
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if found != nil {
+			return
+		}
+		if n.Type == html.ElementNode {
+			id := getAttr(n, "id")
+			for _, mainID := range mainIDs {
+				if strings.EqualFold(id, mainID) {
+					found = n
+					return
+				}
+			}
+			// 也匹配 class 包含 pcVideoListSection 的节点
+			if hasClass(n, "pcVideoListSection") || hasClass(n, "videoUList") {
+				found = n
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return found
 }
 
 // extractVideoFromContainer 从视频容器节点中提取 Video 信息
