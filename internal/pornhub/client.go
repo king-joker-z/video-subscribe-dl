@@ -500,39 +500,28 @@ var clearInterval = function(){};
 		return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 	}
 
-	// DEBUG: dump mediaDefinitions 结构（调查 URL 格式，后续可移除）
-	if len(fv.MediaDefinitions) > 0 {
-		if dbg, _ := json.Marshal(fv.MediaDefinitions); dbg != nil {
-			log.Printf("[pornhub·debug] mediaDefinitions (%d entries): %s", len(fv.MediaDefinitions), string(dbg))
-		}
+	// Pornhub mediaDefinitions 实际结构（2025+）：
+	// - 多条 format=hls，videoUrl 是带时效签名的 .m3u8 直链（240p/480p/720p/1080p）
+	// - 一条 format=mp4，videoUrl 是 video/get_media 间接 API（需 Cookie，quality=[]）
+	// 策略：优先取 HLS 最高画质 m3u8；fallback 再尝试 mp4 间接 API
+	if u := c.extractBestHLSURL(fv.MediaDefinitions); u != "" {
+		return u, nil
 	}
 
-	// 从 mediaDefinitions 中提取最高画质 MP4 直链
-	// Pornhub 有两种结构：
-	// 1. 新版（直接）：每条 mediaDefinition 本身就是可播放的 {videoUrl, quality, format}，format="mp4"
-	// 2. 旧版（间接）：format="mp4" 的条目 videoUrl 是一个 JSON API 地址，
-	//    GET 后返回 []{"videoUrl","quality","format"} 数组
-	bestURL := c.extractBestMP4URL(fv.MediaDefinitions)
-	if bestURL != "" {
-		return bestURL, nil
-	}
-
-	// fallback：找第一个 format=mp4 的间接 URL，再 GET 一次
+	// fallback：format=mp4 间接 API（video/get_media，需要已设置 Cookie）
 	for _, entry := range fv.MediaDefinitions {
-		if entry.Format == "mp4" && entry.VideoURL != "" &&
-			!strings.Contains(entry.VideoURL, ".mp4") {
+		if entry.Format == "mp4" && entry.VideoURL != "" {
 			qualityBody, qStatus, qErr := c.getJSON(entry.VideoURL)
 			if qErr != nil || qStatus != 200 {
-				log.Printf("[pornhub·client] quality list failed (status=%d): %v", qStatus, qErr)
+				log.Printf("[pornhub·client] mp4 indirect API failed (status=%d): %v", qStatus, qErr)
 				continue
 			}
 			var qualities []VideoQuality
 			if err := json.Unmarshal(qualityBody, &qualities); err != nil {
-				log.Printf("[pornhub·client] unmarshal quality list failed: %v", err)
+				log.Printf("[pornhub·client] unmarshal mp4 quality list failed: %v", err)
 				continue
 			}
 			if len(qualities) > 0 {
-				// 取最后一条（最高画质）
 				if u := qualities[len(qualities)-1].VideoURL; u != "" {
 					return u, nil
 				}
@@ -540,31 +529,31 @@ var clearInterval = function(){};
 		}
 	}
 
-	return "", fmt.Errorf("%w: could not find mp4 url in mediaDefinitions (count=%d)", ErrNoVideoURL, len(fv.MediaDefinitions))
+	return "", fmt.Errorf("%w: could not find playable url in mediaDefinitions (count=%d)", ErrNoVideoURL, len(fv.MediaDefinitions))
 }
 
-// extractBestMP4URL 从 mediaDefinitions 中直接提取最高画质的 MP4 URL（新版直接格式）
-// 收集所有 format=mp4 且 videoUrl 看起来是直接 MP4 的条目，取最后一条（最高画质）
-func (c *Client) extractBestMP4URL(defs []MediaDefinition) string {
-	var candidates []string
+// extractBestHLSURL 从 mediaDefinitions 中取最高画质的 HLS m3u8 URL
+// quality 字段是数字字符串（"240","480","720","1080"），取数值最大的
+func (c *Client) extractBestHLSURL(defs []MediaDefinition) string {
+	bestQ := -1
+	bestURL := ""
 	for _, d := range defs {
-		if d.Format != "mp4" {
+		if d.Format != "hls" || d.VideoURL == "" {
 			continue
 		}
-		u := d.VideoURL
-		if u == "" {
-			continue
-		}
-		// 直接 MP4：URL 含 .mp4 或看起来是视频 CDN 地址
-		if strings.Contains(u, ".mp4") || strings.Contains(u, "/videos/") {
-			candidates = append(candidates, u)
+		// quality 是 "720" 这类数字字符串（RawMessage，去掉引号解析）
+		qStr := strings.Trim(string(d.Quality), `"`)
+		q := 0
+		fmt.Sscanf(qStr, "%d", &q)
+		if q > bestQ {
+			bestQ = q
+			bestURL = d.VideoURL
 		}
 	}
-	if len(candidates) == 0 {
-		return ""
-	}
-	return candidates[len(candidates)-1] // 最后一条 = 最高画质
+	return bestURL
 }
+
+
 
 // extractPlayerScript 从 HTML 中提取 #player 下的 script 内容
 func extractPlayerScript(htmlContent string) (string, error) {

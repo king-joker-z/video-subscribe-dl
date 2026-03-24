@@ -1,12 +1,15 @@
 package phscheduler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"video-subscribe-dl/internal/db"
@@ -151,11 +154,17 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		}
 	}
 
-	// 下载（最多重试 3 次，支持断点续传）
+	// 下载（最多重试 3 次）
+	// HLS m3u8：用 ffmpeg 转存；普通 HTTP：Range 断点续传
 	var fileSize int64
+	isHLS := strings.Contains(mp4URL, ".m3u8")
 	for attempt := 1; attempt <= 3; attempt++ {
 		ctx := s.rootCtx
-		fileSize, err = downloadPHFileWithProgress(ctx, mp4URL, videoFilePath, dl.ID, title, pCb)
+		if isHLS {
+			fileSize, err = downloadHLSWithFFmpeg(ctx, mp4URL, videoFilePath, dl.ID, title, pCb)
+		} else {
+			fileSize, err = downloadPHFileWithProgress(ctx, mp4URL, videoFilePath, dl.ID, title, pCb)
+		}
 		if err == nil {
 			break
 		}
@@ -239,4 +248,49 @@ func downloadThumb(thumbURL, destPath string) error {
 
 	_, err = io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)) // 封面最大 20 MB
 	return err
+}
+
+// downloadHLSWithFFmpeg 使用 ffmpeg 将 HLS m3u8 流转存为 mp4 文件
+// ffmpeg 直接从 CDN 拉取 TS 分片并 mux 成 mp4，无需断点续传（分片本身保证完整性）
+func downloadHLSWithFFmpeg(ctx context.Context, m3u8URL, destPath string, dlID int64, title string, cb phProgressCallback) (int64, error) {
+	// 临时文件，避免写一半的文件被误用
+	tmpPath := destPath + ".tmp"
+
+	// 如果之前的 .tmp 存在先清理（HLS 不支持断点续传，重来）
+	_ = os.Remove(tmpPath)
+
+	args := []string{
+		"-y",                  // 覆盖输出
+		"-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		"-headers", "Referer: https://www.pornhub.com/\r\n",
+		"-i", m3u8URL,
+		"-c", "copy",          // 流复制，不转码
+		"-bsf:a", "aac_adtstoasc", // ADTS → ASC（mp4 容器要求）
+		"-movflags", "+faststart",
+		tmpPath,
+	}
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+
+	// 通知前端"开始下载"
+	cb(ProgressInfo{Status: "downloading", Downloaded: 0})
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return 0, fmt.Errorf("ffmpeg failed: %v\n%s", err, string(out))
+	}
+
+	// 重命名 tmp → 最终路径
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return 0, fmt.Errorf("rename tmp failed: %v", err)
+	}
+
+	fi, _ := os.Stat(destPath)
+	var size int64
+	if fi != nil {
+		size = fi.Size()
+	}
+	cb(ProgressInfo{Status: "done", Downloaded: size})
+	return size, nil
 }
