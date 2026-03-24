@@ -67,15 +67,17 @@ export function SettingsPage() {
   const [savingDouyinCookie, setSavingDouyinCookie] = useState(false);
   const [phCookieInput, setPhCookieInput] = useState('');
   const [savingPhCookie, setSavingPhCookie] = useState(false);
+  const [phStatus, setPhStatus] = useState(null);
   const [templatePreview, setTemplatePreview] = useState('');
   const previewTimer = React.useRef(null);
 
   const load = useCallback(async () => {
     try {
-      const [sRes, cRes, dyRes] = await Promise.all([api.getSettings(), api.getCredential(), api.getDouyinCookieStatus()]);
+      const [sRes, cRes, dyRes, phRes] = await Promise.all([api.getSettings(), api.getCredential(), api.getDouyinCookieStatus(), api.getPHStatus()]);
       setSettings(sRes.data || {});
       setCredential(cRes.data || {});
       setDouyinCookieStatus(dyRes.data || null);
+      setPhStatus(phRes.data || null);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, []);
@@ -354,6 +356,9 @@ export function SettingsPage() {
         h(Icon, { name: 'settings', size: 18, className: 'text-red-400' }), 'Pornhub Cookie'
       ),
       h('div', { className: 'space-y-3' },
+        phStatus && h('div', { className: cn('text-xs px-3 py-2 rounded-lg mb-2', phStatus.cookie_valid ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700') },
+          phStatus.cookie_valid ? '✓ Cookie 有效' : `⚠ ${phStatus.cookie_msg || '未配置 Cookie，匿名模式'}`
+        ),
         h('div', { className: 'text-xs text-slate-500 mb-2' }, '设置 Pornhub 登录 Cookie 可获取更高画质和私有内容。匿名模式也可下载公开视频。'),
         h('div', null,
           h('label', { className: 'text-sm text-slate-600' }, '浏览器 Cookie'),
@@ -375,6 +380,7 @@ export function SettingsPage() {
                 await api.savePHCookie(phCookieInput.trim());
                 toast.success('Pornhub Cookie 已保存');
                 setPhCookieInput('');
+                load();
               } catch (e) { toast.error(e.message); }
               finally { setSavingPhCookie(false); }
             },
@@ -386,6 +392,7 @@ export function SettingsPage() {
               try {
                 await api.deletePHCookie();
                 toast.success('Pornhub Cookie 已清除');
+                load();
               } catch (e) { toast.error(e.message); }
             },
             variant: 'ghost', size: 'sm'

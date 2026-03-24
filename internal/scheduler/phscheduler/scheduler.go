@@ -162,6 +162,8 @@ func (s *PHScheduler) Stop() {
 	if s.wg != nil {
 		s.wg.Wait()
 	}
+	// 等所有 worker 退出后再关 eventCh，让上游事件转发 goroutine 正常退出
+	close(s.eventCh)
 }
 
 // ─── 进度推送 ─────────────────────────────────────────────────────────────────

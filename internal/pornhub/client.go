@@ -254,6 +254,11 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 	if maxPage < 1 {
 		maxPage = 1
 	}
+	const maxPageLimit = 50 // 防止恶意/异常页面返回超大翻页数
+	if maxPage > maxPageLimit {
+		log.Printf("[pornhub·client] maxPage %d > limit %d, capping", maxPage, maxPageLimit)
+		maxPage = maxPageLimit
+	}
 
 	var allVideos []Video
 
