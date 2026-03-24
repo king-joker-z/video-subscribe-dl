@@ -601,32 +601,43 @@ var clearInterval = function(){};
 	}
 
 	// Pornhub mediaDefinitions 实际结构（2025+）：
-	// - 多条 format=hls，videoUrl 是带时效签名的 .m3u8 直链（240p/480p/720p/1080p）
-	// - 一条 format=mp4，videoUrl 是 video/get_media 间接 API（需 Cookie，quality=[]）
-	// 策略：优先取 HLS 最高画质 m3u8；fallback 再尝试 mp4 间接 API
-	if u := c.extractBestHLSURL(fv.MediaDefinitions); u != "" {
-		return u, nil
-	}
+	// - 多条 format=hls：带时效签名的 .m3u8 直链（240p/480p/720p/1080p）
+	// - 一条 format=mp4：video/get_media 间接 API，带登录 Cookie 时返回真实 MP4 直链
+	//
+	// 优先级策略：
+	// 1. 有 Cookie → 先走 video/get_media 拿真实 MP4（画质最全，可能有 2K/4K）
+	// 2. 无 Cookie 或 video/get_media 失败 → fallback 到 HLS 最高画质 m3u8
+	// 3. HLS 也没有 → 报错
 
-	// fallback：format=mp4 间接 API（video/get_media，需要已设置 Cookie）
-	for _, entry := range fv.MediaDefinitions {
-		if entry.Format == "mp4" && entry.VideoURL != "" {
-			qualityBody, qStatus, qErr := c.getJSON(entry.VideoURL)
-			if qErr != nil || qStatus != 200 {
-				log.Printf("[pornhub·client] mp4 indirect API failed (status=%d): %v", qStatus, qErr)
-				continue
-			}
-			var qualities []VideoQuality
-			if err := json.Unmarshal(qualityBody, &qualities); err != nil {
-				log.Printf("[pornhub·client] unmarshal mp4 quality list failed: %v", err)
-				continue
-			}
-			if len(qualities) > 0 {
-				if u := qualities[len(qualities)-1].VideoURL; u != "" {
-					return u, nil
+	// Step 1: 有 Cookie 时尝试 video/get_media
+	if c.cookie != "" {
+		for _, entry := range fv.MediaDefinitions {
+			if entry.Format == "mp4" && entry.VideoURL != "" {
+				qualityBody, qStatus, qErr := c.getJSON(entry.VideoURL)
+				if qErr != nil || qStatus != 200 {
+					log.Printf("[pornhub·client] video/get_media failed (status=%d): %v，fallback to HLS", qStatus, qErr)
+					break
 				}
+				var qualities []VideoQuality
+				if err := json.Unmarshal(qualityBody, &qualities); err != nil {
+					log.Printf("[pornhub·client] unmarshal video/get_media failed: %v，fallback to HLS", err)
+					break
+				}
+				if len(qualities) > 0 {
+					if u := qualities[len(qualities)-1].VideoURL; u != "" {
+						log.Printf("[pornhub·client] using MP4 via video/get_media (quality count=%d)", len(qualities))
+						return u, nil
+					}
+				}
+				break
 			}
 		}
+	}
+
+	// Step 2: fallback 到 HLS 最高画质
+	if u := c.extractBestHLSURL(fv.MediaDefinitions); u != "" {
+		log.Printf("[pornhub·client] using HLS fallback")
+		return u, nil
 	}
 
 	return "", fmt.Errorf("%w: could not find playable url in mediaDefinitions (count=%d)", ErrNoVideoURL, len(fv.MediaDefinitions))
