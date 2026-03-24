@@ -487,7 +487,8 @@ func extractVideoFromContainer(n *html.Node) Video {
 	findLink = func(child *html.Node) {
 		if child.Type == html.ElementNode && child.Data == "a" {
 			href := getAttr(child, "href")
-			if strings.Contains(href, "viewkey=") {
+			// 只处理 /view_video.php?viewkey= 链接，过滤图片集(/photo/)、GIF(/gif/)等非视频内容
+			if (strings.Contains(href, "/view_video.php") || strings.Contains(href, "view_video.php")) && strings.Contains(href, "viewkey=") {
 				viewKey := ExtractViewKey(href)
 				if viewKey != "" && video.ViewKey == "" {
 					video.ViewKey = viewKey
