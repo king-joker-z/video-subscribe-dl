@@ -169,9 +169,9 @@ func downloadPHFileWithProgress(ctx context.Context, fileURL, destPath string, d
 
 	f.Close()
 
-	// written 是从 startByte 开始累加的总字节数（含续传部分）
-	// 如果 written == startByte 说明本次实际下载了 0 字节（服务器返回空体）
-	if written <= startByte && written == 0 {
+	// written 从 startByte 开始累加；实际本次新增字节 = written - startByte
+	// 若本次新增 0 字节（服务器返回空体），视为失败
+	if written <= startByte {
 		os.Remove(tmpPath)
 		return 0, fmt.Errorf("downloaded 0 bytes")
 	}

@@ -21,6 +21,14 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// 检查 context 是否已取消（Stop 被调用）
+	select {
+	case <-s.rootCtx.Done():
+		log.Printf("[phscheduler] context cancelled, skip download %s", dl.VideoID)
+		return
+	default:
+	}
+
 	s.downloadLimiter.Acquire()
 
 	src, err := s.db.GetSource(dl.SourceID)
@@ -35,8 +43,8 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 	client := s.newClient()
 	defer client.Close()
-	if s.cookie != "" {
-		client.SetCookie(s.cookie)
+	if s.getCookie() != "" {
+		client.SetCookie(s.getCookie())
 	}
 
 	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")

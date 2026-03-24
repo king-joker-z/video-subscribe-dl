@@ -43,8 +43,9 @@ type PHScheduler struct {
 	downloadDir string
 	notifier    *notify.Notifier
 
-	// 当前 Cookie（内存）
-	cookie string
+	// 当前 Cookie（内存），cookieMu 保护并发读写
+	cookieMu sync.RWMutex
+	cookie   string
 
 	// 客户端工厂
 	newClient func() *pornhub.Client

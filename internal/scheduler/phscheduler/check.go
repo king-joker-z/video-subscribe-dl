@@ -28,8 +28,8 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 	defer client.Close()
 
 	// 设置 Cookie
-	if s.cookie != "" {
-		client.SetCookie(s.cookie)
+	if s.getCookie() != "" {
+		client.SetCookie(s.getCookie())
 	}
 
 	// 首次扫描时获取博主详情更新名称
@@ -183,8 +183,8 @@ func (s *PHScheduler) FullScanPHModel(src db.Source) {
 	client := s.newClient()
 	defer client.Close()
 
-	if s.cookie != "" {
-		client.SetCookie(s.cookie)
+	if s.getCookie() != "" {
+		client.SetCookie(s.getCookie())
 	}
 
 	uploaderName := src.Name

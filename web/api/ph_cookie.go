@@ -100,17 +100,4 @@ func (h *PHCookieHandler) handleDeleteCookie(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// HandleCookieStatus GET /api/ph/cookie/status — 查询当前 PH Cookie 状态
-func (h *PHCookieHandler) HandleCookieStatus(w http.ResponseWriter, r *http.Request) {
-	if !MethodGuard("GET", w, r) {
-		return
-	}
 
-	savedCookie, _ := h.db.GetSetting("ph_cookie")
-	hasCookie := strings.TrimSpace(savedCookie) != ""
-
-	apiOK(w, map[string]interface{}{
-		"has_cookie": hasCookie,
-		"mode":       map[bool]string{true: "user", false: "anonymous"}[hasCookie],
-	})
-}

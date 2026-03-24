@@ -16,6 +16,9 @@ import (
 	"golang.org/x/net/html"
 )
 
+// phMaxHTMLBodySize HTML 页面最大读取大小（10 MB），防止无限流撑爆内存
+const phMaxHTMLBodySize = 10 * 1024 * 1024
+
 const (
 	phBaseURL   = "https://www.pornhub.com"
 	phUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -85,7 +88,8 @@ func (c *Client) get(rawURL string) ([]byte, int, error) {
 	req.Header.Set("User-Agent", phUserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	// 不手动设置 Accept-Encoding，让 Go http.Client 自动处理 gzip 解压
+	// 手动设置后 Go 不会自动解压，会拿到原始压缩数据
 	req.Header.Set("Connection", "keep-alive")
 	if c.cookie != "" {
 		req.Header.Set("Cookie", c.cookie)
@@ -97,7 +101,7 @@ func (c *Client) get(rawURL string) ([]byte, int, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, phMaxHTMLBodySize))
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
 	}
@@ -124,7 +128,7 @@ func (c *Client) getJSON(rawURL string) ([]byte, int, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024)) // JSON 响应最大 1 MB
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
 	}
@@ -470,6 +474,11 @@ var clearInterval = function(){};
 `
 	js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
 	vm := goja.New()
+	// 设置 10 秒超时，防止页面 JS 含死循环导致 goroutine 永久阻塞
+	timer := time.AfterFunc(10*time.Second, func() {
+		vm.Interrupt("js eval timeout")
+	})
+	defer timer.Stop()
 	if _, err := vm.RunString(js); err != nil {
 		return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, err)
 	}
