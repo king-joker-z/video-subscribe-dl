@@ -297,15 +297,9 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 		return nil, fmt.Errorf("%w: %v", ErrParseFailed, err)
 	}
 
-	maxPage := extractMaxPage(doc)
-	if maxPage < 1 {
-		maxPage = 1
-	}
-	const maxPageLimit = 50 // 防止恶意/异常页面返回超大翻页数
-	if maxPage > maxPageLimit {
-		log.Printf("[pornhub·client] maxPage %d > limit %d, capping", maxPage, maxPageLimit)
-		maxPage = maxPageLimit
-	}
+	// 提示页数（仅用于日志参考，不作为翻页上限）
+	hintMaxPage := extractMaxPage(doc)
+	const maxPageHardLimit = 1000 // 防止死循环的兜底上限
 
 	var allVideos []Video
 
@@ -313,10 +307,11 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 	videos := extractVideos(doc)
 	allVideos = append(allVideos, videos...)
 
-	log.Printf("[pornhub·client] GetModelVideos: %s, 共 %d 页", modelURL, maxPage)
+	log.Printf("[pornhub·client] GetModelVideos: %s, 分页提示=%d页（实际采用探测翻页）", modelURL, hintMaxPage)
 
-	// 翻页
-	for page := 2; page <= maxPage; page++ {
+	// 探测翻页：不依赖 extractMaxPage，只要当页有视频就继续翻
+	// 避免 Pornhub 分页 UI 只展示临近页码导致总页数被低估
+	for page := 2; page <= maxPageHardLimit; page++ {
 		pageURL := fmt.Sprintf("%s?page=%d", videosURL, page)
 		pageBody, pageStatus, pageErr := c.get(pageURL)
 		if pageErr != nil {
@@ -328,7 +323,7 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 			break
 		}
 		if pageStatus != 200 {
-			log.Printf("[pornhub·client] 第 %d 页返回 HTTP %d", page, pageStatus)
+			log.Printf("[pornhub·client] 第 %d 页返回 HTTP %d，停止翻页", page, pageStatus)
 			break
 		}
 
@@ -340,10 +335,11 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 
 		pageVideos := extractVideos(pageDoc)
 		if len(pageVideos) == 0 {
-			// 空页，停止翻页
+			log.Printf("[pornhub·client] 第 %d 页无视频，翻页结束，共 %d 条", page, len(allVideos))
 			break
 		}
 		allVideos = append(allVideos, pageVideos...)
+		log.Printf("[pornhub·client] 第 %d 页获取 %d 条，累计 %d 条", page, len(pageVideos), len(allVideos))
 
 		// 页间延迟，避免被限流
 		time.Sleep(2 * time.Second)

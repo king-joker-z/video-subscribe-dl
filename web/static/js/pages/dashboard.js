@@ -15,16 +15,27 @@ export function DashboardPage({ onNavigate }) {
   const [douyinCookieValid, setDouyinCookieValid] = useState(true);
   const [douyinCookieMsg, setDouyinCookieMsg] = useState('');
   const [douyinPaused, setDouyinPaused] = useState(false);
+  const [phPaused, setPhPaused] = useState(false);
+  const [phPausedReason, setPhPausedReason] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [dash, taskRes, douyinStatus] = await Promise.all([api.getDashboard(), api.getTaskStatus(), api.getDouyinStatus().catch(() => null)]);
+      const [dash, taskRes, douyinStatus, phStatus] = await Promise.all([
+        api.getDashboard(),
+        api.getTaskStatus(),
+        api.getDouyinStatus().catch(() => null),
+        api.getPHStatus().catch(() => null),
+      ]);
       setData(dash.data);
       setTask(taskRes.data);
       if (douyinStatus?.data) {
         setDouyinCookieValid(douyinStatus.data.cookie_valid !== false);
         setDouyinCookieMsg(douyinStatus.data.cookie_msg || '');
         setDouyinPaused(!!douyinStatus.data.paused);
+      }
+      if (phStatus?.data) {
+        setPhPaused(!!phStatus.data.paused);
+        setPhPausedReason(phStatus.data.reason || '');
       }
       // 同步风控冷却倒计时
       if (dash.data?.cooldown?.active) {
@@ -148,6 +159,28 @@ export function DashboardPage({ onNavigate }) {
       ),
       h(Button, { onClick: () => onNavigate && onNavigate('settings'), variant: 'secondary', size: 'sm' }, '去设置')
     ),
+    // PH 暂停横幅
+    phPaused && h('div', { className: 'bg-purple-50 border border-purple-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
+      h('div', { className: 'text-purple-500 text-xl' }, '⏸'),
+      h('div', { className: 'flex-1' },
+        h('div', { className: 'text-purple-700 font-medium' }, 'PH 下载已暂停'),
+        h('div', { className: 'text-purple-600/70 text-sm' }, phPausedReason || '新视频扫描正常进行，下载任务将在恢复后处理')
+      ),
+      h(Button, {
+        size: 'sm',
+        variant: 'secondary',
+        onClick: async () => {
+          try {
+            await api.resumePH();
+            setPhPaused(false);
+            setPhPausedReason('');
+            toast('PH 下载已恢复', 'success');
+          } catch (e) {
+            toast('恢复失败: ' + e.message, 'error');
+          }
+        }
+      }, '恢复下载')
+    ),
     // 抖音手动暂停横幅
     douyinPaused && h('div', { className: 'bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
       h('div', { className: 'text-yellow-500 text-xl' }, '⏸'),
@@ -251,7 +284,10 @@ export function DashboardPage({ onNavigate }) {
             : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站'),
           douyinPaused
             ? h(Button, { onClick: () => api.resumeDouyin().then(() => { toast.success('抖音已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复抖音')
-            : h(Button, { onClick: () => api.pauseDouyin().then(() => { toast.success('抖音已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停抖音')
+            : h(Button, { onClick: () => api.pauseDouyin().then(() => { toast.success('抖音已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停抖音'),
+          phPaused
+            ? h(Button, { onClick: () => api.resumePH().then(() => { setPhPaused(false); setPhPausedReason(''); toast.success('PH 已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 PH')
+            : h(Button, { onClick: () => api.pausePH().then(() => { toast.success('PH 已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 PH')
         )
       ),
 
