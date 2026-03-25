@@ -549,7 +549,7 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
       )
     ),
     // 信息
-    h('div', { className: 'min-w-0' },
+    h('div', { className: 'min-w-0 overflow-hidden' }, // [FIXED: overflow-hidden 防手机端溢出]
       h('div', { className: 'text-sm font-medium truncate leading-snug' }, v.title || v.video_id),
       h('div', { className: 'text-xs text-slate-500 mt-1 truncate' }, v.uploader || '--'),
       h('div', { className: 'flex items-center gap-2 mt-2' },

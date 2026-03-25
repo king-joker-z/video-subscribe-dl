@@ -4,6 +4,21 @@ import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState , Uploader
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 
+// [FIXED: 自定义确认弹窗，替换 window.confirm]
+function ConfirmDialog({ title, message, onConfirm, onCancel }) {
+  return h("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4" },
+    h("div", { className: "absolute inset-0 bg-black/40", onClick: onCancel }),
+    h("div", { className: "relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4" },
+      h("h3", { className: "text-base font-semibold text-slate-800" }, title),
+      h("p", { className: "text-sm text-slate-500" }, message),
+      h("div", { className: "flex gap-3 justify-end" },
+        h("button", { onClick: onCancel, className: "px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100" }, "取消"),
+        h("button", { onClick: onConfirm, className: "px-4 py-2 rounded-lg text-sm bg-red-500 text-white hover:bg-red-600" }, "确认删除")
+      )
+    )
+  );
+}
+
 // UP主头像组件
 function UploaderAvatar({ name, hasAvatar }) {
   const [imgError, setImgError] = React.useState(false);
@@ -35,6 +50,7 @@ export function UploadersPage({ onNavigate }) {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('recent');
   const [loading, setLoading] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(null); // [FIXED: 存待删除的 uploader name]
   const searchTimer = useRef(null);
 
   const load = useCallback(async () => {
@@ -86,14 +102,10 @@ export function UploadersPage({ onNavigate }) {
     } catch (e2) { toast(e2.message, 'error'); }
   };
 
-  const handleDeleteUploader = async (uploaderName, e) => {
+  const handleDeleteUploader = (uploaderName, e) => {
+    // [FIXED: 改为弹出自定义 ConfirmDialog，去掉 window.confirm]
     e.stopPropagation();
-    if (!window.confirm(`确认删除 UP 主「${uploaderName}」的所有记录？\n（不会删除本地文件，仅清除数据库数据）`)) return;
-    try {
-      const res = await api.deleteUploader(uploaderName);
-      toast(`已删除，共 ${res.data.affected} 条记录`, 'success');
-      load();
-    } catch (e2) { toast(e2.message, 'error'); }
+    setConfirmDelete(uploaderName);
   };
 
   const handleSearch = (value) => {
@@ -102,6 +114,20 @@ export function UploadersPage({ onNavigate }) {
   };
 
   return h('div', { className: 'page-enter space-y-4' },
+    // [FIXED: 自定义删除确认弹窗]
+    confirmDelete && h(ConfirmDialog, {
+      title: "删除 UP 主",
+      message: `确认删除「${confirmDelete}」的所有记录？（不会删除本地文件）`,
+      onConfirm: async () => {
+        setConfirmDelete(null);
+        try {
+          const res = await api.deleteUploader(confirmDelete);
+          toast(`已删除，共 ${res.data.affected} 条记录`, 'success');
+          load();
+        } catch(e) { toast(e.message, 'error'); }
+      },
+      onCancel: () => setConfirmDelete(null)
+    }),
     h('div', { className: 'flex items-center justify-between flex-wrap gap-3' },
       h('h2', { className: 'text-lg font-semibold' }, 'UP 主'),
       h('div', { className: 'flex items-center gap-2' },
@@ -143,7 +169,7 @@ export function UploadersPage({ onNavigate }) {
                   h(UploaderAvatar, { name: u.uploader, hasAvatar: u.has_avatar }),
                   h('div', { className: 'min-w-0 flex-1' },
                     h('div', { className: 'font-medium text-sm truncate text-slate-800' }, u.uploader),
-                    u.mid && h('div', { className: 'text-xs text-slate-500 mt-0.5' }, 'UID: ' + u.mid)
+                    u.mid && h('div', { className: 'text-xs text-slate-500 mt-0.5 truncate' }, 'UID: ' + u.mid) // [FIXED: truncate overflow]
                   )
                 ),
                 h('div', { className: 'grid grid-cols-3 gap-2 text-center' },

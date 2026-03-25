@@ -13,6 +13,7 @@ export function LogsPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [connType, setConnType] = useState('');
   const autoScrollRef = useRef(true);
+  const bufferRef = useRef([]); // [FIXED: buffer for paused mode]
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
   const reconnectKey = useRef(0);
@@ -25,10 +26,12 @@ export function LogsPage() {
     }
 
     const onLog = (entry) => {
-      // 新日志 prepend（最新在最前）
-      setLogs(prev => [entry, ...prev.slice(0, 999)]);
-      if (!autoScrollRef.current) {
-        setUnreadCount(prev => prev + 1);
+      // [FIXED: buffer in pause mode, prepend in follow mode]
+      if (autoScrollRef.current) {
+        setLogs(prev => [entry, ...prev.slice(0, 999)]);
+      } else {
+        bufferRef.current = [entry, ...bufferRef.current];
+        setUnreadCount(bufferRef.current.length);
       }
     };
 
@@ -53,9 +56,12 @@ export function LogsPage() {
 
   const fallbackToSSE = useCallback(() => {
     const onLog = (entry) => {
-      setLogs(prev => [entry, ...prev.slice(0, 999)]);
-      if (!autoScrollRef.current) {
-        setUnreadCount(prev => prev + 1);
+      // [FIXED: buffer in pause mode, prepend in follow mode]
+      if (autoScrollRef.current) {
+        setLogs(prev => [entry, ...prev.slice(0, 999)]);
+      } else {
+        bufferRef.current = [entry, ...bufferRef.current];
+        setUnreadCount(bufferRef.current.length);
       }
     };
     const handler = (e) => { onLog(e.detail); };
@@ -81,36 +87,39 @@ export function LogsPage() {
     };
   }, [reconnectKey.current]);
 
-  // 反转模式：autoScroll 时保持 scrollTop=0（顶部），不需要滚到底
+  // [FIXED: 反转模式，只在追随时强制 scrollTop=0，靠 ref 判断避免 autoScroll state 时序问题]
   useEffect(() => {
-    if (!autoScroll || !containerRef.current) return;
+    if (!autoScrollRef.current || !containerRef.current) return;
     containerRef.current.scrollTop = 0;
-  }, [logs, autoScroll]);
+  }, [logs]);
 
   const handleScroll = () => {
+    // [FIXED: 用户向下滚时暂停追随，回顶时调用 scrollToTop 合并 buffer]
     if (!containerRef.current) return;
     const { scrollTop } = containerRef.current;
-    // 用户往下滚（scrollTop > 20px）时暂停追随
     if (scrollTop > 20) {
       autoScrollRef.current = false;
       setAutoScroll(false);
-    } else {
-      autoScrollRef.current = true;
-      setAutoScroll(true);
-      setUnreadCount(0);
+    } else if (!autoScrollRef.current) {
+      // 用户手动滚回顶部，恢复追随并合并 buffer
+      scrollToTop();
     }
   };
 
   const scrollToTop = () => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = 0;
+    // [FIXED: 合并 buffer 进 logs，清空 buffer，恢复追随]
+    if (bufferRef.current.length > 0) {
+      setLogs(prev => [...bufferRef.current, ...prev].slice(0, 1000));
+      bufferRef.current = [];
     }
     autoScrollRef.current = true;
     setAutoScroll(true);
     setUnreadCount(0);
+    if (containerRef.current) containerRef.current.scrollTop = 0;
   };
 
   const toggleAutoScroll = () => {
+    // [FIXED: 恢复追随时调用 scrollToTop，暂停时只更新 ref 和 state]
     const next = !autoScroll;
     autoScrollRef.current = next;
     setAutoScroll(next);

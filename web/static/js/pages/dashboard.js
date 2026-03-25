@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { formatBytes, formatSpeed, formatETA, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton, DashboardStatSkeleton } from '../components/utils.js';
+import { formatBytes, formatSpeed, formatETA, formatTime, cn, toast, Icon, Card, Button, StatusBadge, Skeleton, DashboardStatSkeleton, EmptyState } from '../components/utils.js'; // [FIXED: add EmptyState]
 const { createElement: h, useState, useEffect, useCallback, useRef, Fragment } = React;
 
 export function DashboardPage({ onNavigate }) {
@@ -451,21 +451,23 @@ export function DashboardPage({ onNavigate }) {
       )
     ),
 
-    // 最近下载
-    data?.recent_downloads?.length > 0 && h(Card, null,
+    // 最近下载 [FIXED: 加空态 EmptyState]
+    h(Card, null,
       h('h3', { className: 'font-medium mb-4 text-slate-800' }, '最近下载'),
-      h('div', { className: 'space-y-2' },
-        data.recent_downloads.slice(0, 8).map((dl, i) =>
-          h('div', { key: dl.id, className: cn('flex items-center gap-3 py-2 border-b border-slate-200 last:border-0', i >= 5 && 'hidden sm:flex') },
-            h('div', { className: 'flex-1 min-w-0' },
-              h('div', { className: 'text-sm truncate' }, dl.title || dl.video_id),
-              h('div', { className: 'text-xs text-slate-500 truncate' }, dl.uploader || '--')
-            ),
-            h(StatusBadge, { status: dl.status }),
-            h('span', { className: 'text-xs text-slate-500 flex-shrink-0 hidden sm:block' }, formatTime(dl.created_at))
+      data?.recent_downloads?.length > 0
+        ? h('div', { className: 'space-y-2' },
+            data.recent_downloads.slice(0, 8).map((dl, i) =>
+              h('div', { key: dl.id, className: cn('flex items-center gap-3 py-2 border-b border-slate-200 last:border-0', i >= 5 && 'hidden sm:flex') },
+                h('div', { className: 'flex-1 min-w-0' },
+                  h('div', { className: 'text-sm truncate' }, dl.title || dl.video_id),
+                  h('div', { className: 'text-xs text-slate-500 truncate' }, dl.uploader || '--')
+                ),
+                h(StatusBadge, { status: dl.status }),
+                h('span', { className: 'text-xs text-slate-500 flex-shrink-0 hidden sm:block' }, formatTime(dl.created_at))
+              )
+            )
           )
-        )
-      )
+        : h(EmptyState, { icon: 'video', message: '暂无最近下载' })
     )
   );
 }
