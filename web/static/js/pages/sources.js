@@ -34,7 +34,7 @@ function EditModal({ source, onSave, onClose }) {
     skip_nfo: source.skip_nfo || false,
     skip_poster: source.skip_poster || false,
     use_dynamic_api: source.use_dynamic_api || false,
-    check_interval: source.check_interval || 1800,
+    check_interval: source.check_interval || 7200,
     filter_rules: (() => { try { return JSON.parse(source.filter_rules || '[]'); } catch { return []; } })(),
   });
 
@@ -162,7 +162,7 @@ function EditModal({ source, onSave, onClose }) {
       // 检查间隔
       h('div', null,
         h('label', { className: labelClass }, '检查间隔（秒）'),
-        h('input', { type: 'number', value: form.check_interval, onChange: (e) => update('check_interval', parseInt(e.target.value) || 1800), min: 300, className: inputClass })
+        h('input', { type: 'number', value: form.check_interval, onChange: (e) => update('check_interval', parseInt(e.target.value) || 7200), min: 300, className: inputClass })
       ),
 
       // 开关组（2×2 网格，每项独立）
@@ -320,7 +320,7 @@ export function SourcesPage({ onNavigate }) {
     download_filter: '',
     skip_nfo: false,
     skip_poster: false,
-    check_interval: 1800,
+    check_interval: 7200,
   });
 
   const [douyinPaused, setDouyinPaused] = useState(null);
@@ -426,7 +426,7 @@ export function SourcesPage({ onNavigate }) {
       const res = await api.createSource(body);
       toast.success('已添加: ' + (res.data.name || '新订阅源'));
       setNewURL(''); setShowAdd(false); setParseResult(null);
-      setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 1800 });
+      setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200 });
       load();
     } catch (e) { toast.error(e.message); }
     finally { setAdding(false); }
@@ -435,7 +435,7 @@ export function SourcesPage({ onNavigate }) {
   const resetAddModal = () => {
     setShowAdd(false); setNewURL(''); setParseResult(null);
     setAddPlatform('bili'); setAddBiliTab('url'); setAddDouyinTab('url');
-    setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 1800 });
+    setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200 });
   };
 
   const handleDelete = async (id, name) => {
@@ -671,7 +671,7 @@ export function SourcesPage({ onNavigate }) {
             ),
             h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
-              h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+              h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
             h('div', { className: 'grid grid-cols-2 gap-3' },
               h('div', { className: 'flex items-center gap-2' },
@@ -730,7 +730,7 @@ export function SourcesPage({ onNavigate }) {
               ),
               h('div', null,
                 h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
-                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 1800), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+                h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
               ),
               h('div', { className: 'grid grid-cols-2 gap-3' },
                 h('div', { className: 'flex items-center gap-2' },

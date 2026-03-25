@@ -201,6 +201,10 @@ func extractModelName(doc *html.Node, modelURL string) string {
 	findTitle(doc)
 
 	if titleText != "" {
+		// 中文格式: "博主名 的色情片 | Pornhub" 或 "博主名的色情片 | Pornhub"
+		if idx := strings.Index(titleText, "的色情片"); idx > 0 {
+			return strings.TrimSpace(titleText[:idx])
+		}
 		// 典型格式: "ModelName Porn Videos | Pornhub.com"
 		parts := strings.Split(titleText, " Porn Videos")
 		if len(parts) >= 1 && parts[0] != "" {

@@ -8,7 +8,7 @@ const (
 	DefaultRequestInterval = 15
 
 	// DefaultCheckIntervalSec 源默认检查间隔（秒）
-	DefaultCheckIntervalSec = 1800
+	DefaultCheckIntervalSec = 7200
 
 	// DefaultSchedulerTick 调度器定时检查间隔
 	DefaultSchedulerTick = 5 * time.Minute

@@ -161,7 +161,7 @@ func (h *MeHandler) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 				URL:             url,
 				Name:            name,
 				Enabled:         true,
-				CheckInterval:   1800,
+				CheckInterval:   7200,
 				DownloadQuality: "best",
 				DownloadCodec:   "all",
 			}
@@ -192,7 +192,7 @@ func (h *MeHandler) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 				URL:             fmt.Sprintf("https://www.bilibili.com/medialist/detail/ml%d", fid),
 				Name:            fmt.Sprintf("收藏夹 %d", fid),
 				Enabled:         true,
-				CheckInterval:   1800,
+				CheckInterval:   7200,
 				DownloadQuality: "best",
 				DownloadCodec:   "all",
 			}

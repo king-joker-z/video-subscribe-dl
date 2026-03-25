@@ -933,7 +933,7 @@ func (h *SourcesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 			src.Type = "up"
 		}
 		if src.CheckInterval <= 0 {
-			src.CheckInterval = 1800
+			src.CheckInterval = 7200
 		}
 		if src.DownloadQuality == "" {
 			src.DownloadQuality = "best"
