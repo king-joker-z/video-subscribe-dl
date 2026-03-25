@@ -91,6 +91,8 @@ func (h *EventsHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
 				flusher.Flush()
 			}
 
+		// [FIXED: P2-10] nil channel 在 select 中永远不会被选中，相当于禁用该分支；
+		// logCh 和 dlEventCh 在对应组件未初始化时为 nil，此行为是 Go 的设计保证，无需额外处理
 		case entry, ok := <-logCh:
 			if !ok {
 				return

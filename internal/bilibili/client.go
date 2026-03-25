@@ -465,7 +465,7 @@ func (c *Client) FetchDynamicVideosIncremental(mid int64, latestVideoAt int64) (
 		offset = dynResp.Offset
 		pageIdx++
 
-		// 安全限制：最多翻 50 页
+		// [FIXED: P2-2] 安全限制：最多翻 200 页（原注释误写为 50 页）
 		if pageIdx >= 200 {
 			log.Printf("[dynamic] 达到最大翻页限制 200 页，mid=%d", mid)
 			break
@@ -484,7 +484,11 @@ func (c *Client) get(rawURL string, result interface{}) error {
 	if c.limiter != nil {
 		c.limiter.Acquire()
 	}
-	req, _ := http.NewRequest("GET", rawURL, nil)
+	// [FIXED: P1-2] 检查 http.NewRequest 错误，避免非法 URL 导致 req 为 nil 后 panic
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return err
+	}
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
 	if c.cookie != "" {
@@ -519,19 +523,20 @@ func checkRateLimitCode(body []byte) error {
 	if err := json.Unmarshal(body, &base); err != nil {
 		return nil // 无法解析就不检测
 	}
+	// [FIXED: P1-1] 将风控错误包装为 ErrRateLimited，使调用者可通过 errors.Is(err, ErrRateLimited) 统一检测
 	switch base.Code {
 	case -352:
 		log.Printf("[WARN] B站风控: code=-352 (风控校验失败)")
-		return NewErrorResponse(-352, "风控校验失败")
+		return fmt.Errorf("%s: %w", "风控校验失败", ErrRateLimited)
 	case -401:
 		log.Printf("[WARN] B站风控: code=-401 (未登录/鉴权失败)")
-		return NewErrorResponse(-401, "未登录/鉴权失败")
+		return fmt.Errorf("%s: %w", "未登录/鉴权失败", ErrRateLimited)
 	case -403:
 		log.Printf("[WARN] B站风控: code=-403 (访问权限不足/鉴权异常)")
-		return NewErrorResponse(-403, "访问权限不足")
+		return fmt.Errorf("%s: %w", "访问权限不足", ErrRateLimited)
 	case -412:
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
-		return NewErrorResponse(-412, "请求过于频繁")
+		return fmt.Errorf("%s: %w", "请求过于频繁", ErrRateLimited)
 	}
 
 	// v_voucher 风控检测: data.v_voucher 非空即触发
@@ -542,7 +547,7 @@ func checkRateLimitCode(body []byte) error {
 	}
 	if err := json.Unmarshal(body, &voucherCheck); err == nil && voucherCheck.Data.VVoucher != "" {
 		log.Printf("[WARN] B站风控: v_voucher detected (需要人机验证)")
-		return NewRiskControlError("v_voucher detected, 需要人机验证")
+		return fmt.Errorf("%s: %w", "v_voucher detected, 需要人机验证", ErrRateLimited)
 	}
 
 	return nil
@@ -553,8 +558,11 @@ func ExtractMID(rawURL string) (int64, error) {
 	re := reSpaceMID
 	m := re.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		var mid int64
-		fmt.Sscanf(m[1], "%d", &mid)
+		// [FIXED: P2-3] 改用 strconv.ParseInt，可检测超出 int64 范围的情况（fmt.Sscanf 会静默截断）
+		mid, err := strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("cannot parse MID %q: %w", m[1], err)
+		}
 		return mid, nil
 	}
 	return 0, fmt.Errorf("cannot extract MID from: %s", rawURL)

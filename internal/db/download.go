@@ -302,10 +302,10 @@ func (d *DB) ResetDownloadToPending(id int64) error {
 	return err
 }
 
-// ResetStaleDownloads 重置所有 pending 和 downloading 状态的记录
-// 容器重启后内存队列已清空，这些记录需要重新参与调度
-// pending -> 删除记录（让 IsVideoDownloaded 返回 false，下次同步时重新创建并提交）
-// downloading -> pending（由对账模块处理）
+// ResetStaleDownloads 重置进程重启后残留的 downloading 状态记录为 pending
+// 容器重启后内存队列已清空，downloading 状态的记录需要重新参与调度
+// [FIXED: P1-4] 注释与实现对齐：pending 是有效的待下载状态，不删除；
+//   只将 downloading -> pending（进程重启后重新入队，由调度器统一调度）
 func (d *DB) ResetStaleDownloads() (int64, error) {
 	// downloading -> pending（进程重启后需要重新排队）
 	result, err := d.Exec("UPDATE downloads SET status = 'pending' WHERE status = 'downloading'")
@@ -392,10 +392,15 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		// [FIXED: P0-4] downloaded_at 可为 NULL，改用 sql.NullTime 避免 Scan panic
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}
@@ -420,6 +425,7 @@ type UploaderStats struct {
 }
 
 // GetDownloadUploaders 获取 UP 主列表（分页 + 筛选 + 排序）
+// [FIXED: P2-8] where 变量只允许追加白名单条件（通过 ? 参数化），禁止拼接用户原始输入，防止 SQL 注入
 func (d *DB) GetDownloadUploaders(status, search, sort string, page, pageSize int) ([]UploaderStats, int, error) {
 	where := "WHERE 1=1"
 	args := []interface{}{}

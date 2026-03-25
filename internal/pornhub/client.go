@@ -19,6 +19,9 @@ import (
 // phMaxHTMLBodySize HTML 页面最大读取大小（10 MB），防止无限流撑爆内存
 const phMaxHTMLBodySize = 10 * 1024 * 1024
 
+// pageDelay GetModelVideos 翻页间延迟，避免被限流 [FIXED: P1-10]
+const pageDelay = 2 * time.Second
+
 const (
 	phBaseURL   = "https://www.pornhub.com"
 	phUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -148,10 +151,15 @@ func ExtractViewKey(videoURL string) string {
 // GetModelInfo 获取博主基本信息（名称）
 func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
 	// 规范化：去掉 query string、末尾斜杠、/videos 后缀
+	// [FIXED: P2-4] 只精确去掉路径末尾的 /videos segment，避免博主名含 "videos" 时被误裁
 	if idx := strings.IndexByte(modelURL, '?'); idx != -1 {
 		modelURL = modelURL[:idx]
 	}
-	cleanURL := strings.TrimSuffix(strings.TrimSuffix(strings.TrimRight(modelURL, "/"), "/videos"), "/")
+	cleanURL := strings.TrimRight(modelURL, "/")
+	if strings.HasSuffix(cleanURL, "/videos") {
+		cleanURL = cleanURL[:len(cleanURL)-len("/videos")]
+	}
+	cleanURL = strings.TrimRight(cleanURL, "/")
 
 	body, status, err := c.get(cleanURL)
 	if err != nil {
@@ -345,8 +353,8 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 		allVideos = append(allVideos, pageVideos...)
 		log.Printf("[pornhub·client] 第 %d 页获取 %d 条，累计 %d 条", page, len(pageVideos), len(allVideos))
 
-		// 页间延迟，避免被限流
-		time.Sleep(2 * time.Second)
+		// [FIXED: P1-10] 提取页间延迟为具名常量，便于统一调整反爬策略
+		time.Sleep(pageDelay)
 	}
 
 	return allVideos, nil
@@ -594,13 +602,24 @@ var clearInterval = function(){};
 `
 	js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
 	vm := goja.New()
-	// 设置 10 秒超时，防止页面 JS 含死循环导致 goroutine 永久阻塞
-	timer := time.AfterFunc(10*time.Second, func() {
+	// [FIXED: P1-3] 在独立 goroutine 中执行 JS，通过 channel + select + timeout 等待结果，
+	// 超时时中断 VM 并返回错误，避免 RunString 在当前 goroutine 长期阻塞
+	type jsResult struct {
+		err error
+	}
+	jsCh := make(chan jsResult, 1)
+	go func() {
+		_, evalErr := vm.RunString(js)
+		jsCh <- jsResult{evalErr}
+	}()
+	select {
+	case res := <-jsCh:
+		if res.err != nil {
+			return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, res.err)
+		}
+	case <-time.After(10 * time.Second):
 		vm.Interrupt("js eval timeout")
-	})
-	defer timer.Stop()
-	if _, err := vm.RunString(js); err != nil {
-		return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, err)
+		return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
 	}
 
 	jsonVal := vm.Get("_json")

@@ -3,7 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/glebarez/sqlite"
@@ -176,8 +178,13 @@ func Init(dataDir string) (*DB, error) {
 		"ALTER TABLE sources ADD COLUMN download_subtitle INTEGER DEFAULT 0",
 		"ALTER TABLE downloads ADD COLUMN detail_status INTEGER DEFAULT 0",
 	}
+	// [FIXED: P2-13] 区分「列已存在」（预期的幂等错误，可忽略）与真实错误（应记录日志）
 	for _, m := range migrations {
-		db.Exec(m)
+		if _, err := db.Exec(m); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				log.Printf("[migration] warning: %v — sql: %s", err, m)
+			}
+		}
 	}
 
 	return &DB{db}, nil

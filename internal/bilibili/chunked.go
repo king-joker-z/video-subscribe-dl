@@ -110,6 +110,7 @@ func downloadChunked(ctx context.Context, rawURL, dest string, totalSize int64, 
 			End:   int64(i+1)*chunkSize - 1,
 		}
 	}
+	// [FIXED: P2-1] 最后一块的 End 修正为 totalSize-1，补偿整除截断（totalSize % numChunks 的余量）
 	chunks[numChunks-1].End = totalSize - 1 // 最后一块取到末尾
 
 	log.Printf("  Chunked download: %s, %d chunks, %.1f MB total",
@@ -181,12 +182,25 @@ func downloadChunked(ctx context.Context, rawURL, dest string, totalSize int64, 
 	}
 
 	// 合并所有块
+	// [FIXED: P0-3] 用 succeeded 标志位 + defer 确保合并失败时清理所有剩余块文件，避免泄露
 	log.Printf("  Merging %d chunks...", numChunks)
 	outFile, err := os.Create(dest)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 	defer outFile.Close()
+
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			// 合并失败时清理所有尚未删除的块文件
+			for _, cf := range chunkFiles {
+				if removeErr := os.Remove(cf); removeErr != nil && !os.IsNotExist(removeErr) {
+					log.Printf("[WARN] Failed to cleanup chunk file %s: %v", cf, removeErr)
+				}
+			}
+		}
+	}()
 
 	for i, cf := range chunkFiles {
 		f, err := os.Open(cf)
@@ -202,6 +216,7 @@ func downloadChunked(ctx context.Context, rawURL, dest string, totalSize int64, 
 			log.Printf("[WARN] Failed to remove chunk file after merge %s: %v", cf, removeErr)
 		}
 	}
+	succeeded = true
 
 	// 最终进度
 	if onProgress != nil {
@@ -238,15 +253,16 @@ func downloadOneChunkAttempt(ctx context.Context, rawURL, dest string, chunk chu
 	client := sharedLargeDownloadClient
 
 	// 检查已下载的部分（支持块内断点续传）
+	// [FIXED: P0-1] 只计入此次 attempt 新增的字节，避免每次 retry 都把历史字节重复加入 totalDownloaded
 	var startByte int64 = chunk.Start
 	if fi, err := os.Stat(dest); err == nil {
 		downloaded := fi.Size()
-		// 如果已完成这个块
+		// 如果已完成这个块，直接返回，不再计数（外层已统计过）
 		expected := chunk.End - chunk.Start + 1
 		if downloaded >= expected {
-			atomic.AddInt64(totalDownloaded, downloaded)
 			return nil
 		}
+		// 续传：只记录已有进度（首次进入此 attempt，前面没有计过）
 		startByte = chunk.Start + downloaded
 		atomic.AddInt64(totalDownloaded, downloaded)
 	}

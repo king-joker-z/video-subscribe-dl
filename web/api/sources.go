@@ -53,7 +53,11 @@ func (h *SourcesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		PendingCount   int `json:"pending_count"`
 	}
 	// 预加载所有 source 的统计数据（单次 GROUP BY 查询，避免 N+1）
-	statsMap, _ := h.db.GetSourcesStats()
+	// [FIXED: P1-9] 记录 GetSourcesStats 错误，而非静默丢弃（nil map 读取安全，但应有可见日志）
+	statsMap, err := h.db.GetSourcesStats()
+	if err != nil {
+		log.Printf("[sources] GetSourcesStats error: %v", err)
+	}
 
 	buildStats := func(sources []db.Source) []SourceWithStats {
 		result := make([]SourceWithStats, 0, len(sources))
@@ -233,7 +237,11 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	case "douyin":
 		if source.URL != "" {
 			dyClient := douyin.NewClient()
-			defer dyClient.Close()
+			// [FIXED: P1-8] 用 recover 包裹 Close()，确保 Close() 内部 panic 不会传播
+			defer func() {
+				defer func() { recover() }()
+				dyClient.Close()
+			}()
 			// 抖音号输入（不含 "://"，不含 "."）→ 先通过 QueryUser 查 sec_uid
 			if !strings.Contains(source.URL, "://") && !strings.Contains(source.URL, ".") {
 				uniqueID := strings.TrimPrefix(source.URL, "@")
@@ -321,14 +329,23 @@ func (h *SourcesHandler) HandleGet(w http.ResponseWriter, r *http.Request, id in
 	}
 
 	// 附加视频统计
+	// [FIXED: P2-9] 处理 Scan 错误，避免数据库临时不可用时静默返回 0
 	result := map[string]interface{}{
 		"source": source,
 	}
 	var videoCount, completedCount, failedCount, pendingCount int
-	h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ?", id).Scan(&videoCount)
-	h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('completed','relocated')", id).Scan(&completedCount)
-	h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('failed','permanent_failed')", id).Scan(&failedCount)
-	h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'pending'", id).Scan(&pendingCount)
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ?", id).Scan(&videoCount); err != nil {
+		log.Printf("[source] count query error (source_id=%d): %v", id, err)
+	}
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('completed','relocated')", id).Scan(&completedCount); err != nil {
+		log.Printf("[source] completed count query error (source_id=%d): %v", id, err)
+	}
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status IN ('failed','permanent_failed')", id).Scan(&failedCount); err != nil {
+		log.Printf("[source] failed count query error (source_id=%d): %v", id, err)
+	}
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'pending'", id).Scan(&pendingCount); err != nil {
+		log.Printf("[source] pending count query error (source_id=%d): %v", id, err)
+	}
 	result["video_count"] = videoCount
 	result["completed_count"] = completedCount
 	result["failed_count"] = failedCount
@@ -608,7 +625,11 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		uniqueID = strings.TrimSpace(uniqueID)
 		if len(uniqueID) >= 4 && len(uniqueID) <= 30 {
 			dyClient := douyin.NewClient()
-			defer dyClient.Close()
+			// [FIXED: P1-8] 用 recover 包裹 Close()，确保 Close() 内部 panic 不会传播
+			defer func() {
+				defer func() { recover() }()
+				dyClient.Close()
+			}()
 			if profile, err := dyClient.GetUserByUniqueID(uniqueID); err == nil && profile.SecUID != "" {
 				result["type"] = "douyin"
 				result["sec_uid"] = profile.SecUID
@@ -628,7 +649,11 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	// 4. 抖音链接
 	if douyin.IsDouyinURL(rawURL) {
 		dyClient := douyin.NewClient()
-		defer dyClient.Close()
+		// [FIXED: P1-8] 用 recover 包裹 Close()，确保 Close() 内部 panic 不会传播
+		defer func() {
+			defer func() { recover() }()
+			dyClient.Close()
+		}()
 		resolved, err := dyClient.ResolveShareURL(rawURL)
 		if err == nil {
 			switch resolved.Type {

@@ -47,7 +47,10 @@ func CloseDownloadClients() {
 // DownloadFile 下载抖音视频/图片文件到 destPath（原子写入: 先写 .tmp 再 rename）。
 // 若 destPath 已存在且非空则直接跳过，返回已有文件大小。
 func DownloadFile(fileURL, destPath string) (int64, error) {
-	os.MkdirAll(filepath.Dir(destPath), 0755)
+	// [FIXED: P2-5] 检查 MkdirAll 错误，避免目录创建失败时返回不直观的错误信息
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return 0, fmt.Errorf("mkdir: %w", err)
+	}
 
 	// 已存在且非空则跳过
 	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
@@ -97,9 +100,10 @@ func DownloadFile(fileURL, destPath string) (int64, error) {
 	return written, nil
 }
 
-// DownloadThumb 下载封面图到 destPath。若已存在则跳过。
+// DownloadThumb 下载封面图到 destPath。若已存在且非空非目录则跳过。
 func DownloadThumb(thumbURL, destPath string) error {
-	if _, err := os.Stat(destPath); err == nil {
+	// [FIXED: P2-6] 检查是否为非空普通文件，避免 destPath 为空目录时跳过导致封面缺失
+	if info, err := os.Stat(destPath); err == nil && !info.IsDir() && info.Size() > 0 {
 		return nil
 	}
 

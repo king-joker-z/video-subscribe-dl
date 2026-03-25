@@ -28,6 +28,8 @@ export function VideosPage({ params = {} } = {}) {
   const [filterExpanded, setFilterExpanded] = useState(() => !isMobileViewport());
   const [detailVideo, setDetailVideo] = useState(null);
   const searchTimer = useRef(null);
+  // [FIXED: P2-11] 用 ref 保存最新 load 引用，visibilitychange handler 通过 ref 调用，避免 stale closure
+  const loadRef = useRef(null);
   const [progress, setProgress] = useState([]);
   const [batchLoading, setBatchLoading] = useState(false);
 
@@ -53,6 +55,9 @@ export function VideosPage({ params = {} } = {}) {
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, [page, pageSize, status, search, sort, uploader, sourceId]);
+
+  // [FIXED: P2-11] 同步 load 最新引用到 ref，供 visibilitychange handler 使用
+  useEffect(() => { loadRef.current = load; }, [load]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -98,6 +103,8 @@ export function VideosPage({ params = {} } = {}) {
           }
           return { ...v, ...patch };
         }));
+        // [FIXED: P1-5] 完成/失败后延迟刷新，同步 file_path、detail_status 等后端字段
+        setTimeout(load, 1000);
       } else {
         setTimeout(load, 500);
       }
@@ -120,9 +127,10 @@ export function VideosPage({ params = {} } = {}) {
       }, INTERVAL);
     };
 
+    // [FIXED: P2-11] 通过 loadRef 调用最新 load，避免 stale closure 问题
     const handleVisibility = () => {
       if (!document.hidden) {
-        load();
+        if (loadRef.current) loadRef.current();
       }
     };
 
@@ -446,11 +454,12 @@ export function VideosPage({ params = {} } = {}) {
 }
 
 // 判断视频平台（根据 video_id 特征）
+// [FIXED: P1-6] 移除过宽的第二个正则 /^[a-z0-9]{8,20}$/i，仅保留明确的 ph[0-9a-f]+ 前缀匹配
 function detectPlatform(videoId) {
   if (!videoId) return 'unknown';
   if (/^BV[0-9A-Za-z]{10}$/.test(videoId) || /^av\d+$/i.test(videoId)) return 'bilibili';
   if (/^\d{15,20}$/.test(videoId)) return 'douyin';
-  if (/^ph[0-9a-f]+$/i.test(videoId) || /^[a-z0-9]{8,20}$/i.test(videoId)) return 'pornhub';
+  if (/^ph[0-9a-f]{6,}$/i.test(videoId)) return 'pornhub';
   return 'unknown';
 }
 

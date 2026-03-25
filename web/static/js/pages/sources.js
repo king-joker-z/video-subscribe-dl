@@ -335,6 +335,8 @@ export function SourcesPage({ onNavigate }) {
   };
 
   const load = useCallback(async () => {
+    // [FIXED: P1-7] 每次刷新前设置 loading=true，让后续刷新也能显示加载状态（初始值已是 true）
+    setLoading(true);
     try {
       const params = { page: sourcePage, page_size: 20 };
       if (filterType) params.type = filterType;
@@ -488,7 +490,11 @@ export function SourcesPage({ onNavigate }) {
   const handleImportFile = () => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = '.json';
+    // [FIXED: P2-12] 先 append 到 DOM 再 click，兼容 Firefox 不响应未挂载元素的 click 事件
+    input.style.display = 'none';
+    document.body.appendChild(input);
     input.onchange = async (e) => {
+      document.body.removeChild(input);
       const file = e.target.files[0];
       if (!file) return;
       try {

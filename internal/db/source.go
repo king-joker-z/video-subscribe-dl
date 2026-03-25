@@ -141,9 +141,19 @@ func (d *DB) DeleteSource(id int64) error {
 	if activeCount > 0 {
 		return fmt.Errorf("该订阅源有 %d 个正在进行的下载任务，请等待完成后再删除", activeCount)
 	}
-	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
-	_, err := d.Exec("DELETE FROM sources WHERE id = ?", id)
-	return err
+	// [FIXED: P0-2] 将两条 DELETE 包在同一事务中，确保原子性，防止进程崩溃导致数据不一致
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM downloads WHERE source_id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM sources WHERE id = ?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteSourceWithFiles 删除订阅并清除本地文件（含缩略图）
@@ -186,10 +196,19 @@ func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
 		}
 	}
 
-	// 3. 删 DB 记录
-	d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
-	_, err = d.Exec("DELETE FROM sources WHERE id = ?", id)
-	return deleted, err
+	// 3. 删 DB 记录（[FIXED: P0-2] 事务包裹，确保原子性）
+	tx, err := d.Begin()
+	if err != nil {
+		return deleted, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM downloads WHERE source_id = ?", id); err != nil {
+		return deleted, err
+	}
+	if _, err = tx.Exec("DELETE FROM sources WHERE id = ?", id); err != nil {
+		return deleted, err
+	}
+	return deleted, tx.Commit()
 }
 
 func (d *DB) UpdateSourceLastCheck(id int64) error {
@@ -197,6 +216,9 @@ func (d *DB) UpdateSourceLastCheck(id int64) error {
 	return err
 }
 
+// CleanSource 清理指定订阅源的下载记录（仅删除 DB 记录，不删除磁盘文件）。
+// [FIXED: P2-7] 此函数只操作数据库，如需同时清理磁盘文件请使用 DeleteSourceWithFiles。
+// 返回值为原 completed 状态的记录数量（可用于日志统计）。
 func (d *DB) CleanSource(id int64) (int, error) {
 	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ? AND status = 'completed'", id)
 	if err != nil {
