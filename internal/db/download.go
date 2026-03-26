@@ -691,14 +691,14 @@ func (d *DB) GetSourcesStats() (map[int64]*SourceStats, error) {
 func (d *DB) GetRetryableDownloadsByPlatform(platform string, limit int) ([]Download, error) {
 	now := time.Now().Unix()
 	rows, err := d.Query(`
-		SELECT d.id, d.source_id, d.video_id, d.title, d.uploader, d.thumbnail,
-		       d.status, d.file_path, d.file_size, d.error_message, d.retry_count,
-		       d.duration, d.downloaded_at, d.detail_status, d.next_retry_at
+		SELECT d.id, d.source_id, d.video_id, COALESCE(d.title,''), COALESCE(d.uploader,''), COALESCE(d.thumbnail,''),
+		       d.status, COALESCE(d.file_path,''), COALESCE(d.file_size,0), COALESCE(d.error_message,''), COALESCE(d.retry_count,0),
+		       COALESCE(d.duration,0), d.downloaded_at, COALESCE(d.detail_status,0), COALESCE(d.next_retry_at,0)
 		FROM downloads d
 		JOIN sources s ON d.source_id = s.id
 		WHERE d.status = 'failed'
-		  AND d.retry_count < 3
-		  AND d.next_retry_at <= ?
+		  AND COALESCE(d.retry_count,0) < 3
+		  AND COALESCE(d.next_retry_at,0) <= ?
 		  AND s.type = ?
 		ORDER BY d.next_retry_at ASC
 		LIMIT ?
