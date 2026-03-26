@@ -200,6 +200,11 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	}
 	if err != nil {
 		log.Printf("[phscheduler] Download failed after retries: %v", err)
+		// 清理可能遗留的 .tmp 文件
+		tmpPath := videoFilePath + ".tmp"
+		if removeErr := os.Remove(tmpPath); removeErr == nil {
+			log.Printf("[phscheduler] Cleaned up stale tmp file: %s", tmpPath)
+		}
 		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 		s.db.IncrementRetryCount(dl.ID, err.Error())
 		return
