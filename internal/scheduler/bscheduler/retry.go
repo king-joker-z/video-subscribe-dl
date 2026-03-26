@@ -194,7 +194,8 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	}()
 
 	capturedDlID := dl.ID
-	s.dl.Submit(&downloader.Job{
+	// [FIXED: BS-9] Submit 失败时关闭 resultCh，防止 handleDownloadResult goroutine 永久阻塞
+	if err := s.dl.Submit(&downloader.Job{
 		DownloadID:       capturedDlID,
 		BvID:             actualBvID,
 		CID:              cid,
@@ -213,7 +214,13 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		CookiesFile:      cookiesFile,
 		ResultCh:         resultCh,
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
-	})
+	}); err != nil {
+		log.Printf("[bscheduler] Submit failed for %s: %v", dl.VideoID, err)
+		close(resultCh) // 通知 handleDownloadResult goroutine 退出
+		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed: "+err.Error())
+		s.db.IncrementRetryCount(capturedDlID, "submit failed: "+err.Error())
+		return
+	}
 
 	log.Printf("[bscheduler] Resubmitted %s (retry #%d)", dl.VideoID, dl.RetryCount+1)
 }
