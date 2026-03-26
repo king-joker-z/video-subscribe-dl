@@ -68,7 +68,8 @@ type PHScheduler struct {
 	progressMap map[string]*ProgressInfo
 
 	// 下载事件推送 channel
-	eventCh chan DownloadEvent
+	eventCh     chan DownloadEvent
+	eventChOnce sync.Once // [FIXED: PH-1] 保证 eventCh 只关闭一次
 
 	// 下载 goroutine 并发上限（2）
 	workerSem chan struct{}
@@ -175,7 +176,8 @@ func (s *PHScheduler) Stop() {
 		s.wg.Wait()
 	}
 	// 等所有 worker 退出后再关 eventCh，让上游事件转发 goroutine 正常退出
-	close(s.eventCh)
+	// [FIXED: PH-1] 用 sync.Once 保证只关闭一次，避免重复 close panic
+	s.eventChOnce.Do(func() { close(s.eventCh) })
 }
 
 // ─── 进度推送 ─────────────────────────────────────────────────────────────────
@@ -200,7 +202,9 @@ func (s *PHScheduler) removeProgress(key string) {
 }
 
 // emitEvent 推送下载事件（非阻塞）
+// [FIXED: PH-1] 用 recover 捕获向已关闭 channel 写入时的 panic
 func (s *PHScheduler) emitEvent(evt DownloadEvent) {
+	defer func() { recover() }() //nolint:errcheck
 	select {
 	case s.eventCh <- evt:
 	default:

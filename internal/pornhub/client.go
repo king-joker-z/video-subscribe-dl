@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -35,6 +36,7 @@ var (
 // Client Pornhub HTTP 客户端
 type Client struct {
 	httpClient *http.Client
+	mu         sync.RWMutex // [FIXED: PH-2] 保护 cookie 并发读写
 	cookie     string
 }
 
@@ -73,7 +75,16 @@ func NewClient(cookie ...string) *Client {
 
 // SetCookie 设置用户 Cookie
 func (c *Client) SetCookie(cookie string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.cookie = strings.TrimSpace(cookie)
+}
+
+// getCookie 线程安全地读取 cookie
+func (c *Client) getCookie() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cookie
 }
 
 // Close 释放资源
@@ -94,8 +105,8 @@ func (c *Client) get(rawURL string) ([]byte, int, error) {
 	// 不手动设置 Accept-Encoding，让 Go http.Client 自动处理 gzip 解压
 	// 手动设置后 Go 不会自动解压，会拿到原始压缩数据
 	req.Header.Set("Connection", "keep-alive")
-	if c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
+	if cookie := c.getCookie(); cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -121,8 +132,8 @@ func (c *Client) getJSON(rawURL string) ([]byte, int, error) {
 
 	req.Header.Set("User-Agent", phUserAgent)
 	req.Header.Set("Accept", "application/json, */*")
-	if c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
+	if cookie := c.getCookie(); cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -608,16 +619,13 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 			log.Printf("[pornhub·client] GetVideoURL pc-mode failed, page title: %q", titleText)
 		}
 		// fallback：用 platform=tv Cookie 重试一次（竖屏/新格式兼容）
-		tvCookie := c.cookie
-		if tvCookie != "" {
-			tvCookie = tvCookie + "; platform=tv"
-		} else {
-			tvCookie = "platform=tv"
+		// [FIXED: PH-2] 不直接修改 c.cookie（data race），改为传入临时 cookie 单次请求
+		origCookie := c.getCookie()
+		tvCookie := "platform=tv"
+		if origCookie != "" {
+			tvCookie = origCookie + "; platform=tv"
 		}
-		origCookie := c.cookie
-		c.cookie = tvCookie
-		tvBody, tvStatus, tvErr := c.get(videoPageURL)
-		c.cookie = origCookie // 恢复原始 cookie
+		tvBody, tvStatus, tvErr := c.getWithCookie(videoPageURL, tvCookie)
 
 		if tvErr == nil && tvStatus == 200 {
 			scriptContent, titleText, err = extractAndParse(tvBody)

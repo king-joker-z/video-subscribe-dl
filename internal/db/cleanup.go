@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -24,10 +25,15 @@ func (d *DB) GetOldCompletedDownloads(retentionDays int) ([]Download, error) {
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
+		// [FIXED: DB-2] downloaded_at 可为 NULL，改用 sql.NullTime 避免 Scan panic
+		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &dl.DownloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
 			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
 		}
 		downloads = append(downloads, dl)
 	}

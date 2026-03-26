@@ -16,8 +16,23 @@ const (
 )
 
 func (d *DB) CreateDownload(dl *Download) (int64, error) {
+	// [FIXED: DB-1] INSERT OR IGNORE 冲突时 LastInsertId() 返回 0，改为先查后插。
+	// 先查询是否已存在相同 (source_id, video_id) 的记录
+	var existingID int64
+	err := d.QueryRow(
+		`SELECT id FROM downloads WHERE source_id = ? AND video_id = ? LIMIT 1`,
+		dl.SourceID, dl.VideoID,
+	).Scan(&existingID)
+	if err == nil {
+		// 记录已存在，直接返回已有 ID
+		return existingID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+	// 不存在则插入
 	result, err := d.Exec(`
-		INSERT OR IGNORE INTO downloads (source_id, video_id, title, filename, status, uploader, description, thumbnail, duration)
+		INSERT INTO downloads (source_id, video_id, title, filename, status, uploader, description, thumbnail, duration)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, dl.SourceID, dl.VideoID, dl.Title, dl.Filename, dl.Status, dl.Uploader, dl.Description, dl.Thumbnail, dl.Duration)
 	if err != nil {
