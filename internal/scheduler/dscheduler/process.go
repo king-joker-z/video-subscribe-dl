@@ -152,6 +152,21 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	}
 
 	for attempt := 1; attempt <= 3; attempt++ {
+		// 从第 2 次起重新获取 URL（CDN 直链带时效签名，可能已过期）
+		if attempt > 1 {
+			if newDetail, urlErr := client.GetVideoDetail(dl.VideoID); urlErr == nil && newDetail.VideoURL != "" {
+				newURL := newDetail.VideoURL
+				if !newDetail.URLResolved {
+					if resolved, resolveErr := client.ResolveVideoURL(newDetail.VideoURL); resolveErr == nil {
+						newURL = resolved
+					}
+				}
+				videoURL = newURL
+				log.Printf("[dscheduler] Re-fetched video URL on attempt %d", attempt)
+			} else {
+				log.Printf("[dscheduler] Re-fetch video URL failed on attempt %d: %v", attempt, urlErr)
+			}
+		}
 		ctx := s.rootCtx
 		fileSize, err = downloadFileWithProgress(ctx, videoURL, videoFilePath, dl.ID, title, pCb)
 		if err == nil {
