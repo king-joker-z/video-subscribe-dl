@@ -117,6 +117,41 @@ func (c *Client) Close() {
 	c.httpClient.CloseIdleConnections()
 }
 
+// GetVideoThumbnail 从视频详情页提取封面图 URL（og:image meta 标签）
+// 用于补充历史遗留的空 thumbnail 记录
+func (c *Client) GetVideoThumbnail(videoPageURL string) string {
+	body, status, err := c.get(videoPageURL)
+	if err != nil || status != 200 {
+		return ""
+	}
+	doc, err := html.Parse(strings.NewReader(string(body)))
+	if err != nil {
+		return ""
+	}
+	var thumb string
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if thumb != "" {
+			return
+		}
+		if n.Type == html.ElementNode && n.Data == "meta" {
+			prop := getAttr(n, "property")
+			name := getAttr(n, "name")
+			if prop == "og:image" || name == "twitter:image" {
+				if content := getAttr(n, "content"); content != "" && !strings.HasPrefix(content, "data:image/gif") {
+					thumb = content
+					return
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+	return thumb
+}
+
 // get 发送 GET 请求，返回响应体字节
 func (c *Client) get(rawURL string) ([]byte, int, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)

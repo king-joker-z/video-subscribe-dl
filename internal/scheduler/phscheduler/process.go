@@ -117,6 +117,17 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// thumbnail 为空时尝试从视频详情页补充（处理历史遗留空值）
+	if dl.Thumbnail == "" {
+		if thumb := client.GetVideoThumbnail(videoPageURL); thumb != "" {
+			dl.Thumbnail = thumb
+			s.db.Exec("UPDATE downloads SET thumbnail = ? WHERE id = ?", thumb, dl.ID)
+			log.Printf("[phscheduler] Recovered thumbnail for %s from page", dl.VideoID)
+		} else {
+			log.Printf("[phscheduler] Could not recover thumbnail for %s", dl.VideoID)
+		}
+	}
+
 	// 构建目录结构
 	srcName := src.Name
 	if srcName == "" {
