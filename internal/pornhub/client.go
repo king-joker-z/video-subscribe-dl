@@ -169,7 +169,7 @@ func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
 		return nil, fmt.Errorf("%w: model page returned 404", ErrUnavailable)
 	}
 	if status != 200 {
-		return nil, NewPHError(status, "model page returned non-200")
+		return nil, NewPHErrorAuto(status, "model page returned non-200")
 	}
 
 	// 解析 <title> 标签提取博主名称
@@ -295,7 +295,7 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 		return nil, fmt.Errorf("%w: HTTP %d", ErrRateLimit, status)
 	}
 	if status != 200 {
-		return nil, NewPHError(status, "videos page returned non-200")
+		return nil, NewPHErrorAuto(status, "videos page returned non-200")
 	}
 
 	doc, err := html.Parse(strings.NewReader(string(body)))
@@ -545,39 +545,83 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 		return "", err
 	}
 	if status == 404 || status == 410 {
-		return "", fmt.Errorf("%w: video page returned %d", ErrUnavailable, status)
+		return "", NewPHError(ErrKindUnavailable, status, fmt.Sprintf("video page returned %d", status))
 	}
 	if status == 429 || status == 503 {
-		return "", fmt.Errorf("%w: HTTP %d", ErrRateLimit, status)
+		return "", NewPHError(ErrKindRateLimit, status, fmt.Sprintf("rate limited HTTP %d", status))
+	}
+	// 403：检查页面内容区分"真不可用"与"临时 CDN 拒绝"
+	if status == 403 {
+		bodyStr := strings.ToLower(string(body))
+		unavailableKeywords := []string{
+			"has been removed", "no longer available", "this video is private",
+			"deleted", "flagged for verification", "disabled",
+		}
+		for _, kw := range unavailableKeywords {
+			if strings.Contains(bodyStr, kw) {
+				return "", NewPHError(ErrKindUnavailable, 403, "video unavailable: "+kw)
+			}
+		}
+		// 未命中关键词 → CDN 临时 403，可重试
+		return "", NewPHError(ErrKindTransient, 403, "temporary 403, may retry")
 	}
 	if status != 200 {
-		return "", NewPHError(status, fmt.Sprintf("video page returned %d", status))
+		return "", NewPHErrorAuto(status, fmt.Sprintf("video page returned %d", status))
+	}
+
+	// extractPlayerScriptFromBody 提取 #player script 并返回 titleText（用于诊断）
+	extractAndParse := func(b []byte) (scriptContent string, titleText string, parseErr error) {
+		scriptContent, parseErr = extractPlayerScript(string(b))
+		if parseErr != nil {
+			if doc, err2 := html.Parse(strings.NewReader(string(b))); err2 == nil {
+				var findT func(*html.Node)
+				findT = func(n *html.Node) {
+					if titleText != "" {
+						return
+					}
+					if n.Type == html.ElementNode && n.Data == "title" && n.FirstChild != nil {
+						titleText = n.FirstChild.Data
+					}
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						findT(c)
+					}
+				}
+				findT(doc)
+			}
+		}
+		return
 	}
 
 	// 提取 #player 区域的 script 内容
-	scriptContent, err := extractPlayerScript(string(body))
+	scriptContent, titleText, err := extractAndParse(body)
 	if err != nil {
-		// 打印页面 title 帮助诊断（登录墙/删除/地区封锁）
-		if doc, parseErr := html.Parse(strings.NewReader(string(body))); parseErr == nil {
-			var titleText string
-			var findT func(*html.Node)
-			findT = func(n *html.Node) {
-				if titleText != "" {
-					return
-				}
-				if n.Type == html.ElementNode && n.Data == "title" && n.FirstChild != nil {
-					titleText = n.FirstChild.Data
-				}
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					findT(c)
-				}
-			}
-			findT(doc)
-			if titleText != "" {
-				log.Printf("[pornhub·client] GetVideoURL failed, page title: %q", titleText)
+		if titleText != "" {
+			log.Printf("[pornhub·client] GetVideoURL pc-mode failed, page title: %q", titleText)
+		}
+		// fallback：用 platform=tv Cookie 重试一次（竖屏/新格式兼容）
+		tvCookie := c.cookie
+		if tvCookie != "" {
+			tvCookie = tvCookie + "; platform=tv"
+		} else {
+			tvCookie = "platform=tv"
+		}
+		origCookie := c.cookie
+		c.cookie = tvCookie
+		tvBody, tvStatus, tvErr := c.get(videoPageURL)
+		c.cookie = origCookie // 恢复原始 cookie
+
+		if tvErr == nil && tvStatus == 200 {
+			scriptContent, titleText, err = extractAndParse(tvBody)
+			if err == nil {
+				log.Printf("[pornhub·client] GetVideoURL tv-mode fallback succeeded")
+			} else {
+				log.Printf("[pornhub·client] GetVideoURL tv-mode also failed (title=%q): %v", titleText, err)
 			}
 		}
-		return "", fmt.Errorf("%w: %v", ErrParseFailed, err)
+
+		if err != nil {
+			return "", NewPHError(ErrKindParseFailed, status, fmt.Sprintf("page parse failed (title=%q): %v", titleText, err))
+		}
 	}
 
 	// 提取 flashvars 变量名

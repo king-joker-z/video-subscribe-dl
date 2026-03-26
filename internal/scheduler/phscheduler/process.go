@@ -2,7 +2,6 @@ package phscheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -66,7 +65,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	// 构造视频页面 URL
 	videoPageURL := fmt.Sprintf("https://www.pornhub.com/view_video.php?viewkey=%s", dl.VideoID)
 
-	// 获取 MP4 直链（最多重试 3 次）
+	// 获取 MP4 直链（最多重试 3 次，按错误分类决策）
 	var mp4URL string
 	for attempt := 1; attempt <= 3; attempt++ {
 		mp4URL, err = client.GetVideoURL(videoPageURL)
@@ -75,19 +74,19 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		}
 		log.Printf("[phscheduler] GetVideoURL attempt %d failed for %s: %v", attempt, dl.VideoID, err)
 
-		if pornhub.IsUnavailable(err) {
-			// 内容不可用（删除/私有），标记为跳过
-			log.Printf("[phscheduler] Video %s is unavailable, skipping", dl.VideoID)
-			s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: content unavailable")
-			return
-		}
-		if errors.Is(err, pornhub.ErrParseFailed) {
-			// 页面解析失败（非标准视频/图片集/embed外链），不重试，直接标记跳过
-			log.Printf("[phscheduler] Video %s parse failed (non-standard content), skipping: %v", dl.VideoID, err)
+		switch pornhub.GetErrKind(err) {
+		case pornhub.ErrKindUnavailable:
+			// 内容真不可用（删除/私有），直接 skip，不重试
+			log.Printf("[phscheduler] Video %s unavailable, skipping: %v", dl.VideoID, err)
 			s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: "+err.Error())
 			return
-		}
-		if pornhub.IsRateLimit(err) {
+		case pornhub.ErrKindParseFailed:
+			// 页面解析失败（竖屏新格式/embed外链等），标 failed 留人工排查
+			log.Printf("[phscheduler] Video %s parse failed, marking failed for manual review: %v", dl.VideoID, err)
+			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
+			s.db.IncrementRetryCount(dl.ID, err.Error())
+			return
+		case pornhub.ErrKindRateLimit:
 			reason := fmt.Sprintf("PH 限流触发: %v", err)
 			s.Pause(reason)
 			s.TriggerCooldown()
@@ -98,6 +97,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
 			s.db.IncrementRetryCount(dl.ID, err.Error())
 			return
+		default: // ErrKindTransient：临时错误，继续重试
 		}
 
 		if attempt < 3 {
@@ -163,9 +163,20 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 	// 下载（最多重试 3 次）
 	// HLS m3u8：用 ffmpeg 转存；普通 HTTP：Range 断点续传
+	// HLS URL 带 CDN 时效签名，重试时重新获取防止过期
 	var fileSize int64
 	isHLS := strings.Contains(mp4URL, ".m3u8")
 	for attempt := 1; attempt <= 3; attempt++ {
+		// 从第 2 次起，HLS 重新获取 URL（CDN 签名可能过期）
+		if attempt > 1 && isHLS {
+			if newURL, urlErr := client.GetVideoURL(videoPageURL); urlErr == nil {
+				mp4URL = newURL
+				isHLS = strings.Contains(mp4URL, ".m3u8")
+				log.Printf("[phscheduler] Re-fetched URL on attempt %d (isHLS=%v)", attempt, isHLS)
+			} else {
+				log.Printf("[phscheduler] Re-fetch URL failed on attempt %d: %v", attempt, urlErr)
+			}
+		}
 		ctx := s.rootCtx
 		if isHLS {
 			fileSize, err = downloadHLSWithFFmpeg(ctx, mp4URL, videoFilePath, dl.ID, title, pCb)
