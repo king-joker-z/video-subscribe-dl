@@ -24,7 +24,11 @@ func (d *DB) CreateDownload(dl *Download) (int64, error) {
 		dl.SourceID, dl.VideoID,
 	).Scan(&existingID)
 	if err == nil {
-		// 记录已存在，直接返回已有 ID
+		// 记录已存在，更新 thumbnail（可能上次为空，本次拿到了新值）
+		if dl.Thumbnail != "" {
+			d.Exec(`UPDATE downloads SET thumbnail = ? WHERE id = ? AND (thumbnail IS NULL OR thumbnail = '')`,
+				dl.Thumbnail, existingID)
+		}
 		return existingID, nil
 	}
 	if err != sql.ErrNoRows {
