@@ -128,6 +128,7 @@ type Download struct {
 	DetailStatus int        `json:"detail_status"` // 位图: 1=封面 2=视频 4=NFO 8=弹幕 16=字幕
 	LastError    string     `json:"last_error"`
 	CreatedAt    time.Time  `json:"created_at"`
+	NextRetryAt  int64      `json:"next_retry_at"`
 }
 
 type Person struct {
@@ -177,6 +178,7 @@ func Init(dataDir string) (*DB, error) {
 		"ALTER TABLE sources ADD COLUMN filter_rules TEXT DEFAULT ''",
 		"ALTER TABLE sources ADD COLUMN download_subtitle INTEGER DEFAULT 0",
 		"ALTER TABLE downloads ADD COLUMN detail_status INTEGER DEFAULT 0",
+		`ALTER TABLE downloads ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0`,
 	}
 	// [FIXED: P2-13] 区分「列已存在」（预期的幂等错误，可忽略）与真实错误（应记录日志）
 	for _, m := range migrations {

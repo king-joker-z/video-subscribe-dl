@@ -345,3 +345,18 @@ func (s *DouyinScheduler) downloadDouyinNote(dl db.Download, src db.Source, deta
 		fmt.Sprintf("抖音图集下载完成: %s (%d张)", title, successCount),
 		fmt.Sprintf("作者: %s\n大小: %.1f MB", uploaderName, float64(totalSize)/(1024*1024)))
 }
+
+// markFailed 标记下载失败并设置退避重试时间
+// 若 retry_count+1 >= 3，升级为 permanent_failed，不再自动重试
+func (s *DouyinScheduler) markFailed(dl db.Download, errMsg string) {
+	newCount := dl.RetryCount + 1
+	if newCount >= 3 {
+		s.db.UpdateDownloadStatus(dl.ID, "permanent_failed", "", 0, errMsg)
+		log.Printf("[dscheduler] Video %s marked permanent_failed after %d retries", dl.VideoID, newCount)
+	} else {
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, errMsg)
+		s.db.IncrementRetryCount(dl.ID, errMsg)
+		s.db.SetNextRetryAt(dl.ID, dl.RetryCount)
+		log.Printf("[dscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", dl.VideoID, []int{15, 30, 60}[dl.RetryCount], newCount)
+	}
+}

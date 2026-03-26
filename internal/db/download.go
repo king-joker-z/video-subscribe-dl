@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // 下载状态位图常量
@@ -683,4 +684,58 @@ func (d *DB) GetSourcesStats() (map[int64]*SourceStats, error) {
 		result[sourceID] = s
 	}
 	return result, rows.Err()
+}
+
+// GetRetryableDownloads 获取可重试的失败下载记录
+// 条件：status='failed' AND retry_count < 3 AND next_retry_at <= now AND source.type=platform
+func (d *DB) GetRetryableDownloads(platform string, limit int) ([]Download, error) {
+	now := time.Now().Unix()
+	rows, err := d.Query(`
+		SELECT d.id, d.source_id, d.video_id, d.title, d.uploader, d.thumbnail,
+		       d.status, d.file_path, d.file_size, d.error_message, d.retry_count,
+		       d.duration, d.downloaded_at, d.detail_status, d.next_retry_at
+		FROM downloads d
+		JOIN sources s ON d.source_id = s.id
+		WHERE d.status = 'failed'
+		  AND d.retry_count < 3
+		  AND d.next_retry_at <= ?
+		  AND s.type = ?
+		ORDER BY d.next_retry_at ASC
+		LIMIT ?
+	`, now, platform, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var downloads []Download
+	for rows.Next() {
+		var dl Download
+		var downloadedAt sql.NullTime
+		if err := rows.Scan(
+			&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Uploader, &dl.Thumbnail,
+			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.ErrorMessage, &dl.RetryCount,
+			&dl.Duration, &downloadedAt, &dl.DetailStatus, &dl.NextRetryAt,
+		); err != nil {
+			return nil, err
+		}
+		if downloadedAt.Valid {
+			dl.DownloadedAt = &downloadedAt.Time
+		}
+		downloads = append(downloads, dl)
+	}
+	return downloads, rows.Err()
+}
+
+// SetNextRetryAt 按退避规则设置下次重试时间
+// retryCount=0 → 15分钟；retryCount=1 → 30分钟；retryCount=2 → 60分钟
+func (d *DB) SetNextRetryAt(id int64, retryCount int) error {
+	delays := []time.Duration{15 * time.Minute, 30 * time.Minute, 60 * time.Minute}
+	delay := 60 * time.Minute
+	if retryCount < len(delays) {
+		delay = delays[retryCount]
+	}
+	nextRetryAt := time.Now().Add(delay).Unix()
+	_, err := d.Exec(`UPDATE downloads SET next_retry_at = ? WHERE id = ?`, nextRetryAt, id)
+	return err
 }

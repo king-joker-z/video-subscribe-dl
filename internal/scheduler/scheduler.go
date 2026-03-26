@@ -212,6 +212,22 @@ func (s *Scheduler) Start() {
 		}()
 	}
 
+	// 独立重试 Worker：每 5 分钟扫描 failed 记录，按指数退避重试（最多 3 次）
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.processRetryQueue()
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+
 	log.Println("Scheduler started (interval: 5min)")
 }
 
@@ -662,4 +678,35 @@ func (s *Scheduler) GetPHCooldownInfo() (inCooldown bool, remainingSec int) {
 		return false, 0
 	}
 	return s.ph.GetCooldownInfo()
+}
+
+// processRetryQueue 扫描各平台 failed 记录，按退避时间重新投递
+func (s *Scheduler) processRetryQueue() {
+	platforms := []struct {
+		name string
+		fn   func(dl db.Download)
+	}{
+		{"bilibili", func(dl db.Download) { s.bili.RetryDownload(dl) }},
+		{"douyin", func(dl db.Download) {
+			if s.douyin != nil {
+				s.douyin.RetryDownload(dl)
+			}
+		}},
+		{"pornhub", func(dl db.Download) {
+			if s.ph != nil {
+				s.ph.RetryDownload(dl)
+			}
+		}},
+	}
+	for _, p := range platforms {
+		downloads, err := s.db.GetRetryableDownloads(p.name, 10)
+		if err != nil {
+			log.Printf("[retry-worker] GetRetryableDownloads(%s) error: %v", p.name, err)
+			continue
+		}
+		for _, dl := range downloads {
+			log.Printf("[retry-worker] Re-queuing %s download %s (retry_count=%d)", p.name, dl.VideoID, dl.RetryCount)
+			p.fn(dl)
+		}
+	}
 }

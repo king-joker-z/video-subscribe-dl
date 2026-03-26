@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"log"
-	"time"
 
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/db"
@@ -45,32 +44,16 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 	}
 }
 
-// retryFailedDownloads 扫描失败下载并重试可重试的
+// retryFailedDownloads 委托给 processRetryQueue（独立 retry worker）
+// 保留此函数签名供 checkAll 调用，避免破坏现有调用链
 func (s *Scheduler) retryFailedDownloads() {
-	const maxPerCycle = 5
-
+	// processRetryQueue 已在独立 goroutine 每 5 分钟运行，此处不重复扫描
+	// 仅保留 permanent_failed 升级逻辑（超出最大重试次数的旧记录）
 	marked, err := s.db.MarkPermanentFailed(config.MaxRetryCount)
 	if err != nil {
 		log.Printf("[retry-scheduler] Mark permanent failed error: %v", err)
 	} else if marked > 0 {
 		log.Printf("[retry-scheduler] Marked %d downloads as permanent_failed", marked)
-	}
-
-	retryable, err := s.db.GetRetryableDownloads(config.MaxRetryCount, maxPerCycle)
-	if err != nil {
-		log.Printf("[retry-scheduler] Get retryable downloads error: %v", err)
-		return
-	}
-
-	if len(retryable) == 0 {
-		return
-	}
-
-	log.Printf("[retry-scheduler] Found %d retryable failed downloads", len(retryable))
-
-	for _, dl := range retryable {
-		s.retryOneDownload(dl)
-		time.Sleep(2 * time.Second)
 	}
 }
 

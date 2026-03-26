@@ -569,3 +569,18 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 	log.Printf("[bscheduler] Completed: %s -> %s", videoID, result.FilePath)
 	s.notifier.Send(notify.EventDownloadComplete, "下载完成: "+detailTitle, result.FilePath)
 }
+
+// markFailed 标记下载失败并设置退避重试时间
+// 若 retry_count+1 >= 3，升级为 permanent_failed，不再自动重试
+func (s *BiliScheduler) markFailed(dlID int64, retryCount int, videoID string, errMsg string) {
+	newCount := retryCount + 1
+	if newCount >= 3 {
+		s.db.UpdateDownloadStatus(dlID, "permanent_failed", "", 0, errMsg)
+		log.Printf("[bscheduler] Video %s marked permanent_failed after %d retries", videoID, newCount)
+	} else {
+		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, errMsg)
+		s.db.IncrementRetryCount(dlID, errMsg)
+		s.db.SetNextRetryAt(dlID, retryCount)
+		log.Printf("[bscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", videoID, []int{15, 30, 60}[retryCount], newCount)
+	}
+}

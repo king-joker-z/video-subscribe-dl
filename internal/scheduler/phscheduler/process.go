@@ -313,3 +313,18 @@ func downloadHLSWithFFmpeg(ctx context.Context, m3u8URL, destPath string, dlID i
 	cb(ProgressInfo{Status: "done", Downloaded: size})
 	return size, nil
 }
+
+// markFailed 标记下载失败并设置退避重试时间
+// 若 retry_count+1 >= 3，升级为 permanent_failed，不再自动重试
+func (s *PHScheduler) markFailed(dl db.Download, errMsg string) {
+	newCount := dl.RetryCount + 1
+	if newCount >= 3 {
+		s.db.UpdateDownloadStatus(dl.ID, "permanent_failed", "", 0, errMsg)
+		log.Printf("[phscheduler] Video %s marked permanent_failed after %d retries", dl.VideoID, newCount)
+	} else {
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, errMsg)
+		s.db.IncrementRetryCount(dl.ID, errMsg)
+		s.db.SetNextRetryAt(dl.ID, dl.RetryCount)
+		log.Printf("[phscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", dl.VideoID, []int{15, 30, 60}[dl.RetryCount], newCount)
+	}
+}

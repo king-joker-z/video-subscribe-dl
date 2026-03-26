@@ -18,8 +18,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// ErrDouyinRiskControl 抖音风控错误（API 返回空/截断响应或页面被验证码拦截）
-var ErrDouyinRiskControl = errors.New("douyin risk control detected")
+// ErrDouyinRiskControl 定义在 error.go
 
 //go:embed sign.js
 var signScript string
@@ -337,7 +336,7 @@ func (c *DouyinClient) GetVideoDetail(videoID string) (*DouyinVideo, error) {
 	if err == nil {
 		return video, nil
 	}
-	logger.Info("detail API failed, falling back to page scrape", "videoID", videoID, "error", err)
+	logger.Info("detail API unavailable, using page scrape fallback", "videoID", videoID, "error", err)
 
 	// 降级: 页面解析
 	return c.getVideoDetailPage(videoID)
@@ -457,7 +456,7 @@ func (c *DouyinClient) getVideoDetailPage(videoID string) (*DouyinVideo, error) 
 			return video, nil
 		}
 		// getNoteDetail 失败时降级到页面解析（body 已在手）
-		logger.Info("getNoteDetail failed, falling back to page parse", "videoID", videoID, "error", err)
+		logger.Info("getNoteDetail unavailable, using page parse fallback", "videoID", videoID, "error", err)
 	}
 
 	// 风控检测: 小 body 通常是验证码/captcha 页面

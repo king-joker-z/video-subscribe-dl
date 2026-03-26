@@ -103,6 +103,7 @@ type DouyinScheduler struct {
 	// 生命周期 context（Stop 时取消，中断正在进行的下载）
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 // Config 创建 DouyinScheduler 所需的配置
@@ -132,7 +133,7 @@ func New(cfg Config) *DouyinScheduler {
 		eventCh:         make(chan DownloadEvent, 100),
 		cookieValid:     true,
 		downloadLimiter: douyin.NewRateLimiter(3, 1, 15*time.Second),
-		workerSem:       make(chan struct{}, 8), // 最多 8 个并发下载 goroutine
+		workerSem:       make(chan struct{}, 3), // 最多 3 个并发下载 goroutine
 		rootCtx:         ctx,
 		rootCancel:      cancel,
 	}
@@ -151,10 +152,23 @@ func (s *DouyinScheduler) CheckSource(src db.Source) {
 	}
 }
 
-// RetryDownload 重试单个抖音下载记录（通过信号量限制并发 goroutine 数量）
+// RetryDownload 重试单个抖音下载记录（通过信号量限制并发，与 phscheduler 对齐）
 func (s *DouyinScheduler) RetryDownload(dl db.Download) {
-	s.workerSem <- struct{}{} // 获取 slot，满时阻塞（调用方通常在 go func 内，不影响主流程）
+	s.workerSem <- struct{}{} // 获取 slot，满时阻塞
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
+		defer func() { <-s.workerSem }()
+		s.RetryOneDownload(dl)
+	}()
+}
+
+// DispatchDownload 异步提交单个下载任务（非阻塞，workerSem 满时在 goroutine 内等待）
+func (s *DouyinScheduler) DispatchDownload(dl db.Download) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.workerSem <- struct{}{} // goroutine 内等待 slot，不阻塞调用方
 		defer func() { <-s.workerSem }()
 		s.RetryOneDownload(dl)
 	}()
@@ -175,6 +189,9 @@ func (s *DouyinScheduler) Stop() {
 	if s.downloadLimiter != nil {
 		s.downloadLimiter.Stop()
 	}
+	s.wg.Wait()
+	// 等所有 worker 退出后再关 eventCh
+	close(s.eventCh)
 }
 
 // ─── 进度推送 ──────────────────────────────────────────────────────────────────
