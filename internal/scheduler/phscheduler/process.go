@@ -208,10 +208,18 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	log.Printf("[phscheduler] Downloaded: %s → %s (%.1f MB)", dl.VideoID, videoFilePath, float64(fileSize)/(1024*1024))
 
 	// 下载封面
-	if !src.SkipPoster && dl.Thumbnail != "" {
-		thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
-		if thumbErr := downloadThumb(dl.Thumbnail, thumbPath); thumbErr != nil {
-			log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
+	if !src.SkipPoster {
+		if dl.Thumbnail == "" {
+			log.Printf("[phscheduler] Thumbnail URL is empty for %s, skipping thumb download", dl.VideoID)
+		} else {
+			thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
+			if thumbErr := downloadThumb(dl.Thumbnail, thumbPath); thumbErr != nil {
+				log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
+			} else {
+				if dbErr := s.db.UpdateThumbPath(dl.ID, thumbPath); dbErr != nil {
+					log.Printf("[phscheduler] UpdateThumbPath failed for %s: %v", dl.VideoID, dbErr)
+				}
+			}
 		}
 	}
 
@@ -240,8 +248,24 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	}
 }
 
-// downloadThumb 下载封面图到指定路径
+// downloadThumb 下载封面图到指定路径，最多重试 3 次（指数退避 2s/4s）
 func downloadThumb(thumbURL, destPath string) error {
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		lastErr = downloadThumbOnce(thumbURL, destPath)
+		if lastErr == nil {
+			return nil
+		}
+		log.Printf("[phscheduler] downloadThumb attempt %d failed: %v", attempt, lastErr)
+		if attempt < 3 {
+			time.Sleep(time.Duration(2*(1<<(attempt-1))) * time.Second) // 2s, 4s
+		}
+	}
+	return lastErr
+}
+
+// downloadThumbOnce 执行单次封面图下载
+func downloadThumbOnce(thumbURL, destPath string) error {
 	req, err := http.NewRequest("GET", thumbURL, nil)
 	if err != nil {
 		return err

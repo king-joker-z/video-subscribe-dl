@@ -621,13 +621,16 @@ func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// 从 file_path 推算
+	// 从 file_path 推算（同时尝试 -poster.jpg 和 -thumb.jpg）
 	if dl.FilePath != "" {
 		ext := filepath.Ext(dl.FilePath)
-		thumbPath := strings.TrimSuffix(dl.FilePath, ext) + "-thumb.jpg"
-		if _, err := os.Stat(thumbPath); err == nil {
-			http.ServeFile(w, r, thumbPath)
-			return
+		base := strings.TrimSuffix(dl.FilePath, ext)
+		for _, suffix := range []string{"-poster.jpg", "-thumb.jpg"} {
+			thumbPath := base + suffix
+			if _, err := os.Stat(thumbPath); err == nil {
+				http.ServeFile(w, r, thumbPath)
+				return
+			}
 		}
 	}
 	// 302 到 CDN

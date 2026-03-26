@@ -508,11 +508,20 @@ func extractVideoFromContainer(n *html.Node) Video {
 		}
 		// 查找 img 获取缩略图
 		if child.Type == html.ElementNode && child.Data == "img" {
-			if src := getAttr(child, "src"); src != "" && !strings.HasSuffix(src, ".gif") && video.Thumbnail == "" {
+			if src := getAttr(child, "src"); src != "" && !strings.HasPrefix(src, "data:image/gif") && video.Thumbnail == "" {
 				video.Thumbnail = src
 			}
-			// 懒加载图片
-			if src := getAttr(child, "data-src"); src != "" && !strings.HasSuffix(src, ".gif") && video.Thumbnail == "" {
+			// 懒加载图片（依次 fallback：data-src → data-thumb_url → data-original → data-image）
+			if src := getAttr(child, "data-src"); src != "" && !strings.HasPrefix(src, "data:image/gif") && video.Thumbnail == "" {
+				video.Thumbnail = src
+			}
+			if src := getAttr(child, "data-thumb_url"); src != "" && !strings.HasPrefix(src, "data:image/gif") && video.Thumbnail == "" {
+				video.Thumbnail = src
+			}
+			if src := getAttr(child, "data-original"); src != "" && !strings.HasPrefix(src, "data:image/gif") && video.Thumbnail == "" {
+				video.Thumbnail = src
+			}
+			if src := getAttr(child, "data-image"); src != "" && !strings.HasPrefix(src, "data:image/gif") && video.Thumbnail == "" {
 				video.Thumbnail = src
 			}
 			// 从 img alt 获取标题兜底
