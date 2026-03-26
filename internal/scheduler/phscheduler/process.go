@@ -44,7 +44,8 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 	if !src.Enabled {
-		log.Printf("[phscheduler] Source %d (%s) is disabled, skipping download %s", src.ID, src.Name, dl.VideoID)
+		log.Printf("[phscheduler] Source %d (%s) is disabled, marking download %s as skipped", src.ID, src.Name, dl.VideoID)
+		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: source disabled")
 		return
 	}
 
