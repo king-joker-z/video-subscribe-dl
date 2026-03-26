@@ -686,9 +686,9 @@ func (d *DB) GetSourcesStats() (map[int64]*SourceStats, error) {
 	return result, rows.Err()
 }
 
-// GetRetryableDownloads 获取可重试的失败下载记录
+// GetRetryableDownloadsByPlatform 获取可重试的失败下载记录（按平台过滤）
 // 条件：status='failed' AND retry_count < 3 AND next_retry_at <= now AND source.type=platform
-func (d *DB) GetRetryableDownloads(platform string, limit int) ([]Download, error) {
+func (d *DB) GetRetryableDownloadsByPlatform(platform string, limit int) ([]Download, error) {
 	now := time.Now().Unix()
 	rows, err := d.Query(`
 		SELECT d.id, d.source_id, d.video_id, d.title, d.uploader, d.thumbnail,

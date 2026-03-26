@@ -699,9 +699,9 @@ func (s *Scheduler) processRetryQueue() {
 		}},
 	}
 	for _, p := range platforms {
-		downloads, err := s.db.GetRetryableDownloads(p.name, 10)
+		downloads, err := s.db.GetRetryableDownloadsByPlatform(p.name, 10)
 		if err != nil {
-			log.Printf("[retry-worker] GetRetryableDownloads(%s) error: %v", p.name, err)
+			log.Printf("[retry-worker] GetRetryableDownloadsByPlatform(%s) error: %v", p.name, err)
 			continue
 		}
 		for _, dl := range downloads {
