@@ -2,11 +2,13 @@ package douyin
 
 import (
 	"bytes"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -95,11 +97,12 @@ func setClientHints(req *http.Request, ua string) {
 
 // DouyinClient 抖音 API 客户端
 type DouyinClient struct {
-	noRedirectClient *http.Client          // 不跟随重定向
-	normalClient     *http.Client          // 正常 client
-	limiter          *RateLimiter
-	fingerprint      *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
-	sessionMsToken   string                // 会话级 msToken（Cookie 中的 msToken 保持一致）
+	noRedirectClient  *http.Client          // 不跟随重定向
+	normalClient      *http.Client          // 正常 client
+	downloadTransport *http.Transport       // 每实例独立的下载 Transport，Close() 时只关自己的
+	limiter           *RateLimiter
+	fingerprint       *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
+	sessionMsToken    string                // 会话级 msToken（Cookie 中的 msToken 保持一致）
 }
 
 // getSessionCookie 返回使用会话级 msToken 的 Cookie
@@ -113,10 +116,29 @@ func (c *DouyinClient) getSessionCookie() string {
 	return globalCookieMgr.getCookieStringWithMsToken(c.normalClient, c.sessionMsToken)
 }
 
+// newDownloadTransport 创建一个独立的下载用 http.Transport（每实例独享）
+func newDownloadTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		MaxIdleConns:           100,
+		MaxIdleConnsPerHost:    10,
+		IdleConnTimeout:        90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout:  1 * time.Second,
+		ResponseHeaderTimeout:  30 * time.Second,
+	}
+}
+
 // NewClient 创建抖音客户端（使用会话级指纹，确保同一实例内请求一致性）
+// 每个实例持有独立的 downloadTransport，Close() 只关闭自己的连接池，不影响其他实例。
 func NewClient() *DouyinClient {
 	fp := GetSessionFingerprint()
 	logger.Info("client created", "fingerprint", fp)
+	transport := newDownloadTransport()
 	return &DouyinClient{
 		noRedirectClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -127,18 +149,22 @@ func NewClient() *DouyinClient {
 		normalClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		limiter:     DefaultRateLimiter(),
-		fingerprint: fp,
+		downloadTransport: transport,
+		limiter:           DefaultRateLimiter(),
+		fingerprint:       fp,
 	}
 }
 
-// Close 关闭客户端，停止 RateLimiter 的 refill goroutine，释放下载连接池资源
+// Close 关闭客户端，停止 RateLimiter 的 refill goroutine，释放本实例的下载连接池资源
 // 每次 NewClient() 都会创建新的 RateLimiter goroutine，必须在使用完毕后调用 Close()
+// [FIXED: D-1] 只关闭本实例的 downloadTransport，不影响其他实例
 func (c *DouyinClient) Close() {
 	if c.limiter != nil {
 		c.limiter.Stop()
 	}
-	CloseDownloadClients()
+	if c.downloadTransport != nil {
+		c.downloadTransport.CloseIdleConnections()
+	}
 }
 
 // ---- X-Bogus 签名 ----

@@ -1,12 +1,12 @@
 package douyin
 
 import (
-	"time"
 	_ "embed"
 	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -36,25 +36,39 @@ const (
 	abogusMaxUses  = 500 // 每个 VM 最大使用次数后丢弃重建
 )
 
+// abogusPoolHolder 用 atomic.Value 持有 *abogusPool，支持并发安全的热更新
+// [FIXED: D-3] 用 atomic.Value 替代 sync.Once+plain var，消除并发赋值 data race
+type abogusPoolHolder struct {
+	pool *abogusPool
+	err  error
+}
+
 var (
-	globalABogusPool     *abogusPool
-	globalABogusPoolOnce sync.Once
-	globalABogusPoolErr  error
+	globalABogusPoolValue atomic.Value // stores *abogusPoolHolder
+	globalABogusPoolOnce  sync.Once
 )
 
-// getABogusPool 获取全局 a_bogus 签名池（懒初始化单例）
+// getABogusPool 获取全局 a_bogus 签名池（懒初始化单例，热更新时原子替换）
 func getABogusPool() (*abogusPool, error) {
 	globalABogusPoolOnce.Do(func() {
-		globalABogusPool, globalABogusPoolErr = newABogusPool(abogusPoolSize, abogusMaxUses)
+		pool, err := newABogusPool(abogusPoolSize, abogusMaxUses)
+		globalABogusPoolValue.Store(&abogusPoolHolder{pool: pool, err: err})
 	})
-	return globalABogusPool, globalABogusPoolErr
+	if h, ok := globalABogusPoolValue.Load().(*abogusPoolHolder); ok && h != nil {
+		return h.pool, h.err
+	}
+	return nil, fmt.Errorf("a_bogus pool not initialized")
+}
+
+// storeABogusPool 原子替换全局 a_bogus 签名池（热更新专用）
+func storeABogusPool(pool *abogusPool) {
+	globalABogusPoolValue.Store(&abogusPoolHolder{pool: pool, err: nil})
 }
 
 // resetABogusPool 重置全局签名池（用于测试）
 func resetABogusPool() {
 	globalABogusPoolOnce = sync.Once{}
-	globalABogusPool = nil
-	globalABogusPoolErr = nil
+	globalABogusPoolValue.Store((*abogusPoolHolder)(nil))
 }
 
 // newABogusPool 创建 a_bogus 签名 VM 池

@@ -1,6 +1,7 @@
 package douyin
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -33,25 +34,39 @@ const (
 	maxReplaceRetries = 5   // replaceEntry 最大重试次数
 )
 
+// signPoolHolder 用 atomic.Value 持有 *signPool，支持并发安全的热更新
+// [FIXED: D-3] 用 atomic.Value 替代 sync.Once+plain var，消除并发赋值 data race
+type signPoolHolder struct {
+	pool *signPool
+	err  error
+}
+
 var (
-	globalSignPool     *signPool
-	globalSignPoolOnce sync.Once
-	globalSignPoolErr  error
+	globalSignPoolValue atomic.Value // stores *signPoolHolder
+	globalSignPoolOnce  sync.Once
 )
 
-// getSignPool 获取全局签名池（懒初始化单例）
+// getSignPool 获取全局签名池（懒初始化单例，热更新时原子替换）
 func getSignPool() (*signPool, error) {
 	globalSignPoolOnce.Do(func() {
-		globalSignPool, globalSignPoolErr = newSignPool(defaultPoolSize, defaultMaxUses)
+		pool, err := newSignPool(defaultPoolSize, defaultMaxUses)
+		globalSignPoolValue.Store(&signPoolHolder{pool: pool, err: err})
 	})
-	return globalSignPool, globalSignPoolErr
+	if h, ok := globalSignPoolValue.Load().(*signPoolHolder); ok && h != nil {
+		return h.pool, h.err
+	}
+	return nil, fmt.Errorf("sign pool not initialized")
+}
+
+// storeSignPool 原子替换全局签名池（热更新专用）
+func storeSignPool(pool *signPool) {
+	globalSignPoolValue.Store(&signPoolHolder{pool: pool, err: nil})
 }
 
 // resetSignPool 重置全局签名池（用于测试）
 func resetSignPool() {
 	globalSignPoolOnce = sync.Once{}
-	globalSignPool = nil
-	globalSignPoolErr = nil
+	globalSignPoolValue.Store((*signPoolHolder)(nil))
 }
 
 // newSignPool 创建签名 VM 池
@@ -96,10 +111,21 @@ func (sp *signPool) newEntry() (*poolEntry, error) {
 	return &poolEntry{vm: vm, uses: 0}, nil
 }
 
+// signPoolGetTimeout 从池中获取 VM 实例的最大等待时间
+const signPoolGetTimeout = 10 * time.Second
+
 // sign 执行 X-Bogus 签名
+// [FIXED: D-2] VM 批量失败时改用带超时的 select，避免永久阻塞
 func (sp *signPool) sign(queryStr, userAgent string) (string, error) {
-	// 从池中获取 VM
-	entry := <-sp.pool
+	// 从池中获取 VM（带超时，防止 VM 批量失败时永久阻塞）
+	ctx, cancel := context.WithTimeout(context.Background(), signPoolGetTimeout)
+	defer cancel()
+	var entry *poolEntry
+	select {
+	case entry = <-sp.pool:
+	case <-ctx.Done():
+		return "", fmt.Errorf("sign pool: timed out waiting for available VM (pool may be exhausted)")
+	}
 
 	// 对参数进行转义，防止 JS 注入（单引号）— 与 abogus_pool.go 保持一致
 	safeQuery := escapeJSString(queryStr)

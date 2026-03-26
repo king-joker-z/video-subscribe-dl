@@ -165,6 +165,7 @@ func (su *SignUpdater) updatePool(
 }
 
 // reloadSignPool 用新的 JS 代码重建 X-Bogus 签名池
+// [FIXED: D-3] 使用 storeSignPool 原子替换，消除 sync.Once 并发赋值 data race
 func (su *SignUpdater) reloadSignPool(jsCode string) error {
 	program, err := goja.Compile("sign.js", jsCode, false)
 	if err != nil {
@@ -186,18 +187,15 @@ func (su *SignUpdater) reloadSignPool(jsCode string) error {
 		pool.pool <- entry
 	}
 
-	// 原子替换全局池
-	globalSignPoolOnce = sync.Once{}
-	globalSignPoolOnce.Do(func() {
-		globalSignPool = pool
-		globalSignPoolErr = nil
-	})
+	// 原子替换全局池（线程安全，不依赖 sync.Once）
+	storeSignPool(pool)
 
 	slog.Info("sign pool reloaded", "module", "douyin", "size", defaultPoolSize)
 	return nil
 }
 
 // reloadABogusPool 用新的 JS 代码重建 a_bogus 签名池
+// [FIXED: D-3] 使用 storeABogusPool 原子替换，消除 sync.Once 并发赋值 data race
 func (su *SignUpdater) reloadABogusPool(jsCode string) error {
 	program, err := goja.Compile("a_bogus.js", jsCode, false)
 	if err != nil {
@@ -219,12 +217,8 @@ func (su *SignUpdater) reloadABogusPool(jsCode string) error {
 		pool.pool <- entry
 	}
 
-	// 原子替换全局池
-	globalABogusPoolOnce = sync.Once{}
-	globalABogusPoolOnce.Do(func() {
-		globalABogusPool = pool
-		globalABogusPoolErr = nil
-	})
+	// 原子替换全局池（线程安全，不依赖 sync.Once）
+	storeABogusPool(pool)
 
 	slog.Info("a_bogus pool reloaded", "module", "douyin", "size", abogusPoolSize)
 	return nil
