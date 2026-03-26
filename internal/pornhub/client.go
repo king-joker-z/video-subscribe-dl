@@ -87,6 +87,31 @@ func (c *Client) getCookie() string {
 	return c.cookie
 }
 
+// getWithCookie 发送 GET 请求并使用指定的 cookie（不修改 c.cookie，用于临时覆盖场景）
+func (c *Client) getWithCookie(rawURL, cookie string) ([]byte, int, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("User-Agent", phUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Connection", "keep-alive")
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("http get %s: %w", rawURL, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read body %s: %w", rawURL, err)
+	}
+	return body, resp.StatusCode, nil
+}
+
 // Close 释放资源
 func (c *Client) Close() {
 	c.httpClient.CloseIdleConnections()

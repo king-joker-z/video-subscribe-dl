@@ -103,6 +103,8 @@ func (s *Scheduler) Start() {
 		// 委托给 BiliScheduler 做 B 站初始化工作
 		s.bili.Startup()
 
+		// [FIXED: DS-1] 重置抖音平台僵死的 downloading 记录
+		s.douyin.Start()
 		s.douyin.LoadUserCookie()
 		s.ph.LoadUserCookie()
 		s.ProcessAllPending()

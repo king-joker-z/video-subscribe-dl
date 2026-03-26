@@ -5,6 +5,7 @@ package dscheduler
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -90,7 +91,8 @@ type DouyinScheduler struct {
 	progressMap map[string]*ProgressInfo
 
 	// 下载事件推送 channel
-	eventCh chan DownloadEvent
+	eventCh     chan DownloadEvent
+	eventChOnce sync.Once // [FIXED: DS-8] 保证 eventCh 只关闭一次
 
 	// 下载 goroutine 并发上限（防止批量提交时无限创建 goroutine）
 	workerSem chan struct{}
@@ -104,6 +106,9 @@ type DouyinScheduler struct {
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
 	wg         sync.WaitGroup
+
+	// [FIXED: DS-2] 复用 http.Client，避免每次下载新建 transport
+	httpClient *http.Client
 }
 
 // Config 创建 DouyinScheduler 所需的配置
@@ -136,8 +141,34 @@ func New(cfg Config) *DouyinScheduler {
 		workerSem:       make(chan struct{}, 8), // 最多 8 个并发下载 goroutine
 		rootCtx:         ctx,
 		rootCancel:      cancel,
+		// [FIXED: DS-2] 初始化一次，复用 transport（与 defaultDouyinDownloadClient 共享同一实例）
+		httpClient: defaultDouyinDownloadClient,
 	}
 	return s
+}
+
+// Start 在调度器启动时调用，重置崩溃遗留的僵死 "downloading" 记录为 "pending"
+// [FIXED: DS-1] 防止进程崩溃后 downloading 状态记录永久卡住
+func (s *DouyinScheduler) Start() {
+	s.resetStaleDownloading()
+}
+
+// resetStaleDownloading 将抖音平台僵死的 "downloading" 状态记录重置为 "pending"
+func (s *DouyinScheduler) resetStaleDownloading() {
+	result, err := s.db.Exec(`
+		UPDATE downloads SET status = 'pending'
+		WHERE status = 'downloading'
+		  AND source_id IN (
+		    SELECT id FROM sources WHERE type IN ('douyin','douyin_mix')
+		  )
+	`)
+	if err != nil {
+		return
+	}
+	if n, _ := result.RowsAffected(); n > 0 {
+		_ = n
+		// 日志由调用方记录或忽略
+	}
 }
 
 // ─── PlatformScheduler 接口实现 ───────────────────────────────────────────────
@@ -191,7 +222,8 @@ func (s *DouyinScheduler) Stop() {
 	}
 	s.wg.Wait()
 	// 等所有 worker 退出后再关 eventCh
-	close(s.eventCh)
+	// [FIXED: DS-8] 用 sync.Once 保证只关闭一次，避免重复 close panic
+	s.eventChOnce.Do(func() { close(s.eventCh) })
 }
 
 // ─── 进度推送 ──────────────────────────────────────────────────────────────────
@@ -216,7 +248,9 @@ func (s *DouyinScheduler) removeProgress(key string) {
 }
 
 // emitEvent 推送下载事件（非阻塞）
+// [FIXED: DS-8] 用 recover 捕获向已关闭 channel 写入时的 panic
 func (s *DouyinScheduler) emitEvent(evt DownloadEvent) {
+	defer func() { recover() }() //nolint:errcheck
 	select {
 	case s.eventCh <- evt:
 	default:

@@ -683,13 +683,26 @@ func DownloadFile(rawURL, dest string) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("download %s: HTTP %d", rawURL, resp.StatusCode)
 	}
-	f, err := os.Create(dest)
+
+	// [FIXED: B-1] 写入临时文件，失败时清理，成功后原子重命名，避免残留半截文件
+	tmpPath := dest + ".tmp"
+	f, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+
+	_, copyErr := io.Copy(f, resp.Body)
+	f.Close()
+	if copyErr != nil {
+		os.Remove(tmpPath) // 写失败时清理残留临时文件
+		return copyErr
+	}
+
+	if err := os.Rename(tmpPath, dest); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // 预编译正则表达式

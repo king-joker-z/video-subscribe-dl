@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// defaultDouyinDownloadClient 复用的 HTTP Client，避免每次下载新建 transport
+// [FIXED: DS-2] 提升为包级变量初始化一次复用
+var defaultDouyinDownloadClient = &http.Client{Timeout: 10 * time.Minute}
+
 // progressCallback 抖音下载进度回调类型
 type progressCallback func(info ProgressInfo)
 
@@ -58,8 +62,7 @@ func downloadFileWithProgress(ctx context.Context, fileURL, destPath string, dow
 	req.Header.Set("Referer", "https://www.douyin.com/")
 	req.Header.Set("Accept", "*/*")
 
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := defaultDouyinDownloadClient.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("http get: %w", err)
 	}
