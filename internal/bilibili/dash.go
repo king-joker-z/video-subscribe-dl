@@ -1,6 +1,7 @@
 package bilibili
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -177,7 +178,7 @@ func SelectBestAudio(streams []DashStream) *DashStream {
 
 // DownloadDash 下载 DASH 流并合并为视频文件
 // 返回最终视频文件路径
-func DownloadDash(video, audio *DashStream, outputDir, filename string) (string, error) {
+func DownloadDash(ctx context.Context, video, audio *DashStream, outputDir, filename string) (string, error) {
 	os.MkdirAll(outputDir, 0755)
 
 	videoTmp := filepath.Join(outputDir, ".video.m4s")
@@ -186,13 +187,13 @@ func DownloadDash(video, audio *DashStream, outputDir, filename string) (string,
 
 	// 下载视频流
 	log.Printf("Downloading video: %dx%d %s (%d kbps)", video.Width, video.Height, video.Codecs, video.Bandwidth/1000)
-	if err := downloadStream(video, videoTmp); err != nil {
+	if err := downloadStream(ctx, video, videoTmp); err != nil {
 		return "", fmt.Errorf("download video: %w", err)
 	}
 
 	// 下载音频流
 	log.Printf("Downloading audio: %s (%d kbps)", audio.Codecs, audio.Bandwidth/1000)
-	if err := downloadStream(audio, audioTmp); err != nil {
+	if err := downloadStream(ctx, audio, audioTmp); err != nil {
 		os.Remove(videoTmp)
 		return "", fmt.Errorf("download audio: %w", err)
 	}
@@ -212,12 +213,12 @@ func DownloadDash(video, audio *DashStream, outputDir, filename string) (string,
 	return outputPath, nil
 }
 
-func downloadStream(stream *DashStream, dest string) error {
+func downloadStream(ctx context.Context, stream *DashStream, dest string) error {
 	// 使用 CDN 优先级排序: upos > cn > mcdn > pcdn
 	urls := StreamURLs(stream, true)
 
 	for _, u := range urls {
-		err := downloadWithResume(u, dest)
+		err := downloadWithResume(ctx, u, dest)
 		if err == nil {
 			return nil
 		}
@@ -226,7 +227,7 @@ func downloadStream(stream *DashStream, dest string) error {
 	return fmt.Errorf("all URLs failed")
 }
 
-func downloadWithResume(rawURL, dest string) error {
+func downloadWithResume(ctx context.Context, rawURL, dest string) error {
 	client := sharedLargeDownloadClient // 复用 client.go 中的共享大文件下载 Client
 
 	// 检查已下载的大小（支持断点续传）
@@ -235,7 +236,7 @@ func downloadWithResume(rawURL, dest string) error {
 		startByte = fi.Size()
 	}
 
-	req, err := http.NewRequest("GET", rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return err
 	}

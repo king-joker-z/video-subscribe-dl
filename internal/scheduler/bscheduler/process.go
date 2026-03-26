@@ -434,11 +434,19 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 		if s.dl.IsPaused() {
 			log.Printf("[bscheduler][TIMEOUT] 超时但 downloader 处于暂停状态 (videoID=%s)", videoID)
 			s.db.UpdateDownloadStatus(dlID, "pending", "", 0, "timeout during pause, will retry")
+			// 确保 resultCh 被消费，避免 downloader worker 在 resume 后发送结果时无人读取
+			go func() {
+				<-ch
+			}()
 			return
 		}
 		log.Printf("[bscheduler][TIMEOUT] 等待超时 (videoID=%s)", videoID)
 		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("download timeout (%v)", timeout))
 		s.notifier.Send(notify.EventDownloadFailed, "下载超时: "+videoID, fmt.Sprintf("等待下载结果超过%v", timeout))
+		// 同样确保 resultCh 被消费，防止 worker 阻塞
+		go func() {
+			<-ch
+		}()
 		return
 	}
 	if result == nil {

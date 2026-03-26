@@ -234,6 +234,10 @@ func downloadOneChunk(ctx context.Context, rawURL, dest string, chunk chunkRange
 		if attempt > 0 {
 			delay := time.Duration(attempt*2) * time.Second
 			log.Printf("  Chunk %d retry %d/%d (wait %v)", chunk.Index, attempt, MaxChunkRetries, delay)
+			// 重试前重置该块在 totalDownloaded 中已累加的字节数，避免进度虚报
+			if fi, err := os.Stat(dest); err == nil {
+				atomic.AddInt64(totalDownloaded, -fi.Size())
+			}
 			time.Sleep(delay)
 		}
 		lastErr = downloadOneChunkAttempt(ctx, rawURL, dest, chunk, rateLimitBps, totalDownloaded, updateProgress)
