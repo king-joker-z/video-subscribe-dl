@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -39,8 +40,13 @@ func main() {
 
 	// Initialize ring buffer logger (1000 entries)
 	appLogger := logger.Init(config.LogRingBufferSize)
-	log.SetOutput(appLogger.Writer())
+	logWriter := appLogger.Writer()
+	log.SetOutput(logWriter)
 	log.SetFlags(log.Ldate | log.Ltime)
+	// slog 也走同一个 writer，避免 slog 直接写 stdout 导致日志重复推送到 SSE
+	slog.SetDefault(slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
 
 	os.MkdirAll(*dataDir, 0755)
 	os.MkdirAll(*downloadDir, 0755)
