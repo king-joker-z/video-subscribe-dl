@@ -133,7 +133,7 @@ func New(cfg Config) *DouyinScheduler {
 		eventCh:         make(chan DownloadEvent, 100),
 		cookieValid:     true,
 		downloadLimiter: douyin.NewRateLimiter(3, 1, 15*time.Second),
-		workerSem:       make(chan struct{}, 3), // 最多 3 个并发下载 goroutine
+		workerSem:       make(chan struct{}, 8), // 最多 8 个并发下载 goroutine
 		rootCtx:         ctx,
 		rootCancel:      cancel,
 	}
