@@ -634,6 +634,7 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 		videoFile := item.FilePath
 		fi, statErr := os.Stat(item.FilePath)
 		if statErr != nil {
+			log.Printf("[repair-thumbs] id=%d skipped: stat failed path=%q err=%v", item.ID, item.FilePath, statErr)
 			skipped++
 			continue
 		}
@@ -641,6 +642,7 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 			// 在目录里找第一个 .mp4 文件
 			entries, readErr := os.ReadDir(item.FilePath)
 			if readErr != nil {
+				log.Printf("[repair-thumbs] id=%d skipped: readdir failed path=%q err=%v", item.ID, item.FilePath, readErr)
 				skipped++
 				continue
 			}
@@ -652,6 +654,13 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 				}
 			}
 			if found == "" {
+				log.Printf("[repair-thumbs] id=%d skipped: no .mp4 in dir=%q files=%v", item.ID, item.FilePath, func() []string {
+					var names []string
+					for _, e := range entries {
+						names = append(names, e.Name())
+					}
+					return names
+				}())
 				skipped++
 				continue
 			}
