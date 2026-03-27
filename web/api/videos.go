@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -607,10 +606,13 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 查询所有需要补封面的记录：
-	// 1. thumb_path 为空，或
-	// 2. thumb_path 不为空但文件不存在（需在后面二次判断）
-	rows, err := h.db.Query(`SELECT id, file_path, title, COALESCE(thumb_path,'') FROM downloads WHERE status='completed' AND file_path != ''`)
+	// 只补 PH（pornhub）平台的封面：JOIN sources 过滤 type='pornhub'
+	// 范围：thumb_path 为空，或 thumb_path 文件不存在
+	rows, err := h.db.Query(`
+		SELECT d.id, d.file_path, d.title, COALESCE(d.thumb_path,'')
+		FROM downloads d
+		JOIN sources s ON s.id = d.source_id
+		WHERE d.status='completed' AND d.file_path != '' AND s.type='pornhub'`)
 	if err != nil {
 		apiError(w, CodeInternal, "查询失败: "+err.Error())
 		return
@@ -665,25 +667,8 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 				}
 			}
 			if found == "" {
-				// 图集：没有 mp4，尝试用 cover.jpg 直接作为封面
-				coverSrc := filepath.Join(item.FilePath, "cover.jpg")
-				if _, cErr := os.Stat(coverSrc); cErr == nil {
-					// cover.jpg 存在，复制到 -poster.jpg 并写 DB
-					dirName := filepath.Base(item.FilePath)
-					thumbPath := filepath.Join(item.FilePath, dirName+"-poster.jpg")
-					if copyErr := copyFile(coverSrc, thumbPath); copyErr == nil {
-						if dbErr := h.db.UpdateThumbPath(item.ID, thumbPath); dbErr != nil {
-							log.Printf("[repair-thumbs] UpdateThumbPath id=%d failed: %v", item.ID, dbErr)
-						}
-						success++
-					} else {
-						log.Printf("[repair-thumbs] id=%d failed: copy cover.jpg: %v", item.ID, copyErr)
-						failed++
-					}
-				} else {
-					log.Printf("[repair-thumbs] id=%d skipped: no .mp4 and no cover.jpg in dir=%q", item.ID, item.FilePath)
-					skipped++
-				}
+				log.Printf("[repair-thumbs] id=%d skipped: no .mp4 in dir=%q", item.ID, item.FilePath)
+				skipped++
 				continue
 			}
 			videoFile = found
@@ -767,20 +752,6 @@ func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
 	apiError(w, CodeNotFound, "无封面图")
 }
 
-// copyFile 将 src 文件内容复制到 dst
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
-}
+
 
 
