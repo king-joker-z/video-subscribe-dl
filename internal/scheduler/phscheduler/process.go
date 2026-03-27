@@ -393,14 +393,19 @@ func captureThumbFromVideo(videoPath, destPath string) error {
 	ffmpeg := lookupBin("ffmpeg")
 
 	// 先用 ffprobe 获取视频时长（秒）
-	probeOut, err := exec.Command(ffprobe,
+	probeCmd := exec.Command(ffprobe,
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		videoPath,
-	).Output()
+	)
+	probeOut, err := probeCmd.Output()
 	if err != nil {
-		return fmt.Errorf("ffprobe failed: %v", err)
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		return fmt.Errorf("ffprobe failed (bin=%s, path=%s): %v | stderr: %s", ffprobe, videoPath, err, stderr)
 	}
 	durationStr := strings.TrimSpace(string(probeOut))
 	duration, err := strconv.ParseFloat(durationStr, 64)
