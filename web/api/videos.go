@@ -629,19 +629,42 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 	var success, skipped, failed int
 
 	for _, item := range items {
-		// 检查视频文件是否存在
-		if _, statErr := os.Stat(item.FilePath); statErr != nil {
+		// 解析实际视频文件路径：
+		// file_path 可能是 mp4 文件，也可能是视频所在目录（历史数据）
+		videoFile := item.FilePath
+		fi, statErr := os.Stat(item.FilePath)
+		if statErr != nil {
 			skipped++
 			continue
 		}
+		if fi.IsDir() {
+			// 在目录里找第一个 .mp4 文件
+			entries, readErr := os.ReadDir(item.FilePath)
+			if readErr != nil {
+				skipped++
+				continue
+			}
+			found := ""
+			for _, e := range entries {
+				if !e.IsDir() && strings.ToLower(filepath.Ext(e.Name())) == ".mp4" {
+					found = filepath.Join(item.FilePath, e.Name())
+					break
+				}
+			}
+			if found == "" {
+				skipped++
+				continue
+			}
+			videoFile = found
+		}
 
 		// thumbPath = 视频文件同目录，文件名（不含扩展名）+ "-poster.jpg"
-		ext := filepath.Ext(item.FilePath)
-		base := item.FilePath[:len(item.FilePath)-len(ext)]
+		ext := filepath.Ext(videoFile)
+		base := videoFile[:len(videoFile)-len(ext)]
 		thumbPath := base + "-poster.jpg"
 
 		if h.onRepairThumb != nil {
-			if repErr := h.onRepairThumb(item.FilePath, thumbPath); repErr != nil {
+			if repErr := h.onRepairThumb(videoFile, thumbPath); repErr != nil {
 				log.Printf("[repair-thumbs] id=%d failed: %v", item.ID, repErr)
 				failed++
 				continue
