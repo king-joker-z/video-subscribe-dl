@@ -163,6 +163,11 @@ func (rt *Router) SetPHCookieStatusFunc(fn func() (bool, string)) {
 	rt.phStatus.SetCookieStatusFunc(fn)
 }
 
+// SetRepairThumbFunc 设置历史封面补全回调
+func (rt *Router) SetRepairThumbFunc(fn func(string, string) error) {
+	rt.videos.SetRepairThumbFunc(fn)
+}
+
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
 	rt.dashboard.SetCooldownInfoFunc(fn)
 	rt.metrics.SetCooldownInfoFunc(fn)
@@ -225,6 +230,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/videos/detect-charge", func(w http.ResponseWriter, r *http.Request) {
 		rt.videos.HandleDetectCharge(w, r)
 	})
+	mux.HandleFunc("/api/videos/repair-thumbs", rt.videos.HandleRepairThumbs)
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 

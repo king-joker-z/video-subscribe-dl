@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,15 +226,25 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 	// 下载封面
 	if !src.SkipPoster {
+		thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
 		if dl.Thumbnail == "" {
 			log.Printf("[phscheduler] Thumbnail URL is empty for %s, skipping thumb download", dl.VideoID)
 		} else {
-			thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
 			if thumbErr := downloadThumb(dl.Thumbnail, thumbPath, s.getCookie()); thumbErr != nil {
 				log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
 			} else {
 				if dbErr := s.db.UpdateThumbPath(dl.ID, thumbPath); dbErr != nil {
 					log.Printf("[phscheduler] UpdateThumbPath failed for %s: %v", dl.VideoID, dbErr)
+				}
+			}
+		}
+		// 兜底：若封面文件不存在，用 ffmpeg 截取视频第 70% 位置的帧
+		if _, statErr := os.Stat(thumbPath); os.IsNotExist(statErr) {
+			if capErr := captureThumbFromVideo(videoFilePath, thumbPath); capErr != nil {
+				log.Printf("[phscheduler] captureThumbFromVideo failed for %s: %v", dl.VideoID, capErr)
+			} else {
+				if dbErr := s.db.UpdateThumbPath(dl.ID, thumbPath); dbErr != nil {
+					log.Printf("[phscheduler] UpdateThumbPath (capture) failed for %s: %v", dl.VideoID, dbErr)
 				}
 			}
 		}
@@ -355,6 +366,45 @@ func downloadHLSWithFFmpeg(ctx context.Context, m3u8URL, destPath string, dlID i
 	}
 	cb(ProgressInfo{Status: "done", Downloaded: size})
 	return size, nil
+}
+
+// CaptureThumbFromVideo 用 ffmpeg 截取视频第 70% 位置的帧作为封面图（可供外部调用）
+func CaptureThumbFromVideo(videoPath, destPath string) error {
+	return captureThumbFromVideo(videoPath, destPath)
+}
+
+// captureThumbFromVideo 用 ffmpeg 截取视频第 70% 位置的帧作为封面图
+func captureThumbFromVideo(videoPath, destPath string) error {
+	// 先用 ffprobe 获取视频时长（秒）
+	probeOut, err := exec.Command("ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		videoPath,
+	).Output()
+	if err != nil {
+		return fmt.Errorf("ffprobe failed: %v", err)
+	}
+	durationStr := strings.TrimSpace(string(probeOut))
+	duration, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil || duration <= 0 {
+		return fmt.Errorf("invalid duration %q: %v", durationStr, err)
+	}
+
+	seekTime := duration * 0.7
+	timeStr := strconv.FormatFloat(seekTime, 'f', 3, 64)
+
+	out, err := exec.Command("ffmpeg",
+		"-ss", timeStr,
+		"-i", videoPath,
+		"-vframes", "1",
+		"-q:v", "2",
+		destPath,
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg capture failed: %v\n%s", err, string(out))
+	}
+	return nil
 }
 
 // markFailed 标记下载失败并设置退避重试时间

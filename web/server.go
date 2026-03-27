@@ -91,6 +91,8 @@ type Server struct {
 	onPHPause         func(reason string)
 	getPHCookieStatus func() (bool, string)
 
+	onRepairThumb func(string, string) error
+
 	version   string
 	buildTime string
 	startTime time.Time
@@ -215,6 +217,9 @@ func (s *Server) setupRoutes() {
 		if s.notifier != nil {
 			s.apiRouter.SetNotifier(s.notifier)
 		}
+		if s.onRepairThumb != nil {
+			s.apiRouter.SetRepairThumbFunc(s.onRepairThumb)
+		}
 	}
 }
 
@@ -312,6 +317,10 @@ func (s *Server) SetPHPauseFunc(fn func(reason string)) {
 
 func (s *Server) SetPHCookieStatusFunc(fn func() (bool, string)) {
 	s.getPHCookieStatus = fn
+}
+
+func (s *Server) SetRepairThumbFunc(fn func(string, string) error) {
+	s.onRepairThumb = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

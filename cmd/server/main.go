@@ -23,6 +23,7 @@ import (
 	"video-subscribe-dl/internal/logger"
 	"video-subscribe-dl/internal/scanner"
 	"video-subscribe-dl/internal/scheduler"
+	"video-subscribe-dl/internal/scheduler/phscheduler"
 	"video-subscribe-dl/web"
 )
 
@@ -198,6 +199,7 @@ func main() {
 	server.SetPHResumeFunc(sched.ResumePH)
 	server.SetPHPauseFunc(sched.PausePH)
 	server.SetPHCookieStatusFunc(sched.GetPHCookieStatus)
+	server.SetRepairThumbFunc(phscheduler.CaptureThumbFromVideo)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

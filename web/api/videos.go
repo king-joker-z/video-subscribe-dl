@@ -17,11 +17,12 @@ import (
 
 // VideosHandler 视频/下载 API
 type VideosHandler struct {
-	db              *db.DB
-	downloadDir     string
-	onRetryDownload func(int64)
+	db               *db.DB
+	downloadDir      string
+	onRetryDownload  func(int64)
 	onProcessPending func()
-	onRedownload    func(int64)
+	onRedownload     func(int64)
+	onRepairThumb    func(videoPath, thumbPath string) error
 }
 
 func NewVideosHandler(database *db.DB, downloadDir string) *VideosHandler {
@@ -38,6 +39,10 @@ func (h *VideosHandler) SetProcessPendingFunc(fn func()) {
 
 func (h *VideosHandler) SetRedownloadFunc(fn func(int64)) {
 	h.onRedownload = fn
+}
+
+func (h *VideosHandler) SetRepairThumbFunc(fn func(string, string) error) {
+	h.onRepairThumb = fn
 }
 
 // GET /api/videos — 视频列表（分页 + 筛选 + 排序）
@@ -592,6 +597,73 @@ func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Reques
 	apiOK(w, map[string]interface{}{
 		"total":   len(items),
 		"message": fmt.Sprintf("已启动充电检测，共 %d 个失败视频", len(items)),
+	})
+}
+
+// POST /api/videos/repair-thumbs — 历史封面补全
+func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	rows, err := h.db.Query(`SELECT id, file_path, title FROM downloads WHERE status='completed' AND (thumb_path='' OR thumb_path IS NULL) AND file_path != ''`)
+	if err != nil {
+		apiError(w, CodeInternal, "查询失败: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	type repairItem struct {
+		ID       int64
+		FilePath string
+		Title    string
+	}
+	var items []repairItem
+	for rows.Next() {
+		var v repairItem
+		rows.Scan(&v.ID, &v.FilePath, &v.Title)
+		items = append(items, v)
+	}
+
+	total := len(items)
+	var success, skipped, failed int
+
+	for _, item := range items {
+		// 检查视频文件是否存在
+		if _, statErr := os.Stat(item.FilePath); statErr != nil {
+			skipped++
+			continue
+		}
+
+		// thumbPath = 视频文件同目录，文件名（不含扩展名）+ "-poster.jpg"
+		ext := filepath.Ext(item.FilePath)
+		base := item.FilePath[:len(item.FilePath)-len(ext)]
+		thumbPath := base + "-poster.jpg"
+
+		if h.onRepairThumb != nil {
+			if repErr := h.onRepairThumb(item.FilePath, thumbPath); repErr != nil {
+				log.Printf("[repair-thumbs] id=%d failed: %v", item.ID, repErr)
+				failed++
+				continue
+			}
+		} else {
+			skipped++
+			continue
+		}
+
+		// 写入 DB
+		if dbErr := h.db.UpdateThumbPath(item.ID, thumbPath); dbErr != nil {
+			log.Printf("[repair-thumbs] UpdateThumbPath id=%d failed: %v", item.ID, dbErr)
+		}
+		success++
+	}
+
+	log.Printf("[repair-thumbs] done: total=%d success=%d skipped=%d failed=%d", total, success, skipped, failed)
+	apiOK(w, map[string]interface{}{
+		"total":   total,
+		"success": success,
+		"skipped": skipped,
+		"failed":  failed,
 	})
 }
 
