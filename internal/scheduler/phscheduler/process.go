@@ -373,10 +373,27 @@ func CaptureThumbFromVideo(videoPath, destPath string) error {
 	return captureThumbFromVideo(videoPath, destPath)
 }
 
+// lookupBin 查找可执行文件路径：优先 PATH lookup，失败则尝试已知固定路径
+func lookupBin(name string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	// Alpine/Debian 容器常见固定路径
+	for _, candidate := range []string{"/usr/bin/" + name, "/usr/local/bin/" + name, "/bin/" + name} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return name // 兜底：原样返回，让系统报错
+}
+
 // captureThumbFromVideo 用 ffmpeg 截取视频第 70% 位置的帧作为封面图
 func captureThumbFromVideo(videoPath, destPath string) error {
+	ffprobe := lookupBin("ffprobe")
+	ffmpeg := lookupBin("ffmpeg")
+
 	// 先用 ffprobe 获取视频时长（秒）
-	probeOut, err := exec.Command("ffprobe",
+	probeOut, err := exec.Command(ffprobe,
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
@@ -394,11 +411,12 @@ func captureThumbFromVideo(videoPath, destPath string) error {
 	seekTime := duration * 0.7
 	timeStr := strconv.FormatFloat(seekTime, 'f', 3, 64)
 
-	out, err := exec.Command("ffmpeg",
+	out, err := exec.Command(ffmpeg,
 		"-ss", timeStr,
 		"-i", videoPath,
 		"-vframes", "1",
 		"-q:v", "2",
+		"-y",      // 覆盖已有文件
 		destPath,
 	).CombinedOutput()
 	if err != nil {
