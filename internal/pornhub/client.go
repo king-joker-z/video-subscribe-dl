@@ -29,8 +29,34 @@ const (
 )
 
 var (
-	flashvarsVarRe = regexp.MustCompile(`(flashvars_\d+)`)
-	viewKeyRe      = regexp.MustCompile(`[?&]viewkey=([a-zA-Z0-9_]+)`)
+	// flashvarsVarRe 按优先级依次匹配多种已知的 PH 播放器变量名格式：
+	//   flashvars_\d+        — 经典格式（2023 前后）
+	//   var flashvars\b      — 简化格式
+	//   window\.flashvars\b  — window 挂载格式
+	//   LRT_VIDEO_VARS       — 部分改版页面
+	//   VIDEO_VARS           — 另一种简化命名
+	// 每个 pattern 独立尝试，取第一个命中的
+	flashvarsVarPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(flashvars_\d+)`),
+		regexp.MustCompile(`var\s+(flashvars)\s*=\s*\{`),
+		regexp.MustCompile(`window\.(flashvars)\s*=`),
+		regexp.MustCompile(`(LRT_VIDEO_VARS)`),
+		regexp.MustCompile(`(VIDEO_VARS)`),
+	}
+	// flashvarsVarRe 保留兼容旧调用（只用于首选格式）
+	flashvarsVarRe = flashvarsVarPatterns[0]
+
+	viewKeyRe = regexp.MustCompile(`[?&]viewkey=([a-zA-Z0-9_]+)`)
+
+	// scriptKeywords 按优先级排列：找到含 mediaDefinitions 的 script 为首选，
+	// 兼容多种 PH 页面结构变体
+	scriptKeywords = []string{
+		"mediaDefinitions",
+		"flashvars_",
+		"flashvars",
+		"LRT_VIDEO_VARS",
+		"VIDEO_VARS",
+	}
 )
 
 // Client Pornhub HTTP 客户端
@@ -701,10 +727,13 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 		}
 	}
 
-	// 提取 flashvars 变量名
-	flashvarsVar := flashvarsVarRe.FindString(scriptContent)
-	if flashvarsVar == "" {
-		return "", fmt.Errorf("%w: flashvars variable not found in script", ErrParseFailed)
+	// 提取 flashvars 变量名：按多种格式依次尝试
+	flashvarsVar := ""
+	for _, re := range flashvarsVarPatterns {
+		if m := re.FindStringSubmatch(scriptContent); len(m) >= 2 {
+			flashvarsVar = m[1]
+			break
+		}
 	}
 
 	// 构造并执行 JS
@@ -721,38 +750,52 @@ var clearTimeout = function(){};
 var setInterval = function(){};
 var clearInterval = function(){};
 `
-	js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
-	vm := goja.New()
-	// [FIXED: P1-3] 在独立 goroutine 中执行 JS，通过 channel + select + timeout 等待结果，
-	// 超时时中断 VM 并返回错误，避免 RunString 在当前 goroutine 长期阻塞
-	type jsResult struct {
-		err error
-	}
-	jsCh := make(chan jsResult, 1)
-	go func() {
-		_, evalErr := vm.RunString(js)
-		jsCh <- jsResult{evalErr}
-	}()
-	select {
-	case res := <-jsCh:
-		if res.err != nil {
-			return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, res.err)
-		}
-	case <-time.After(10 * time.Second):
-		vm.Interrupt("js eval timeout")
-		return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
-	}
 
-	jsonVal := vm.Get("_json")
-	if jsonVal == nil || jsonVal.String() == "undefined" {
-		return "", fmt.Errorf("%w: _json is undefined after eval", ErrParseFailed)
-	}
-	jsonStr := jsonVal.String()
-
-	// 解析 FlashVars JSON
 	var fv FlashVars
-	if err := json.Unmarshal([]byte(jsonStr), &fv); err != nil {
-		return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
+
+	if flashvarsVar != "" {
+		// 有变量名 → goja eval 后序列化
+		js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
+		vm := goja.New()
+		// [FIXED: P1-3] 在独立 goroutine 中执行 JS，通过 channel + select + timeout 等待结果，
+		// 超时时中断 VM 并返回错误，避免 RunString 在当前 goroutine 长期阻塞
+		type jsResult struct {
+			err error
+		}
+		jsCh := make(chan jsResult, 1)
+		go func() {
+			_, evalErr := vm.RunString(js)
+			jsCh <- jsResult{evalErr}
+		}()
+		select {
+		case res := <-jsCh:
+			if res.err != nil {
+				return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, res.err)
+			}
+		case <-time.After(10 * time.Second):
+			vm.Interrupt("js eval timeout")
+			return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
+		}
+
+		jsonVal := vm.Get("_json")
+		if jsonVal == nil || jsonVal.String() == "undefined" {
+			return "", fmt.Errorf("%w: _json is undefined after eval", ErrParseFailed)
+		}
+		if err := json.Unmarshal([]byte(jsonVal.String()), &fv); err != nil {
+			return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
+		}
+	} else {
+		// 兜底：直接从 script 文本中正则提取 mediaDefinitions JSON 数组
+		// 适用于 PH 改版后直接内联 JSON 的页面结构
+		mdRe := regexp.MustCompile(`"mediaDefinitions"\s*:\s*(\[[\s\S]*?\])\s*[,}]`)
+		if m := mdRe.FindStringSubmatch(scriptContent); len(m) >= 2 {
+			if err := json.Unmarshal([]byte(m[1]), &fv.MediaDefinitions); err != nil {
+				return "", fmt.Errorf("%w: unmarshal inline mediaDefinitions: %v", ErrParseFailed, err)
+			}
+			log.Printf("[pornhub·client] using inline mediaDefinitions fallback (no flashvars var found)")
+		} else {
+			return "", fmt.Errorf("%w: no playable variable found in script (tried %d patterns, no inline mediaDefinitions)", ErrParseFailed, len(flashvarsVarPatterns))
+		}
 	}
 
 	// Pornhub mediaDefinitions 实际结构（2025+）：
@@ -821,28 +864,35 @@ func (c *Client) extractBestHLSURL(defs []MediaDefinition) string {
 
 
 
-// extractPlayerScript 从 HTML 中提取 #player 下的 script 内容
+// extractPlayerScript 从 HTML 中提取播放器 script 内容，兼容多种 PH 页面结构。
+// 策略（按优先级）：
+//  1. #player 容器内，依次按 scriptKeywords 查找
+//  2. 全文依次按 scriptKeywords 查找
+//
+// 只要 script 包含 mediaDefinitions（或其他已知播放器变量），即视为命中。
 func extractPlayerScript(htmlContent string) (string, error) {
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", fmt.Errorf("parse html: %w", err)
 	}
 
-	// 找 id="player" 的容器节点
-	playerNode := findNodeByID(doc, "player")
-	if playerNode == nil {
-		// fallback：直接在全文中找包含 flashvars_ 的 script
-		return extractScriptByContent(doc, "flashvars_")
+	// 优先在 #player 容器内按关键词顺序查找
+	if playerNode := findNodeByID(doc, "player"); playerNode != nil {
+		for _, kw := range scriptKeywords {
+			if script := findScriptInNode(playerNode, kw); script != "" {
+				return script, nil
+			}
+		}
 	}
 
-	// 在 player 容器内找第一个包含 flashvars_ 的 script
-	script := findScriptInNode(playerNode, "flashvars_")
-	if script != "" {
-		return script, nil
+	// fallback：全文按关键词顺序查找
+	for _, kw := range scriptKeywords {
+		if script, err2 := extractScriptByContent(doc, kw); err2 == nil && script != "" {
+			return script, nil
+		}
 	}
 
-	// fallback：全文找
-	return extractScriptByContent(doc, "flashvars_")
+	return "", fmt.Errorf("no player script found (tried keywords: %v)", scriptKeywords)
 }
 
 // findNodeByID 在文档中查找 id=targetID 的节点
