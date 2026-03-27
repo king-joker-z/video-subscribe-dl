@@ -229,7 +229,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 			log.Printf("[phscheduler] Thumbnail URL is empty for %s, skipping thumb download", dl.VideoID)
 		} else {
 			thumbPath := filepath.Join(videoDir, safeTitle+"-poster.jpg")
-			if thumbErr := downloadThumb(dl.Thumbnail, thumbPath); thumbErr != nil {
+			if thumbErr := downloadThumb(dl.Thumbnail, thumbPath, s.getCookie()); thumbErr != nil {
 				log.Printf("[phscheduler] Download thumb failed for %s: %v", dl.VideoID, thumbErr)
 			} else {
 				if dbErr := s.db.UpdateThumbPath(dl.ID, thumbPath); dbErr != nil {
@@ -265,10 +265,10 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 }
 
 // downloadThumb 下载封面图到指定路径，最多重试 3 次（指数退避 2s/4s）
-func downloadThumb(thumbURL, destPath string) error {
+func downloadThumb(thumbURL, destPath, cookie string) error {
 	var lastErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		lastErr = downloadThumbOnce(thumbURL, destPath)
+		lastErr = downloadThumbOnce(thumbURL, destPath, cookie)
 		if lastErr == nil {
 			return nil
 		}
@@ -281,13 +281,16 @@ func downloadThumb(thumbURL, destPath string) error {
 }
 
 // downloadThumbOnce 执行单次封面图下载
-func downloadThumbOnce(thumbURL, destPath string) error {
+func downloadThumbOnce(thumbURL, destPath, cookie string) error {
 	req, err := http.NewRequest("GET", thumbURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://www.pornhub.com/")
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
