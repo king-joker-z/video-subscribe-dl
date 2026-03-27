@@ -201,6 +201,19 @@ export function VideosPage({ params = {} } = {}) {
     } catch (e) { toast.error(e.message); }
   };
 
+  const [repairLoading, setRepairLoading] = useState(false);
+  const handleRepairThumbs = async () => {
+    if (!confirm('将对所有已完成但缺少封面的视频截帧补全，可能需要较长时间，确认？')) return;
+    setRepairLoading(true);
+    try {
+      const res = await api.repairThumbs();
+      const d = res.data || {};
+      toast.success(`补全完成：成功 ${d.success ?? 0}，跳过 ${d.skipped ?? 0}，失败 ${d.failed ?? 0}，共 ${d.total ?? 0} 条`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setRepairLoading(false); }
+  };
+
   const handleDownloadAllPending = async () => {
     try {
       if (uploader) {
@@ -239,6 +252,7 @@ export function VideosPage({ params = {} } = {}) {
           title: uploader ? `下载 ${uploader} 的全部待处理视频` : '下载全部待处理视频'
         }, uploader ? '下载该UP主Pending' : '下载全部Pending'),
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
+        h(Button, { onClick: handleRepairThumbs, variant: 'secondary', size: 'sm', disabled: repairLoading }, repairLoading ? '补全中...' : '补全封面'),
         // 手机端隐藏视图切换（强制卡片视图）
         !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
         !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),
