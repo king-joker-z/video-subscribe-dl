@@ -785,16 +785,16 @@ var clearInterval = function(){};
 			return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 		}
 	} else {
-		// 兜底：直接从 script 文本中正则提取 mediaDefinitions JSON 数组
-		// 适用于 PH 改版后直接内联 JSON 的页面结构
-		mdRe := regexp.MustCompile(`"mediaDefinitions"\s*:\s*(\[[\s\S]*?\])\s*[,}]`)
-		if m := mdRe.FindStringSubmatch(scriptContent); len(m) >= 2 {
-			if err := json.Unmarshal([]byte(m[1]), &fv.MediaDefinitions); err != nil {
+		// 兜底：直接从 script 文本中提取 mediaDefinitions JSON 数组
+		// 用括号计数而非正则，正确处理嵌套结构
+		mdArr, mdErr := extractJSONArrayByKey(scriptContent, "mediaDefinitions")
+		if mdErr == nil {
+			if err := json.Unmarshal([]byte(mdArr), &fv.MediaDefinitions); err != nil {
 				return "", fmt.Errorf("%w: unmarshal inline mediaDefinitions: %v", ErrParseFailed, err)
 			}
 			log.Printf("[pornhub·client] using inline mediaDefinitions fallback (no flashvars var found)")
 		} else {
-			return "", fmt.Errorf("%w: no playable variable found in script (tried %d patterns, no inline mediaDefinitions)", ErrParseFailed, len(flashvarsVarPatterns))
+			return "", fmt.Errorf("%w: no playable variable found in script (tried %d patterns, no inline mediaDefinitions: %v)", ErrParseFailed, len(flashvarsVarPatterns), mdErr)
 		}
 	}
 
@@ -985,4 +985,53 @@ func extractText(n *html.Node) string {
 		sb.WriteString(extractText(c))
 	}
 	return sb.String()
+}
+
+// extractJSONArrayByKey 从任意文本中找到 `"key": [...]` 并返回完整 JSON 数组字符串。
+// 使用括号计数而非正则，正确处理任意深度的嵌套结构。
+func extractJSONArrayByKey(text, key string) (string, error) {
+	marker := `"` + key + `"`
+	idx := strings.Index(text, marker)
+	if idx == -1 {
+		return "", fmt.Errorf("key %q not found", key)
+	}
+	// 跳过 key、冒号、空白，找到 '[' 的位置
+	rest := text[idx+len(marker):]
+	bracketIdx := strings.IndexByte(rest, '[')
+	if bracketIdx == -1 {
+		return "", fmt.Errorf("no '[' after key %q", key)
+	}
+	rest = rest[bracketIdx:]
+
+	// 括号计数，找到匹配的 ']'
+	depth := 0
+	inStr := false
+	escape := false
+	for i, ch := range rest {
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' && inStr {
+			escape = true
+			continue
+		}
+		if ch == '"' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		switch ch {
+		case '[', '{':
+			depth++
+		case ']', '}':
+			depth--
+			if depth == 0 {
+				return rest[:i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("unbalanced brackets for key %q", key)
 }
