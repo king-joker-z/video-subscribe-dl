@@ -284,6 +284,13 @@ func (d *DB) GetSourcesPaged(sourceType string, page, pageSize int) ([]Source, i
 	return sources, total, rows.Err()
 }
 
+// SourceExistsByURL 检查是否已存在 url 完全匹配的订阅源（精确匹配）
+func (d *DB) SourceExistsByURL(url string) (bool, error) {
+	var count int
+	err := d.QueryRow("SELECT COUNT(*) FROM sources WHERE url = ?", url).Scan(&count)
+	return count > 0, err
+}
+
 func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
 	var query string
 	if globalInterval > 0 {

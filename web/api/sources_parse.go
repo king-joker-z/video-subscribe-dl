@@ -10,6 +10,21 @@ import (
 	"video-subscribe-dl/internal/douyin"
 )
 
+// injectSubscribed 在 result 里注入 already_subscribed 字段。
+// 用解析出的 canonical URL 查 DB；查询失败时静默降级（字段为 false）。
+func (h *SourcesHandler) injectSubscribed(result map[string]interface{}, canonicalURL string) {
+	if canonicalURL == "" {
+		result["already_subscribed"] = false
+		return
+	}
+	exists, err := h.db.SourceExistsByURL(canonicalURL)
+	if err != nil {
+		result["already_subscribed"] = false
+		return
+	}
+	result["already_subscribed"] = exists
+}
+
 // POST /api/sources/parse — 解析 URL，返回类型和名称
 func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	// 同时支持 GET（?url=...）和 POST（JSON body），兼容极空间等反代对 POST 的特殊处理
@@ -76,6 +91,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 				result["name"] = info.Name + " - 收藏夹"
 				result["uploader"] = info.Name
 			}
+			h.injectSubscribed(result, rawURL)
 			apiOK(w, result)
 			return
 		}
@@ -98,6 +114,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 					result["name"] = info.Name + " - 合集"
 				}
 			}
+			h.injectSubscribed(result, rawURL)
 			apiOK(w, result)
 			return
 		}
@@ -118,6 +135,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 					result["name"] = upInfo.Name + " - 系列"
 				}
 			}
+			h.injectSubscribed(result, rawURL)
 			apiOK(w, result)
 			return
 		}
@@ -142,6 +160,8 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 				result["name"] = profile.Nickname
 				result["uploader"] = profile.Nickname
 				result["followers"] = profile.FollowerCount
+				// 抖音号 → canonical URL 与 CreateSource 标准化后一致
+				h.injectSubscribed(result, "https://www.douyin.com/user/"+profile.SecUID)
 				apiOK(w, result)
 				return
 			} else if err != nil {
@@ -171,6 +191,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 					result["uploader"] = profile.Nickname
 					result["followers"] = profile.FollowerCount
 				}
+				h.injectSubscribed(result, "https://www.douyin.com/user/"+resolved.SecUID)
 				apiOK(w, result)
 				return
 			case douyin.URLTypeVideo:
@@ -192,10 +213,12 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 						result["uploader"] = profile.Nickname
 						result["followers"] = profile.FollowerCount
 					}
+					h.injectSubscribed(result, "https://www.douyin.com/user/"+detail.Author.SecUID)
 				} else {
 					result["video_id"] = resolved.VideoID
 					result["name"] = detail.Author.Nickname
 					result["uploader"] = detail.Author.Nickname
+					h.injectSubscribed(result, "")
 				}
 				apiOK(w, result)
 				return
@@ -216,6 +239,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		} else if err != nil {
 			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
 		}
+		h.injectSubscribed(result, rawURL)
 		apiOK(w, result)
 		return
 	}
@@ -229,6 +253,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 			result["name"] = info.Name
 			result["uploader"] = info.Name
 		}
+		h.injectSubscribed(result, rawURL)
 		apiOK(w, result)
 		return
 	}

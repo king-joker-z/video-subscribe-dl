@@ -643,26 +643,30 @@ export function SourcesPage({ onNavigate }) {
           parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
             h('div', { className: 'flex items-center gap-2' },
               h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
-              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
+              parseResult.already_subscribed && h(Badge, { variant: 'success' }, '✓ 已订阅')
             ),
-            h('div', null,
+            parseResult.already_subscribed && h('div', { className: 'text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2' },
+              '该订阅源已存在，无需重复添加。'
+            ),
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
               h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
-            h('div', { className: 'flex items-center justify-between' },
+            !parseResult.already_subscribed && h('div', { className: 'flex items-center justify-between' },
               h('label', { className: 'text-sm text-slate-600' }, '启用'),
               h('button', {
                 onClick: () => updateAddForm('enabled', !addForm.enabled),
                 className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
               }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
             ),
-            h('div', null,
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '画质偏好'),
               h('select', { value: addForm.download_quality, onChange: (e) => updateAddForm('download_quality', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' },
                 qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
               )
             ),
-            h('div', null,
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '视频编码'),
               h('select', { value: addForm.download_codec, onChange: (e) => updateAddForm('download_codec', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' },
                 h('option', { value: 'all' }, '自动'),
@@ -671,15 +675,15 @@ export function SourcesPage({ onNavigate }) {
                 h('option', { value: 'av1' }, 'AV1')
               )
             ),
-            h('div', null,
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '标题过滤关键词（匹配才下载，留空不过滤）'),
               h('input', { type: 'text', value: addForm.download_filter, onChange: (e) => updateAddForm('download_filter', e.target.value), placeholder: '关键词1|关键词2', className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
-            h('div', null,
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
               h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
-            h('div', { className: 'grid grid-cols-2 gap-3' },
+            !parseResult.already_subscribed && h('div', { className: 'grid grid-cols-2 gap-3' },
               h('div', { className: 'flex items-center gap-2' },
                 h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
                 h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
@@ -694,7 +698,9 @@ export function SourcesPage({ onNavigate }) {
           // 底部按钮
           h('div', { className: 'flex justify-end gap-2 pt-2' },
             h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
-            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim() || !!(parseResult && parseResult.already_subscribed), size: 'md' },
+              adding ? '添加中...' : (parseResult && parseResult.already_subscribed) ? '已订阅' : '确认添加'
+            )
           )
           ),  // 关闭 B站「链接」子 Tab
 
@@ -721,24 +727,28 @@ export function SourcesPage({ onNavigate }) {
             parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
               h('div', { className: 'flex items-center gap-2' },
                 h(Badge, { variant: typeColors[parseResult.type] || 'outline' }, typeLabels[parseResult.type] || parseResult.type),
-                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+                parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
+                parseResult.already_subscribed && h(Badge, { variant: 'success' }, '✓ 已订阅')
               ),
-              h('div', null,
+              parseResult.already_subscribed && h('div', { className: 'text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2' },
+                '该订阅源已存在，无需重复添加。'
+              ),
+              !parseResult.already_subscribed && h('div', null,
                 h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
                 h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
               ),
-              h('div', { className: 'flex items-center justify-between' },
+              !parseResult.already_subscribed && h('div', { className: 'flex items-center justify-between' },
                 h('label', { className: 'text-sm text-slate-600' }, '启用'),
                 h('button', {
                   onClick: () => updateAddForm('enabled', !addForm.enabled),
                   className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
                 }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
               ),
-              h('div', null,
+              !parseResult.already_subscribed && h('div', null,
                 h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
                 h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
               ),
-              h('div', { className: 'grid grid-cols-2 gap-3' },
+              !parseResult.already_subscribed && h('div', { className: 'grid grid-cols-2 gap-3' },
                 h('div', { className: 'flex items-center gap-2' },
                   h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
                   h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
@@ -751,7 +761,9 @@ export function SourcesPage({ onNavigate }) {
             ),
             h('div', { className: 'flex justify-end gap-2 pt-2' },
               h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
-              h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+              h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim() || !!(parseResult && parseResult.already_subscribed), size: 'md' },
+                adding ? '添加中...' : (parseResult && parseResult.already_subscribed) ? '已订阅' : '确认添加'
+              )
             )
         ),  // 关闭抖音大 Tab
 
@@ -774,24 +786,28 @@ export function SourcesPage({ onNavigate }) {
           parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
             h('div', { className: 'flex items-center gap-2' },
               h(Badge, { variant: 'error' }, 'Pornhub'),
-              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader)
+              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
+              parseResult.already_subscribed && h(Badge, { variant: 'success' }, '✓ 已订阅')
             ),
-            h('div', null,
+            parseResult.already_subscribed && h('div', { className: 'text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2' },
+              '该订阅源已存在，无需重复添加。'
+            ),
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
               h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
-            h('div', { className: 'flex items-center justify-between' },
+            !parseResult.already_subscribed && h('div', { className: 'flex items-center justify-between' },
               h('label', { className: 'text-sm text-slate-600' }, '启用'),
               h('button', {
                 onClick: () => updateAddForm('enabled', !addForm.enabled),
                 className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
               }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
             ),
-            h('div', null,
+            !parseResult.already_subscribed && h('div', null,
               h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
               h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 3600), min: 600, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
             ),
-            h('div', { className: 'grid grid-cols-2 gap-3' },
+            !parseResult.already_subscribed && h('div', { className: 'grid grid-cols-2 gap-3' },
               h('div', { className: 'flex items-center gap-2' },
                 h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
                 h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
@@ -804,7 +820,9 @@ export function SourcesPage({ onNavigate }) {
           ),
           h('div', { className: 'flex justify-end gap-2 pt-2' },
             h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
-            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim(), size: 'md' }, adding ? '添加中...' : '确认添加')
+            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim() || !!(parseResult && parseResult.already_subscribed), size: 'md' },
+              adding ? '添加中...' : (parseResult && parseResult.already_subscribed) ? '已订阅' : '确认添加'
+            )
           )
         )  // 关闭 Pornhub 大 Tab
       )
