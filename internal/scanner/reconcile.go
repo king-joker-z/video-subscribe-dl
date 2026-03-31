@@ -36,7 +36,8 @@ func (s *Scanner) Reconcile() (*ReconcileResult, error) {
 
 	// 1. 扫描本地所有视频文件，收集 video_id -> filePath
 	localFiles := map[string]string{} // video_id -> filePath
-	filepath.Walk(s.downloadDir, func(path string, info os.FileInfo, err error) error {
+	// P0-7: check Walk's overall error so an inaccessible downloadDir surfaces as an error
+	if walkErr := filepath.Walk(s.downloadDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -63,7 +64,9 @@ func (s *Scanner) Reconcile() (*ReconcileResult, error) {
 			localFiles[videoID] = videoPath
 		}
 		return nil
-	})
+	}); walkErr != nil {
+		return nil, walkErr
+	}
 	result.TotalLocalFiles = len(localFiles)
 
 	// 2. 反向查询：先扫本地文件，再逐一查 DB（避免 GetAllDownloads 的 LIMIT 50000 上限误判）

@@ -51,6 +51,10 @@ func RemoveAssociatedFiles(videoPath string) {
 			continue
 		}
 		suffix := strings.TrimPrefix(name, baseName)
+		// P2-9: require suffix to start with "." so "foo.srt" does not match "foobar.srt"
+		if !strings.HasPrefix(suffix, ".") {
+			continue
+		}
 		for _, subExt := range subtitlePatterns {
 			if strings.HasSuffix(suffix, subExt) || strings.HasSuffix(suffix, ".ai"+subExt) {
 				subPath := filepath.Join(dir, name)

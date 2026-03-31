@@ -292,6 +292,9 @@ func downloadThumb(thumbURL, destPath, cookie string) error {
 }
 
 // downloadThumbOnce 执行单次封面图下载
+// P1-3: write to a .tmp file first, then rename atomically so a partial write
+// (e.g. network reset) never leaves a corrupt file at destPath that would be
+// mistakenly treated as complete on the next Stat check.
 func downloadThumbOnce(thumbURL, destPath, cookie string) error {
 	req, err := http.NewRequest("GET", thumbURL, nil)
 	if err != nil {
@@ -313,14 +316,24 @@ func downloadThumbOnce(thumbURL, destPath, cookie string) error {
 		return fmt.Errorf("thumb returned %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(destPath)
+	tmpPath := destPath + ".tmp"
+	f, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	_, err = io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)) // 封面最大 20 MB
-	return err
+	_, copyErr := io.Copy(f, io.LimitReader(resp.Body, 20*1024*1024)) // 封面最大 20 MB
+	f.Close()
+	if copyErr != nil {
+		os.Remove(tmpPath)
+		return copyErr
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // downloadHLSWithFFmpeg 使用 ffmpeg 将 HLS m3u8 流转存为 mp4 文件

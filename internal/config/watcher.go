@@ -79,8 +79,15 @@ func (c *HotConfig) OnChange(fn func(*HotConfig)) {
 }
 
 // notifyChange 触发变更回调
+// P1-7: take a shallow copy of the callback slice while holding the lock, then
+// release the lock before invoking each callback. This prevents a concurrent
+// OnChange() registration from modifying the slice while we iterate over it.
 func (c *HotConfig) notifyChange() {
-	for _, fn := range c.onChange {
+	c.mu.RLock()
+	cbs := make([]func(*HotConfig), len(c.onChange))
+	copy(cbs, c.onChange)
+	c.mu.RUnlock()
+	for _, fn := range cbs {
 		fn(c)
 	}
 }

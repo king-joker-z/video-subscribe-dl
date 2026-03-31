@@ -132,10 +132,33 @@ func (h *SourcesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 		Details: make([]string, 0),
 	}
 
+	// P1-10: whitelist of valid source types; unknown types must be rejected to
+	// prevent arbitrary strings being stored in the DB.
+	allowedTypes := map[string]bool{
+		"up": true, "favorite": true, "season": true, "series": true,
+		"watchlater": true, "douyin": true, "pornhub": true,
+	}
+
 	for _, es := range payload.Sources {
 		if es.URL == "" {
 			result.Errors++
 			result.Details = append(result.Details, "跳过: 缺少 URL")
+			continue
+		}
+
+		// Validate type
+		typeToCheck := es.Type
+		if typeToCheck == "" {
+			typeToCheck = "up"
+		}
+		if !allowedTypes[typeToCheck] {
+			result.Errors++
+			name := es.Name
+			if name == "" {
+				name = es.URL
+			}
+			log.Printf("[source/import] Skipping source %s: invalid type %q", name, es.Type)
+			result.Details = append(result.Details, fmt.Sprintf("跳过(类型无效): %s (type=%s)", name, es.Type))
 			continue
 		}
 

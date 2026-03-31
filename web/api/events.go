@@ -334,8 +334,16 @@ func (h *EventsHandler) HandleWSLogs(w http.ResponseWriter, r *http.Request) {
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
-	bufrw.WriteString(response)
-	bufrw.Flush()
+	// P0-5: check handshake write errors; a failed write means the connection is
+	// already broken — close it immediately and do not register the wsConn.
+	if _, err := bufrw.WriteString(response); err != nil {
+		conn.Close()
+		return
+	}
+	if err := bufrw.Flush(); err != nil {
+		conn.Close()
+		return
+	}
 
 	ws := &wsConn{conn: conn, bufrw: bufrw}
 

@@ -36,7 +36,6 @@ type rateLimitEntry struct {
 
 var (
 	rateLimiter     sync.Map // IP -> *rateLimitEntry
-	rateLimitMax    = 200    // 每分钟最大请求数
 	rateLimitWindow = time.Minute
 )
 
@@ -114,6 +113,7 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 		downloadDir:     downloadDir,
 		mux:             http.NewServeMux(),
 		cachedRateLimit: 200,
+		startTime:       time.Now(), // P2-7: initialize so uptime is correct from start
 	}
 
 	// 启动时从 DB 读取 rate limit 设置
@@ -486,8 +486,9 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		s.rateLimitMu.RLock()
 		limit := s.cachedRateLimit
 		s.rateLimitMu.RUnlock()
-		if limit > 0 {
-			rateLimitMax = limit
+		// P0-4: Use local `limit` variable directly; never write to the removed global rateLimitMax
+		if limit <= 0 {
+			limit = 200
 		}
 
 		ip := r.RemoteAddr
@@ -512,7 +513,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		current := entry.count
 		entry.mu.Unlock()
 
-		if int(current) > rateLimitMax {
+		if int(current) > limit {
 			w.Header().Set("Retry-After", "60")
 			jsonError(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return

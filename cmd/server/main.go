@@ -76,8 +76,13 @@ func main() {
 			// 自动转换为 Credential 存 DB
 			fileCred := bilibili.CredentialFromCookieFile(cookiePath)
 			if fileCred != nil {
-				database.SetSetting("credential_json", fileCred.ToJSON())
-				database.SetSetting("credential_source", "cookie_file")
+				// P1-11: check SetSetting errors so silent save failures are visible in logs
+				if err := database.SetSetting("credential_json", fileCred.ToJSON()); err != nil {
+					log.Printf("save credential_json failed: %v", err)
+				}
+				if err := database.SetSetting("credential_source", "cookie_file"); err != nil {
+					log.Printf("save credential_source failed: %v", err)
+				}
 				biliClient = bilibili.NewClientWithCredential(fileCred)
 				log.Printf("Cookie file auto-converted to Credential")
 			}

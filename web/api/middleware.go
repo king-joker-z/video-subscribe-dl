@@ -75,7 +75,10 @@ func LogMiddleware(next http.Handler) http.Handler {
 		}
 
 		duration := time.Since(start)
-		if duration > 500*time.Millisecond {
+		// P2-6: always log 4xx/5xx responses so errors are visible in the log
+		if wrapped.status >= 400 {
+			log.Printf("[api] %s %s %d %s", r.Method, r.URL.Path, wrapped.status, duration)
+		} else if duration > 500*time.Millisecond {
 			log.Printf("[API] %s %s %d %s (slow)", r.Method, r.URL.Path, wrapped.status, duration)
 		}
 	})

@@ -404,7 +404,8 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 		SELECT dl.id, dl.source_id, dl.video_id, COALESCE(dl.title,''), COALESCE(dl.filename,''), dl.status,
 		       COALESCE(dl.file_path,''), dl.file_size, COALESCE(dl.uploader,''), COALESCE(dl.description,''),
 		       COALESCE(dl.thumbnail,''), COALESCE(dl.thumb_path,''),
-		       dl.duration, dl.downloaded_at, COALESCE(dl.error_message,''), dl.created_at
+		       dl.duration, dl.downloaded_at, COALESCE(dl.error_message,''),
+		       COALESCE(dl.retry_count,0), COALESCE(dl.last_error,''), dl.created_at
 		FROM downloads dl
 		JOIN sources s ON s.id = dl.source_id
 		WHERE s.name = ?
@@ -418,11 +419,12 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 	var downloads []Download
 	for rows.Next() {
 		var dl Download
-		// [FIXED: P0-4] downloaded_at 可为 NULL，改用 sql.NullTime 避免 Scan panic
+		// P0-3: downloaded_at 可为 NULL，改用 sql.NullTime 避免 Scan panic；同时补上 retry_count/last_error
 		var downloadedAt sql.NullTime
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage,
+			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		if downloadedAt.Valid {
@@ -549,7 +551,7 @@ func (d *DB) GetDownloadsByUploaderPaged(uploader, status string, page, pageSize
 
 	// 分页（按状态优先级排序）
 	query := fmt.Sprintf(`
-		SELECT id, source_id, video_id, title, status, file_path,
+		SELECT id, source_id, video_id, COALESCE(title,''), status, COALESCE(file_path,''),
 			COALESCE(uploader,''), COALESCE(thumbnail,''), COALESCE(description,''),
 			COALESCE(duration,0), COALESCE(thumb_path,''),
 			COALESCE(retry_count,0), COALESCE(last_error,''), created_at

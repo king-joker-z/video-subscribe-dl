@@ -376,7 +376,8 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 		switch req.Action {
 		case "retry":
 			if h.onRetryDownload != nil {
-				h.onRetryDownload(id)
+				// P1-9: call asynchronously so a large batch doesn't block the HTTP handler
+				go h.onRetryDownload(id)
 			} else {
 				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
 				h.db.ResetRetryCount(id)
@@ -554,7 +555,11 @@ func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Reques
 	var items []chargeCheckItem
 	for rows.Next() {
 		var v chargeCheckItem
-		rows.Scan(&v.ID, &v.VideoID, &v.Title)
+		// P0-6: check Scan error; silently ignoring it would produce zero-value records
+		if err := rows.Scan(&v.ID, &v.VideoID, &v.Title); err != nil {
+			log.Printf("[detect-charge] rows.Scan error: %v", err)
+			continue
+		}
 		items = append(items, v)
 	}
 
@@ -643,7 +648,11 @@ func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Reques
 	var items []repairItem
 	for rows.Next() {
 		var v repairItem
-		rows.Scan(&v.ID, &v.FilePath, &v.Title, &v.ThumbPath)
+		// P0-6: check Scan error; silently ignoring it would produce zero-value records
+		if err := rows.Scan(&v.ID, &v.FilePath, &v.Title, &v.ThumbPath); err != nil {
+			log.Printf("[repair-thumbs] rows.Scan error: %v", err)
+			continue
+		}
 		// 只处理封面缺失的：thumb_path 为空，或 thumb_path 指向的文件不存在
 		if v.ThumbPath != "" {
 			if _, err := os.Stat(v.ThumbPath); err == nil {

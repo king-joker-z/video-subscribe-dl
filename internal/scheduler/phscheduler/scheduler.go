@@ -134,12 +134,14 @@ func (s *PHScheduler) CheckSource(src db.Source) {
 	s.CheckPHModel(src)
 }
 
-// RetryDownload 重试单个 PH 下载记录（通过信号量限制并发）
+// RetryDownload 重试单个 PH 下载记录（非阻塞，workerSem 满时在 goroutine 内等待）
+// P2-1: mirroring DispatchDownload — acquire the semaphore inside the goroutine
+// so the caller is never blocked when the worker pool is full.
 func (s *PHScheduler) RetryDownload(dl db.Download) {
-	s.workerSem <- struct{}{} // 获取 slot，满时阻塞
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		s.workerSem <- struct{}{} // goroutine 内等待 slot，不阻塞调用方
 		defer func() { <-s.workerSem }()
 		s.retryOneDownload(dl)
 	}()

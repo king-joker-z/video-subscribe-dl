@@ -53,13 +53,19 @@ type DownloadEvent struct {
 	DownloadedAt string `json:"downloaded_at"`  // RFC3339，完成时间，失败时为空
 }
 
+// Downloader manages a pool of download workers.
+// Pause model is job-level: jobs already dequeued continue to completion;
+// new jobs wait on resumeCh until Resume() is called. There is no pauseCh
+// because pausing does not signal workers — workers check the paused flag
+// when they pick up a job and block on resumeCh if true.
 type Downloader struct {
 	config         Config
 	bili           *bilibili.Client
 	queue          chan *Job
 	paused         bool
 	stopped        bool // true after Stop() is called; guarded by mu
-	pauseCh        chan struct{}
+	// P2-3: pauseCh was created but never consumed; removed. Pause/resume is
+	// handled exclusively via the paused flag + resumeCh.
 	resumeCh       chan struct{}
 	activeJobs     int64
 	mu             sync.Mutex
@@ -123,7 +129,6 @@ func New(config Config, biliClient *bilibili.Client) *Downloader {
 		config:     config,
 		bili:       biliClient,
 		queue:      make(chan *Job, appconfig.DefaultQueueSize),
-		pauseCh:    make(chan struct{}),
 		resumeCh:   make(chan struct{}),
 		progress:   make(map[string]*ProgressInfo),
 		rootCtx:    ctx,
@@ -156,8 +161,12 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[w%d] PANIC recovered in worker: %v", id, r)
+			// P0-1: ResultCh may be closed; use select with default to avoid panic on send
 			if job.ResultCh != nil {
-				job.ResultCh <- &Result{Error: fmt.Errorf("worker panic: %v", r)}
+				select {
+				case job.ResultCh <- &Result{Error: fmt.Errorf("worker panic: %v", r)}:
+				default:
+				}
 			}
 		}
 	}()
@@ -233,10 +242,7 @@ func (d *Downloader) Submit(job *Job) error {
 func (d *Downloader) Pause() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if !d.paused {
-		d.paused = true
-		d.pauseCh = make(chan struct{})
-	}
+	d.paused = true
 }
 
 // Stop 优雅关闭下载器：取消所有进行中的下载任务，并等待所有 worker 退出

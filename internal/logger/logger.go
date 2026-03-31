@@ -58,12 +58,13 @@ type logWriter struct {
 }
 
 func (w *logWriter) Write(p []byte) (n int, err error) {
-	// Write to stdout first
-	os.Stdout.Write(p)
-
-	// P0-8: guard buf against concurrent writes from multiple goroutines
+	// P1-8: acquire the lock BEFORE writing to stdout so that concurrent callers
+	// write their bytes atomically and the stdout output stays ordered.
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Write to stdout inside the lock
+	os.Stdout.Write(p)
 
 	// Buffer incomplete lines
 	w.buf = append(w.buf, p...)

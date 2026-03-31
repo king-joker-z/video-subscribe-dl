@@ -157,7 +157,13 @@ func (s *BiliScheduler) submitDownload(src db.Source, videoID string, cid int64,
 			SourceID: src.ID, VideoID: videoID, Title: title,
 			Uploader: uploaderName, Thumbnail: pic, Status: "pending",
 		}
-		dlID, _ = s.db.CreateDownload(dl)
+		var createErr error
+		dlID, createErr = s.db.CreateDownload(dl)
+		// P0-2: CreateDownload failed, dlID==0; do not submit a zero-ID job
+		if createErr != nil || dlID == 0 {
+			log.Printf("[bscheduler] CreateDownload failed for %s: err=%v dlID=%d, skipping submit", videoID, createErr, dlID)
+			return
+		}
 	}
 
 	if s.dl.IsPaused() {
@@ -216,7 +222,13 @@ func (s *BiliScheduler) submitDownloadFlat(src db.Source, videoID string, cid in
 			SourceID: src.ID, VideoID: videoID, Title: title,
 			Uploader: uploaderName, Thumbnail: pic, Status: "pending",
 		}
-		dlID, _ = s.db.CreateDownload(dl)
+		var createErr error
+		dlID, createErr = s.db.CreateDownload(dl)
+		// P0-2: CreateDownload failed, dlID==0; do not submit a zero-ID job
+		if createErr != nil || dlID == 0 {
+			log.Printf("[bscheduler] CreateDownload failed for %s: err=%v dlID=%d, skipping submit", videoID, createErr, dlID)
+			return
+		}
 	}
 
 	resultCh := make(chan *downloader.Result, 1)
@@ -367,7 +379,8 @@ func (s *BiliScheduler) processOneVideo(src db.Source, client *bilibili.Client, 
 			if detail != nil && detail.PubDate > 0 {
 				premiered = time.Unix(detail.PubDate, 0).Format("2006-01-02")
 			}
-			tags, _ := s.getBili().GetVideoTags(bvid)
+			// P1-4: use source-level client so per-source cookies are honoured
+			tags, _ := client.GetVideoTags(bvid)
 			nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
 				Title:        detail.Title,
 				Plot:         detail.Desc,
@@ -462,6 +475,14 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 	}
 	if result == nil {
 		log.Printf("[bscheduler] No result received for %s (channel closed)", videoID)
+		// P1-1: channel was closed (e.g. Submit timeout); if the DB record is still
+		// pending/downloading it will never be retried unless we mark it failed.
+		if dl, err := s.db.GetDownload(dlID); err == nil && dl != nil {
+			if dl.Status == "pending" || dl.Status == "downloading" {
+				s.db.UpdateDownloadStatus(dlID, "failed", "", 0, "result channel closed unexpectedly")
+				log.Printf("[bscheduler] Marked %s (id=%d) as failed due to closed result channel", videoID, dlID)
+			}
+		}
 		return
 	}
 	if !result.Success {
@@ -501,6 +522,12 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 		actualBvID = parts[0]
 	}
 
+	// P1-4: use source-level client so per-source cookies are honoured when fetching tags
+	// handleDownloadResult doesn't have `client`, so we fall back to getBili() here only.
+	// The caller (submitDownload/submitDownloadFlat) does use clientForSource, but that
+	// reference is not threaded through to this goroutine, so getBili() is the best we
+	// can do without a larger refactor. The real fix for processOneVideo's tvshow path
+	// is above where we have access to `client`.
 	tags, _ := s.getBili().GetVideoTags(actualBvID)
 
 	if skipNFO || detail == nil {

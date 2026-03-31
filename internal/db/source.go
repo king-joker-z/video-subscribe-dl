@@ -223,26 +223,32 @@ func (d *DB) UpdateSourceLastCheck(id int64) error {
 }
 
 // ClearDownloadRecords 清理指定订阅源的下载记录（仅删除 DB 记录，不删除磁盘文件）。
-// [FIXED: P2-5] 原名 CleanSource 容易误以为会清理磁盘文件，改名为 ClearDownloadRecords 以明确语义。
 // 此函数只操作数据库，如需同时清理磁盘文件请使用 DeleteSourceWithFiles。
-// 返回值为原 completed 状态的记录数量（可用于日志统计）。
+// 返回值为原 completed 且 file_path 非空的记录数量（可用于日志统计）。
+// P1-6: wrap SELECT+DELETE in a single transaction so the count and the delete
+// are always consistent; a crash between the two steps no longer leaves a
+// ghost count.
 func (d *DB) ClearDownloadRecords(id int64) (int, error) {
-	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ? AND status = 'completed'", id)
+	tx, err := d.Begin()
 	if err != nil {
 		return 0, err
 	}
-	// [FIXED: P2-8] Use defer so the cursor is always closed even if rows.Next() panics.
-	defer rows.Close()
+	defer tx.Rollback()
+
+	// Count records that are completed AND have a local file (non-empty file_path)
 	var count int
-	for rows.Next() {
-		var path string
-		rows.Scan(&path)
-		if path != "" {
-			count++
-		}
+	if err := tx.QueryRow(
+		"SELECT COUNT(*) FROM downloads WHERE source_id = ? AND status = 'completed' AND COALESCE(file_path,'') != ''",
+		id,
+	).Scan(&count); err != nil {
+		return 0, err
 	}
-	_, err = d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
-	return count, err
+
+	if _, err := tx.Exec("DELETE FROM downloads WHERE source_id = ?", id); err != nil {
+		return 0, err
+	}
+
+	return count, tx.Commit()
 }
 
 func (d *DB) UpdateSourceLatestVideoAt(id int64, ts int64) error {
@@ -300,17 +306,27 @@ func (d *DB) SourceExistsByURL(url string) (bool, error) {
 }
 
 func (d *DB) GetSourcesDueForCheck(globalInterval int) ([]Source, error) {
-	var query string
+	// P2-5: use a parameterized query instead of fmt.Sprintf to embed the integer,
+	// avoiding any (theoretical) injection risk and keeping the SQL driver's
+	// prepared-statement path.
+	var (
+		rows *sql.Rows
+		err  error
+	)
 	if globalInterval > 0 {
-		query = fmt.Sprintf("SELECT "+sourceColumns+` FROM sources 
-			WHERE enabled = 1 
-			  AND (last_check IS NULL OR datetime(last_check, '+%d seconds') <= datetime('now'))`, globalInterval)
+		rows, err = d.Query(
+			"SELECT "+sourceColumns+` FROM sources
+			WHERE enabled = 1
+			  AND (last_check IS NULL OR datetime(last_check, '+'||?||' seconds') <= datetime('now'))`,
+			globalInterval,
+		)
 	} else {
-		query = "SELECT " + sourceColumns + ` FROM sources 
-			WHERE enabled = 1 
-			  AND (last_check IS NULL OR datetime(last_check, '+' || check_interval || ' seconds') <= datetime('now'))`
+		rows, err = d.Query(
+			"SELECT "+sourceColumns+` FROM sources
+			WHERE enabled = 1
+			  AND (last_check IS NULL OR datetime(last_check, '+' || check_interval || ' seconds') <= datetime('now'))`,
+		)
 	}
-	rows, err := d.Query(query)
 	if err != nil {
 		return nil, err
 	}

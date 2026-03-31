@@ -528,6 +528,10 @@ func writeXML(path string, data interface{}) error {
 	if err := enc.Encode(data); err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
+	// P1-12: Flush flushes any buffered data to the underlying writer (Go 1.21+)
+	if err := enc.Flush(); err != nil {
+		return fmt.Errorf("flush %s: %w", path, err)
+	}
 	log.Printf("NFO: %s", path)
 	return nil
 }

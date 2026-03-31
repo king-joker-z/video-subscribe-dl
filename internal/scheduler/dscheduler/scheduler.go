@@ -83,7 +83,8 @@ type DouyinScheduler struct {
 	// 自定义 sleep（便于测试）
 	sleepFn func(time.Duration)
 
-	// Cookie 检测时间戳
+	// Cookie 检测时间戳（cookieCheckMu 保护并发读写）
+	cookieCheckMu   sync.Mutex
 	lastCookieCheck time.Time
 
 	// 独立进度追踪（不依赖 BiliDownloader）

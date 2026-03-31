@@ -23,8 +23,8 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		return
 	}
 
-	s.downloadLimiter.Acquire()
-
+	// P1-2: check source existence/enabled BEFORE consuming a rate-limit token;
+	// otherwise a disabled/missing source wastes a token each call.
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
 		log.Printf("[dscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
@@ -35,6 +35,8 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: source disabled")
 		return
 	}
+
+	s.downloadLimiter.Acquire()
 
 	client := s.newClient()
 	defer client.Close()

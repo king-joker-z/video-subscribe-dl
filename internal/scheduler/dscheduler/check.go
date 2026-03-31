@@ -23,8 +23,15 @@ func (s *DouyinScheduler) CheckDouyin(src db.Source) {
 	defer client.Close()
 
 	// Cookie 验证（每小时最多一次）
-	if time.Since(s.lastCookieCheck) > 1*time.Hour {
+	// P1-5: guard lastCookieCheck with a mutex to prevent data races when
+	// multiple goroutines call CheckDouyin concurrently.
+	s.cookieCheckMu.Lock()
+	shouldCheck := time.Since(s.lastCookieCheck) > 1*time.Hour
+	if shouldCheck {
 		s.lastCookieCheck = time.Now()
+	}
+	s.cookieCheckMu.Unlock()
+	if shouldCheck {
 		if valid, msg := client.ValidateCookie(); !valid {
 			log.Printf("[dscheduler] ⚠️ Cookie 验证失败: %s", msg)
 			s.SetCookieInvalid(msg)

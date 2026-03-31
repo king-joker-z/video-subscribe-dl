@@ -29,7 +29,9 @@ func New(database *db.DB, downloadDir string) *Scanner {
 func (s *Scanner) ScanAndSync() (int, int, error) {
 	scanned, nfoGen := 0, 0
 
-	filepath.Walk(s.downloadDir, func(path string, info os.FileInfo, err error) error {
+	// P0-7: check Walk's overall error; an inaccessible downloadDir should not
+	// silently succeed and return (0, 0, nil).
+	if err := filepath.Walk(s.downloadDir, func(path string, info os.FileInfo, err error) error {
 		// [FIXED: P1-4] Log walk errors instead of silently swallowing them
 		if err != nil {
 			log.Printf("[scanner] walk error %s: %v", path, err)
@@ -125,7 +127,9 @@ func (s *Scanner) ScanAndSync() (int, int, error) {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return 0, 0, err
+	}
 
 	return scanned, nfoGen, nil
 }
