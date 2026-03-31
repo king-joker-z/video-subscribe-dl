@@ -86,7 +86,10 @@ func (h *SourcesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	filename := fmt.Sprintf("vsd-sources-%s.json", time.Now().Format("20060102-150405"))
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.Write(data)
+	// [FIXED: P2-12] 记录 w.Write 错误，便于排查客户端连接中断等问题
+	if _, err := w.Write(data); err != nil {
+		log.Printf("[sources/export] write response error: %v", err)
+	}
 }
 
 // ImportResult 导入结果

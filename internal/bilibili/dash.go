@@ -306,12 +306,12 @@ func downloadWithResume(ctx context.Context, rawURL, dest string) error {
 }
 
 func mergeStreams(videoPath, audioPath, outputPath string) error {
+	// [FIXED: P1-3] 去掉 -movflags +faststart：对 MKV 输出无意义，且会触发 exit 254（ffmpeg 最后 re-open .tmp 失败）
 	args := []string{
 		"-y",
 		"-i", videoPath,
 		"-i", audioPath,
-		"-c", "copy",      // 不重新编码
-		"-movflags", "+faststart",
+		"-c", "copy", // 不重新编码
 		outputPath,
 	}
 

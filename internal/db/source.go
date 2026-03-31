@@ -216,10 +216,11 @@ func (d *DB) UpdateSourceLastCheck(id int64) error {
 	return err
 }
 
-// CleanSource 清理指定订阅源的下载记录（仅删除 DB 记录，不删除磁盘文件）。
-// [FIXED: P2-7] 此函数只操作数据库，如需同时清理磁盘文件请使用 DeleteSourceWithFiles。
+// ClearDownloadRecords 清理指定订阅源的下载记录（仅删除 DB 记录，不删除磁盘文件）。
+// [FIXED: P2-5] 原名 CleanSource 容易误以为会清理磁盘文件，改名为 ClearDownloadRecords 以明确语义。
+// 此函数只操作数据库，如需同时清理磁盘文件请使用 DeleteSourceWithFiles。
 // 返回值为原 completed 状态的记录数量（可用于日志统计）。
-func (d *DB) CleanSource(id int64) (int, error) {
+func (d *DB) ClearDownloadRecords(id int64) (int, error) {
 	rows, err := d.Query("SELECT file_path FROM downloads WHERE source_id = ? AND status = 'completed'", id)
 	if err != nil {
 		return 0, err
