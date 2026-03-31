@@ -284,19 +284,16 @@ function GlobalDownloadBar({ sidebarCollapsed }) {
     merge: '合并中',
   })[primary.phase || primary.status] || '下载中';
 
-  // 侧边栏宽度偏移（仅桌面端）
-  const mlStyle = sidebarCollapsed ? '4rem' : '14rem';
+  // 侧边栏宽度偏移（仅桌面端，直接用 CSS class 控制，不注入 <style>）
+  const mlClass = sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-56';
 
   // 手机端 top: 3.5rem（header 下方），桌面端 top: 0（无 header，侧边栏偏移）
   return h('div', {
     className: 'fixed z-20 left-0 right-0 pointer-events-none lg:top-0 top-14'
   },
     h('div', {
-      className: 'pointer-events-auto transition-all duration-200',
-      style: { marginLeft: `var(--global-dl-ml, 0)` }
+      className: cn('pointer-events-auto transition-all duration-200', mlClass),
     },
-      // 设置 CSS 变量（通过 style 注入，仅桌面端生效）
-      h('style', null, `@media (min-width: 1024px) { :root { --global-dl-ml: ${mlStyle}; } } @media (max-width: 1023px) { :root { --global-dl-ml: 0px; } }`),
       h('div', {
         className: 'relative bg-white backdrop-blur border-b border-blue-200 px-4 py-1.5 flex items-center gap-3 text-xs shadow-lg'
       },
@@ -380,13 +377,18 @@ function App() {
     return () => window.removeEventListener('vsd:download-event', handler);
   }, []);
 
-  // 全局快捷键 Ctrl+D 打开快速下载
+  // 全局快捷键 Ctrl+D / Ctrl+K（合并到单个 useEffect，减少事件监听注册数）
   useEffect(() => {
     const handler = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
-        e.preventDefault();
-        setQuickDlUrl('');
-        setQuickDlOpen(o => !o);
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'd') {
+          e.preventDefault();
+          setQuickDlUrl('');
+          setQuickDlOpen(o => !o);
+        } else if (e.key === 'k') {
+          e.preventDefault();
+          setCmdPaletteOpen(o => !o);
+        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -448,18 +450,6 @@ function App() {
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
     };
-  }, []);
-
-  // 全局快捷键 Ctrl+K 打开命令面板
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setCmdPaletteOpen(o => !o);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   // Hash 路由

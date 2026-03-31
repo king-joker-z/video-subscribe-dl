@@ -72,26 +72,22 @@ export function VideoDetailModal({ video, onClose, onAction }) {
     return () => window.removeEventListener('keydown', handler);
   }, [video, onClose]);
 
-  // SSE 进度监听（仅下载中状态订阅）
+  // SSE 进度监听（通过全局单例，避免重复建连）
   useEffect(() => {
     if (!video) return;
-    let es;
-    try {
-      es = new EventSource('/api/events');
-      es.addEventListener('progress', (e) => {
-        try {
-          const list = JSON.parse(e.data) || [];
-          const v = detail || video;
-          const found = list.find(p =>
-            (p.download_id && String(p.download_id) === String(v.id)) ||
-            (v.video_id && p.bvid && p.bvid === v.video_id)
-          );
-          setProgress(found || null);
-        } catch {}
-      });
-    } catch {}
-    return () => { if (es) es.close(); };
-  }, [video, detail]);
+    const handler = (e) => {
+      try {
+        const list = e.detail || [];
+        const found = list.find(p =>
+          (p.download_id && String(p.download_id) === String(video.id)) ||
+          (video.video_id && p.bvid && p.bvid === video.video_id)
+        );
+        setProgress(found || null);
+      } catch {}
+    };
+    window.addEventListener('vsd:progress', handler);
+    return () => window.removeEventListener('vsd:progress', handler);
+  }, [video.id]);
 
   if (!video) return null;
 
@@ -117,7 +113,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   };
   const handleDelete = async () => {
     if (!confirm('确定删除？')) return;
-    try { await api.deleteVideo(v.id); toast.success('已删除'); onClose(); if (onAction) onAction(); }
+    try { await api.deleteVideo(v.id); toast.success('已删除'); if (onAction) onAction(); onClose(); }
     catch (e) { toast.error(e.message); }
   };
   const handleDeleteFiles = async () => {

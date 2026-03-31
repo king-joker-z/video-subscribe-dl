@@ -116,7 +116,7 @@ export function QuickDownloadDialog({ open, onClose, initialUrl = '' }) {
         }
       })();
     }
-  }, [open, initialUrl, loading, preview]);
+  }, [open, initialUrl]);
 
   // ESC 关闭
   useEffect(() => {

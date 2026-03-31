@@ -1,7 +1,7 @@
 import React from 'react';
 import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge , SettingsSectionSkeleton } from '../components/utils.js';
-const { createElement: h, useState, useEffect, useCallback, Fragment } = React;
+const { createElement: h, useState, useEffect, useCallback, useRef, Fragment } = React;
 
 // Toggle 开关组件
 function Toggle({ checked, onChange, disabled = false }) {
@@ -69,7 +69,9 @@ export function SettingsPage() {
   const [savingPhCookie, setSavingPhCookie] = useState(false);
   const [phStatus, setPhStatus] = useState(null);
   const [templatePreview, setTemplatePreview] = useState('');
-  const previewTimer = React.useRef(null);
+  const previewTimer = useRef(null);
+  const qrPollInterval = useRef(null);
+  const qrPollTimeout = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -113,28 +115,34 @@ export function SettingsPage() {
     finally { setSaving(false); }
   };
 
+  const clearQRTimers = () => {
+    if (qrPollInterval.current) { clearInterval(qrPollInterval.current); qrPollInterval.current = null; }
+    if (qrPollTimeout.current) { clearTimeout(qrPollTimeout.current); qrPollTimeout.current = null; }
+  };
+
   const handleQRLogin = async () => {
+    clearQRTimers(); // 防止多次点击产生多个并发 timer
     try {
       const res = await api.generateQRCode();
       setQrData(res.data);
       setShowQR(true);
       const key = res.data.qrcode_key;
-      const poll = setInterval(async () => {
+      qrPollInterval.current = setInterval(async () => {
         try {
           const pr = await api.pollQRCode(key);
           if (pr.data.status === 0) {
-            clearInterval(poll);
+            clearQRTimers();
             setShowQR(false);
             toast.success('登录成功' + (pr.data.username ? ': ' + pr.data.username : ''));
             load();
           } else if (pr.data.status === -2) {
-            clearInterval(poll);
+            clearQRTimers();
             setShowQR(false);
             toast.error('二维码已过期');
           }
         } catch {}
       }, 2000);
-      setTimeout(() => { clearInterval(poll); setShowQR(false); }, 180000);
+      qrPollTimeout.current = setTimeout(() => { clearQRTimers(); setShowQR(false); }, 180000);
     } catch (e) { toast.error(e.message); }
   };
 
@@ -252,7 +260,7 @@ export function SettingsPage() {
     ),
 
     // 扫码弹窗
-    showQR && h('div', { className: 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center', onClick: () => setShowQR(false) },
+    showQR && h('div', { className: 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center', onClick: () => { clearQRTimers(); setShowQR(false); } },
       h('div', { className: 'bg-white rounded-xl p-6 max-w-sm mx-4', onClick: function(e) { e.stopPropagation(); } },
         h('h3', { className: 'font-medium text-slate-800 text-center mb-4' }, '打开 B 站 App 扫码登录'),
         qrData && qrData.url
@@ -265,7 +273,7 @@ export function SettingsPage() {
           : h('div', { className: 'skeleton w-48 h-48 mx-auto rounded-lg' }),
         h('p', { className: 'text-center text-sm text-slate-600' }, '等待扫码...'),
         h('div', { className: 'flex justify-center mt-4' },
-          h(Button, { onClick: () => setShowQR(false), variant: 'ghost', size: 'sm' }, '取消')
+          h(Button, { onClick: () => { clearQRTimers(); setShowQR(false); }, variant: 'ghost', size: 'sm' }, '取消')
         )
       )
     ),

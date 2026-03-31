@@ -1,7 +1,7 @@
 import React from 'react';
 import { api, createLogSocket, createEventSource } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge } from '../components/utils.js';
-const { createElement: h, useState, useEffect, useRef, useCallback } = React;
+const { createElement: h, useState, useEffect, useRef, useCallback, useMemo } = React;
 
 export function LogsPage() {
   const [logs, setLogs] = useState([]);
@@ -16,7 +16,8 @@ export function LogsPage() {
   const bufferRef = useRef([]); // [FIXED: buffer for paused mode]
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
-  const reconnectKey = useRef(0);
+  const alreadyFallenBack = useRef(false); // P0-5: 防止 ws.onclose 和 onerror 双连
+  const [reconnectKey, setReconnectKey] = useState(0);
 
   // 连接管理：WebSocket 优先，SSE 降级
   const connect = useCallback(() => {
@@ -40,14 +41,21 @@ export function LogsPage() {
     });
 
     if (sock.ws) {
+      alreadyFallenBack.current = false;
       const origOnError = sock.ws.onerror;
       sock.ws.onerror = () => {
         if (origOnError) origOnError();
-        fallbackToSSE();
+        if (!alreadyFallenBack.current) {
+          alreadyFallenBack.current = true;
+          fallbackToSSE();
+        }
       };
       sock.ws.onclose = () => {
         setConnType('');
-        setTimeout(() => connect(), 5000);
+        // 如果已经因 onerror 降级到 SSE，不再重新发起 WS 连接
+        if (!alreadyFallenBack.current) {
+          setTimeout(() => connect(), 5000);
+        }
       };
     }
 
@@ -85,7 +93,7 @@ export function LogsPage() {
         connectionRef.current.close();
       }
     };
-  }, [reconnectKey.current]);
+  }, [reconnectKey]);
 
   // [FIXED: 反转模式，只在追随时强制 scrollTop=0，靠 ref 判断避免 autoScroll state 时序问题]
   useEffect(() => {
@@ -140,14 +148,14 @@ export function LogsPage() {
     setTimeout(() => connect(), 300);
   };
 
-  const filteredLogs = filter === 'all' ? logs : logs.filter(l => {
+  const filteredLogs = useMemo(() => filter === 'all' ? logs : logs.filter(l => {
     const raw = l.message || l.msg || '';
     const level = (l.level || '').toLowerCase();
     if (filter === 'error') return level === 'error' || /\[error\]|\b(error|fail|failed|failure|exception|panic|fatal)\b/i.test(raw);
     if (filter === 'warn') return level === 'warn' || /\[WARN\]/i.test(raw);
     if (filter === 'info') return level === 'info' || /\[info\]/i.test(raw);
     return true;
-  });
+  }), [logs, filter]);
 
   const levelColors = {
     'ERROR': 'text-red-500',
@@ -214,7 +222,7 @@ export function LogsPage() {
               const time = l.time ? new Date(l.time).toLocaleTimeString('zh-CN') : '';
               const level = l.level || '';
               const msg = l.message || l.msg || JSON.stringify(l);
-              return h('div', { key: i, className: 'flex gap-2 hover:bg-slate-100 py-0.5 px-1 rounded' },
+              return h('div', { key: `${l.time}-${l.level}-${i}`, className: 'flex gap-2 hover:bg-slate-100 py-0.5 px-1 rounded' },
                 time && h('span', { className: 'text-slate-400 flex-shrink-0' }, time),
                 level && h('span', { className: cn('flex-shrink-0 w-12', levelColors[level] || 'text-slate-500') }, level),
                 h('span', { className: 'text-slate-700 break-all' }, msg)

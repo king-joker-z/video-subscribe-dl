@@ -1,7 +1,7 @@
 import React from 'react';
 import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
-const { createElement: h, useState, useEffect, useCallback } = React;
+const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集', pornhub: 'Pornhub' };
 const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning', pornhub: 'error' };
@@ -221,10 +221,12 @@ function ImportFollowTab({ onDone }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [subscribing, setSubscribing] = useState(false);
   const pageSize = 20;
+  const searchTimer = useRef(null);
 
   const loadUppers = useCallback(async () => {
     setLoading(true);
@@ -235,6 +237,12 @@ function ImportFollowTab({ onDone }) {
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); }
   }, [page, search]);
+
+  const handleSearchChange = (value) => {
+    setSearchInput(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setSearch(value); setPage(1); }, 300);
+  };
 
   useEffect(() => { loadUppers(); }, [loadUppers]);
 
@@ -268,8 +276,8 @@ function ImportFollowTab({ onDone }) {
     // 搜索框
     h("div", { className: "flex gap-2" },
       h("input", {
-        type: "text", value: search, placeholder: "搜索 UP 主...",
-        onChange: (e) => { setSearch(e.target.value); setPage(1); },
+        type: "text", value: searchInput, placeholder: "搜索 UP 主...",
+        onChange: (e) => handleSearchChange(e.target.value),
         className: "flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
       }),
       h(Button, { onClick: selectAll, size: "sm", variant: "secondary" }, "全选未订阅")
@@ -483,7 +491,7 @@ export function SourcesPage({ onNavigate }) {
       const a = document.createElement('a');
       a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
-      toast.success('已导出 ' + sources.length + ' 个订阅源');
+      toast.success('导出成功');
     } catch (e) { toast.error('导出失败: ' + e.message); }
   };
 

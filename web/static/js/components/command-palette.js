@@ -129,9 +129,9 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
     } else if (item.type === 'action') {
       if (onAction) onAction(item.action);
     } else if (item.route) {
-      // 搜索结果 — 导航到对应路由
-      const hash = item.route;
-      location.hash = hash.startsWith('#') ? hash.slice(1) : '/' + hash;
+      // 搜索结果 — 导航到对应路由（统一格式：#/route）
+      const route = item.route.replace(/^#\//, '').replace(/^#/, '');
+      location.hash = '#/' + route;
     }
   }, [onClose, onNavigate, onAction]);
 

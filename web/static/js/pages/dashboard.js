@@ -280,8 +280,8 @@ export function DashboardPage({ onNavigate }) {
           h(Button, { onClick: handleTrigger, disabled: triggering || cooldownSec > 0, size: 'sm' },
             h(Icon, { name: 'play', size: 14 }), triggering ? '触发中...' : '立即执行'),
           task?.status === 'paused'
-            ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 B站')
-            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站'),
+            ? h(Button, { onClick: () => api.resumeTask().then(() => { toast.success('已恢复'); load(); }).catch(e => toast.error(e.message || '操作失败')), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 B站')
+            : h(Button, { onClick: () => api.pauseTask().then(() => { toast.success('已暂停'); load(); }).catch(e => toast.error(e.message || '操作失败')), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 B站'),
           douyinPaused
             ? h(Button, { onClick: () => api.resumeDouyin().then(() => { toast.success('抖音已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复抖音')
             : h(Button, { onClick: () => api.pauseDouyin().then(() => { toast.success('抖音已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停抖音'),
@@ -366,8 +366,8 @@ export function DashboardPage({ onNavigate }) {
         )
       ),
       h('div', { className: 'space-y-3' },
-        activeProgress.map(p =>
-          h('div', { key: p.bvid, className: 'space-y-1.5' },
+        activeProgress.map((p, i) =>
+          h('div', { key: p.download_id || p.bvid || i, className: 'space-y-1.5' },
             h('div', { className: 'flex items-center justify-between' },
               h('div', { className: 'text-sm truncate flex-1 min-w-0 mr-3' }, p.title || p.bvid),
               h('span', { className: 'text-xs text-slate-500 flex-shrink-0 tabular-nums' }, (p.percent || 0).toFixed(1) + '%')
