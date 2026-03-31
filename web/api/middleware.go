@@ -8,15 +8,18 @@ import (
 	"time"
 )
 
-// JSONMiddleware 设置 JSON Content-Type
+// JSONMiddleware 设置 JSON Content-Type（跳过 SSE/stream 路径）
+// [FIXED: P2-9] Actually set the Content-Type header for non-streaming API paths.
 func JSONMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 跳过 SSE 端点
+		// 跳过 SSE / WebSocket / stream 端点，它们自行管理 Content-Type
 		if strings.HasSuffix(r.URL.Path, "/events") || strings.HasSuffix(r.URL.Path, "/stream") ||
-			strings.HasPrefix(r.URL.Path, "/api/stream/") {
+			strings.HasPrefix(r.URL.Path, "/api/stream/") ||
+			strings.HasSuffix(r.URL.Path, "/ws/logs") {
 			next.ServeHTTP(w, r)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
 }

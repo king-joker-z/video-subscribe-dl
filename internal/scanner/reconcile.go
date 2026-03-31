@@ -76,7 +76,13 @@ func (s *Scanner) Reconcile() (*ReconcileResult, error) {
 
 	// 3. 检查本地有但DB无的 (orphan files) —— 反向查询，不受 LIMIT 影响
 	for videoID, filePath := range localFiles {
-		exists, _ := s.db.IsVideoExists(videoID)
+		// [FIXED: P1-6] Don't discard the error; a DB anomaly could cause us to
+		// misclassify a valid record as an orphan and trigger unwanted repair.
+		exists, err := s.db.IsVideoExists(videoID)
+		if err != nil {
+			log.Printf("[Reconcile] IsVideoExists error for %s: %v, skipping", videoID, err)
+			continue
+		}
 		if !exists {
 			result.OrphanFiles = append(result.OrphanFiles, filePath)
 		}

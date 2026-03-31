@@ -234,6 +234,12 @@ func (s *Scheduler) Start() {
 }
 
 func (s *Scheduler) Stop() {
+	// [FIXED: P1-8] Signal all forwarding goroutines first, wait for them to
+	// exit, then stop the child schedulers so their resources are only released
+	// after all parent goroutines have finished using them.
+	close(s.stopCh)
+	s.wg.Wait()
+
 	s.bili.Stop()
 	if s.douyin != nil {
 		s.douyin.Stop()
@@ -241,8 +247,6 @@ func (s *Scheduler) Stop() {
 	if s.ph != nil {
 		s.ph.Stop()
 	}
-	close(s.stopCh)
-	s.wg.Wait()
 }
 
 // ─── 检查逻辑 ──────────────────────────────────────────────────────────────────

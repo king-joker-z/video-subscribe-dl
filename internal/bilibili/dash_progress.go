@@ -68,9 +68,15 @@ func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStre
 	wg.Wait()
 
 	if videoErr != nil {
+		// [FIXED: P2-2] Clean up both temp files when either download fails
+		os.Remove(videoTmp)
+		os.Remove(audioTmp)
 		return "", fmt.Errorf("download video: %w", videoErr)
 	}
 	if audioErr != nil {
+		// [FIXED: P2-2] Clean up both temp files when either download fails
+		os.Remove(videoTmp)
+		os.Remove(audioTmp)
 		return "", fmt.Errorf("download audio: %w", audioErr)
 	}
 

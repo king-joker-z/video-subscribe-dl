@@ -102,7 +102,7 @@ func DownloadFile(fileURL, destPath string) (int64, error) {
 
 // DownloadThumb 下载封面图到 destPath。若已存在且非空非目录则跳过。
 func DownloadThumb(thumbURL, destPath string) error {
-	// [FIXED: P2-6] 检查是否为非空普通文件，避免 destPath 为空目录时跳过导致封面缺失
+	// 检查是否为非空普通文件，避免 destPath 为空目录时跳过导致封面缺失
 	if info, err := os.Stat(destPath); err == nil && !info.IsDir() && info.Size() > 0 {
 		return nil
 	}
@@ -123,12 +123,24 @@ func DownloadThumb(thumbURL, destPath string) error {
 		return fmt.Errorf("thumb download returned %d", resp.StatusCode)
 	}
 
-	f, err := os.Create(destPath)
+	// [FIXED: P2-4] Write to a temp file first, rename on success to avoid
+	// leaving a corrupted file behind on download failure.
+	tmpPath := destPath + ".tmp"
+	f, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	_, err = io.Copy(f, resp.Body)
-	return err
+	_, copyErr := io.Copy(f, resp.Body)
+	f.Close()
+	if copyErr != nil {
+		os.Remove(tmpPath)
+		return copyErr
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }

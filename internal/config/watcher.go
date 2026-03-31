@@ -88,7 +88,8 @@ func (c *HotConfig) notifyChange() {
 // LoadFromDB 从数据库加载配置
 func (c *HotConfig) LoadFromDB(store SettingsStore) bool {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	// NOTE: do NOT use defer Unlock here; we manually unlock before calling
+	// notifyChange() to avoid deadlock when a callback calls c.Get().
 
 	changed := false
 
@@ -146,9 +147,14 @@ func (c *HotConfig) LoadFromDB(store SettingsStore) bool {
 	}
 
 	if changed {
+		// [FIXED: P1-1] Release the write lock before invoking callbacks to prevent
+		// deadlock if any callback calls c.Get() which acquires a read lock.
+		c.mu.Unlock()
 		c.notifyChange()
+		return true
 	}
-	return changed
+	c.mu.Unlock()
+	return false
 }
 
 // ConfigWatcher 定期从 DB 轮询配置变化

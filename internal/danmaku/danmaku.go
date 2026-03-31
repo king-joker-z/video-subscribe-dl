@@ -91,10 +91,12 @@ func DownloadDanmakuXML(cid int64, outputPath string) error {
 		return fmt.Errorf("danmaku HTTP %d", resp.StatusCode)
 	}
 
-	// B站弹幕接口可能返回 deflate 压缩
+	// [FIXED: P1-3] B站弹幕接口可能返回 deflate 压缩；flate.Reader 必须 Close 才能释放资源
 	var reader io.Reader
 	if resp.Header.Get("Content-Encoding") == "deflate" {
-		reader = flate.NewReader(resp.Body)
+		var fr io.ReadCloser = flate.NewReader(resp.Body)
+		defer fr.Close()
+		reader = fr
 	} else {
 		reader = resp.Body
 	}

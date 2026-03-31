@@ -15,6 +15,9 @@ type Rule struct {
 	Condition string `json:"condition"` // "contains" | "not_contains" | "regex" | "gt" | "lt" | "between"
 	Value     string `json:"value"`
 	Value2    string `json:"value2"` // between 的第二个值
+	// [FIXED: P2-5] compiledRegex is pre-compiled during ParseRules to avoid
+	// recompiling the same pattern on every MatchesRules call.
+	compiledRegex *regexp.Regexp
 }
 
 // VideoInfo 过滤所需的视频信息
@@ -69,6 +72,8 @@ func MatchesSimple(title, filter string) bool {
 }
 
 // ParseRules 解析 JSON 格式的过滤规则
+// [FIXED: P2-5] Pre-compile regex patterns so matchStringRule doesn't
+// recompile the same expression on every call.
 func ParseRules(rulesJSON string) []Rule {
 	if rulesJSON == "" || rulesJSON == "[]" {
 		return nil
@@ -76,6 +81,13 @@ func ParseRules(rulesJSON string) []Rule {
 	var rules []Rule
 	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
 		return nil
+	}
+	for i := range rules {
+		if rules[i].Condition == "regex" && rules[i].Value != "" {
+			if re, err := regexp.Compile(rules[i].Value); err == nil {
+				rules[i].compiledRegex = re
+			}
+		}
 	}
 	return rules
 }
@@ -94,21 +106,21 @@ func MatchesRules(rules []Rule, info VideoInfo) bool {
 func matchOneRule(rule Rule, info VideoInfo) bool {
 	switch rule.Target {
 	case "title":
-		return matchStringRule(info.Title, rule.Condition, rule.Value)
+		return matchStringRule(info.Title, rule.Condition, rule.Value, rule.compiledRegex)
 	case "duration":
 		return matchNumericRule(info.Duration, rule.Condition, rule.Value, rule.Value2)
 	case "pubdate":
-		return matchStringRule(info.PubDate, rule.Condition, rule.Value)
+		return matchStringRule(info.PubDate, rule.Condition, rule.Value, rule.compiledRegex)
 	case "pages":
 		return matchNumericRule(info.Pages, rule.Condition, rule.Value, rule.Value2)
 	case "tags":
-		return matchStringRule(info.Tags, rule.Condition, rule.Value)
+		return matchStringRule(info.Tags, rule.Condition, rule.Value, rule.compiledRegex)
 	default:
 		return true
 	}
 }
 
-func matchStringRule(text, condition, value string) bool {
+func matchStringRule(text, condition, value string, compiledRegex ...*regexp.Regexp) bool {
 	textLower := strings.ToLower(text)
 	valueLower := strings.ToLower(value)
 	switch condition {
@@ -117,9 +129,16 @@ func matchStringRule(text, condition, value string) bool {
 	case "not_contains":
 		return !strings.Contains(textLower, valueLower)
 	case "regex":
-		re, err := regexp.Compile(value)
-		if err != nil {
-			return true
+		// [FIXED: P2-5] Use pre-compiled regex if available; compile lazily otherwise.
+		var re *regexp.Regexp
+		if len(compiledRegex) > 0 && compiledRegex[0] != nil {
+			re = compiledRegex[0]
+		} else {
+			var err error
+			re, err = regexp.Compile(value)
+			if err != nil {
+				return true
+			}
 		}
 		return re.MatchString(text)
 	case "gt":

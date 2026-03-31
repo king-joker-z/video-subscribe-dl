@@ -519,7 +519,10 @@ func writeXML(path string, data interface{}) error {
 	}
 	defer f.Close()
 
-	f.WriteString(xml.Header)
+	// [FIXED: P2-6] Check WriteString error so a partial-write is detected early.
+	if _, err := f.WriteString(xml.Header); err != nil {
+		return fmt.Errorf("write xml header: %w", err)
+	}
 	enc := xml.NewEncoder(f)
 	enc.Indent("", "  ")
 	if err := enc.Encode(data); err != nil {

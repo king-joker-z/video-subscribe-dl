@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,7 +30,12 @@ func (s *Scanner) ScanAndSync() (int, int, error) {
 	scanned, nfoGen := 0, 0
 
 	filepath.Walk(s.downloadDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		// [FIXED: P1-4] Log walk errors instead of silently swallowing them
+		if err != nil {
+			log.Printf("[scanner] walk error %s: %v", path, err)
+			return nil
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(path, ".info.json") {
@@ -72,8 +78,10 @@ func (s *Scanner) ScanAndSync() (int, int, error) {
 			}
 		}
 
-		// 补录数据库
-		s.db.UpsertDownloadFromScan(id, title, uploader, videoPath, fileSize)
+		// [FIXED: P1-5] Check and log DB write failures
+		if err := s.db.UpsertDownloadFromScan(id, title, uploader, videoPath, fileSize); err != nil {
+			log.Printf("[scanner] upsert error: %v", err)
+		}
 
 		// 生成缺失的 NFO
 		if videoPath != "" {

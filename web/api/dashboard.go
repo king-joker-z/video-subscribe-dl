@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"video-subscribe-dl/internal/bilibili"
@@ -18,7 +19,8 @@ type DashboardHandler struct {
 	downloadDir     string
 	getCooldownInfo func() (bool, int) // 返回 (inCooldown, remainingSec)
 
-	// credential 缓存，避免每次 dashboard 请求都调 B 站 API
+	// [FIXED: P1-2] credential 缓存需要用锁保护，避免并发 HTTP 请求的 data race
+	credCacheMu   sync.RWMutex
 	credCache     map[string]interface{}
 	credCacheTime time.Time
 	credCacheTTL  time.Duration
@@ -39,7 +41,20 @@ func (h *DashboardHandler) SetCooldownInfoFunc(fn func() (bool, int)) {
 
 // getCredentialStatus 获取凭证状态（带缓存，5分钟TTL）
 func (h *DashboardHandler) getCredentialStatus() map[string]interface{} {
-	// 缓存有效期内直接返回
+	// [FIXED: P1-2] 先用 RLock 快速检查缓存
+	h.credCacheMu.RLock()
+	if h.credCache != nil && time.Since(h.credCacheTime) < h.credCacheTTL {
+		cached := h.credCache
+		h.credCacheMu.RUnlock()
+		return cached
+	}
+	h.credCacheMu.RUnlock()
+
+	// 缓存过期或为空，获取写锁更新
+	h.credCacheMu.Lock()
+	defer h.credCacheMu.Unlock()
+
+	// double-check: 另一个 goroutine 可能已更新
 	if h.credCache != nil && time.Since(h.credCacheTime) < h.credCacheTTL {
 		return h.credCache
 	}
@@ -97,7 +112,9 @@ func (h *DashboardHandler) getCredentialStatus() map[string]interface{} {
 
 // InvalidateCredentialCache 使凭证缓存失效（登录/刷新后调用）
 func (h *DashboardHandler) InvalidateCredentialCache() {
+	h.credCacheMu.Lock()
 	h.credCache = nil
+	h.credCacheMu.Unlock()
 }
 
 // GET /api/dashboard

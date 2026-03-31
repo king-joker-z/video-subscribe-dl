@@ -169,6 +169,9 @@ func (ws *wsConn) writeMessage(data []byte) error {
 	if ws.closed {
 		return fmt.Errorf("connection closed")
 	}
+	// [FIXED: P2-10] Set a write deadline so a slow/unresponsive client cannot
+	// block the sender goroutine indefinitely.
+	ws.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	// 构造 WebSocket text frame
 	frame := buildWSFrame(wsOpText, data)
 	_, err := ws.bufrw.Write(frame)
@@ -185,6 +188,9 @@ func (ws *wsConn) writeFrame(opcode byte, payload []byte) error {
 	if ws.closed {
 		return fmt.Errorf("connection closed")
 	}
+	// [FIXED: P2-10] Set a write deadline so a slow/unresponsive client cannot
+	// block the sender goroutine indefinitely.
+	ws.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	frame := buildWSFrame(opcode, payload)
 	_, err := ws.bufrw.Write(frame)
 	if err != nil {

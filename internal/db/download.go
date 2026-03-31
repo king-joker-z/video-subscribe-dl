@@ -243,7 +243,8 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at,
+		       COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
 		FROM downloads WHERE uploader = ? ORDER BY created_at DESC LIMIT ?
 	`, uploader, limit)
 	if err != nil {
@@ -255,9 +256,11 @@ func (d *DB) GetDownloadsByUploader(uploader string, limit int) ([]Download, err
 	for rows.Next() {
 		var dl Download
 		var downloadedAt sql.NullTime
+		// [FIXED: P1-9] Added retry_count and last_error to match the 18-column SELECT
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage,
+			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		if downloadedAt.Valid {
@@ -276,7 +279,8 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 	rows, err := d.Query(`
 		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
 		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at, COALESCE(error_message,''), created_at
+		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at,
+		       COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
 		FROM downloads ORDER BY id DESC LIMIT 50000
 	`)
 	if err != nil {
@@ -288,9 +292,11 @@ func (d *DB) GetAllDownloads() ([]Download, error) {
 	for rows.Next() {
 		var dl Download
 		var downloadedAt sql.NullTime
+		// [FIXED: P1-10] Added retry_count and last_error to match the 18-column SELECT
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description, &dl.Thumbnail,
-			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage, &dl.CreatedAt); err != nil {
+			&dl.ThumbPath, &dl.Duration, &downloadedAt, &dl.ErrorMessage,
+			&dl.RetryCount, &dl.LastError, &dl.CreatedAt); err != nil {
 			return nil, err
 		}
 		if downloadedAt.Valid {

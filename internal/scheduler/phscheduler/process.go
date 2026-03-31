@@ -389,11 +389,16 @@ func lookupBin(name string) string {
 
 // captureThumbFromVideo 用 ffmpeg 截取视频第 70% 位置的帧作为封面图
 func captureThumbFromVideo(videoPath, destPath string) error {
-	ffprobe := lookupBin("ffprobe")
-	ffmpeg := lookupBin("ffmpeg")
+	ffprobeBin := lookupBin("ffprobe")
+	ffmpegBin := lookupBin("ffmpeg")
+
+	// [FIXED: P1-12] Use a 60-second context timeout so corrupted or
+	// unreachable video files cannot hang the process forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// 先用 ffprobe 获取视频时长（秒）
-	probeCmd := exec.Command(ffprobe,
+	probeCmd := exec.CommandContext(ctx, ffprobeBin,
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
@@ -405,7 +410,7 @@ func captureThumbFromVideo(videoPath, destPath string) error {
 		if ee, ok := err.(*exec.ExitError); ok {
 			stderr = string(ee.Stderr)
 		}
-		return fmt.Errorf("ffprobe failed (bin=%s, path=%s): %v | stderr: %s", ffprobe, videoPath, err, stderr)
+		return fmt.Errorf("ffprobe failed (bin=%s, path=%s): %v | stderr: %s", ffprobeBin, videoPath, err, stderr)
 	}
 	durationStr := strings.TrimSpace(string(probeOut))
 	duration, err := strconv.ParseFloat(durationStr, 64)
@@ -416,7 +421,7 @@ func captureThumbFromVideo(videoPath, destPath string) error {
 	seekTime := duration * 0.7
 	timeStr := strconv.FormatFloat(seekTime, 'f', 3, 64)
 
-	out, err := exec.Command(ffmpeg,
+	out, err := exec.CommandContext(ctx, ffmpegBin,
 		"-ss", timeStr,
 		"-i", videoPath,
 		"-vframes", "1",

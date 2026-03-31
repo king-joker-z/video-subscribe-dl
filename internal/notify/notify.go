@@ -47,17 +47,68 @@ type SettingsGetter interface {
 	GetSetting(key string) (string, error)
 }
 
+// notifyJob is a single notification task queued to the worker goroutine.
+type notifyJob struct {
+	event   EventType
+	title   string
+	message string
+}
+
 // Notifier 通知发送器
 type Notifier struct {
 	settings SettingsGetter
 	client   *http.Client
+	// [FIXED: P1-7] Use a buffered channel + single worker goroutine so that
+	// Send() is non-blocking and goroutines can be cancelled via Stop().
+	jobCh chan notifyJob
+	stopCh chan struct{}
 }
 
 // New 创建 Notifier
 func New(settings SettingsGetter) *Notifier {
-	return &Notifier{
+	n := &Notifier{
 		settings: settings,
 		client:   &http.Client{Timeout: 10 * time.Second},
+		jobCh:    make(chan notifyJob, 64),
+		stopCh:   make(chan struct{}),
+	}
+	go n.worker()
+	return n
+}
+
+// Stop 停止 Notifier 后台 worker（优雅关闭）
+func (n *Notifier) Stop() {
+	close(n.stopCh)
+}
+
+// worker 是唯一处理通知的 goroutine，可被 Stop() 取消。
+func (n *Notifier) worker() {
+	for {
+		select {
+		case <-n.stopCh:
+			return
+		case job, ok := <-n.jobCh:
+			if !ok {
+				return
+			}
+			delays := []time.Duration{0, 2 * time.Second, 4 * time.Second}
+			for i, delay := range delays {
+				if delay > 0 {
+					select {
+					case <-n.stopCh:
+						return
+					case <-time.After(delay):
+					}
+				}
+				if err := n.sendOnce(job.event, job.title, job.message); err == nil {
+					break
+				} else if i < len(delays)-1 {
+					log.Printf("[notify] 第%d次发送失败，%v 后重试: %v", i+1, delays[i+1], err)
+				} else {
+					log.Printf("[notify] 发送最终失败 (event=%s): %v", job.event, err)
+				}
+			}
+		}
 	}
 }
 
@@ -89,25 +140,18 @@ func (n *Notifier) sendOnce(event EventType, title, message string) error {
 }
 
 // Send 发送通知（根据事件类型和 DB 开关判断是否真正发送，失败自动重试 3 次）
+// [FIXED: P1-7] Delivers to buffered channel so the caller is non-blocking and
+// the worker goroutine can be stopped cleanly via Stop().
 func (n *Notifier) Send(event EventType, title, message string) {
 	if !n.shouldSend(event) {
 		return
 	}
-	go func() {
-		delays := []time.Duration{0, 2 * time.Second, 4 * time.Second}
-		for i, delay := range delays {
-			if delay > 0 {
-				time.Sleep(delay)
-			}
-			if err := n.sendOnce(event, title, message); err == nil {
-				return
-			} else if i < len(delays)-1 {
-				log.Printf("[notify] 第%d次发送失败，%v 后重试: %v", i+1, delays[i+1], err)
-			} else {
-				log.Printf("[notify] 发送最终失败 (event=%s): %v", event, err)
-			}
-		}
-	}()
+	job := notifyJob{event: event, title: title, message: message}
+	select {
+	case n.jobCh <- job:
+	default:
+		log.Printf("[notify] job queue full, dropping event=%s", event)
+	}
 }
 
 // SendTest 强制发送测试通知（忽略开关）

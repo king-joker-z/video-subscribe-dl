@@ -1239,8 +1239,10 @@ func SanitizePath(name string) string {
 }
 
 func generateWebID() string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return fmt.Sprintf("75%015d", r.Int63n(1e15))
+	// [FIXED: P2-3] Use the package-level global Rand (Go 1.20+ auto-seeded)
+	// instead of creating a new rand.New() on every call, which wastes resources
+	// and risks seed collisions under high concurrency.
+	return fmt.Sprintf("75%015d", rand.Int63n(1e15))
 }
 
 func randAlphaNum(n int) string {
@@ -1394,9 +1396,11 @@ func (c *DouyinClient) GetMixVideos(mixID string) ([]DouyinVideo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("fetch mix videos: %w", err)
 		}
-		defer resp.Body.Close()
-
+		// [FIXED: P1-11] Use explicit Close (not defer) to avoid keeping all
+		// response bodies open until the function returns when the loop runs
+		// multiple iterations.
 		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read mix videos: %w", err)
 		}

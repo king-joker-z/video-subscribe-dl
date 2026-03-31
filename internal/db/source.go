@@ -231,6 +231,8 @@ func (d *DB) ClearDownloadRecords(id int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// [FIXED: P2-8] Use defer so the cursor is always closed even if rows.Next() panics.
+	defer rows.Close()
 	var count int
 	for rows.Next() {
 		var path string
@@ -239,7 +241,6 @@ func (d *DB) ClearDownloadRecords(id int64) (int, error) {
 			count++
 		}
 	}
-	rows.Close()
 	_, err = d.Exec("DELETE FROM downloads WHERE source_id = ?", id)
 	return count, err
 }

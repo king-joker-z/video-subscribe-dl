@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,6 +49,8 @@ var ErrRateLimited = errors.New("bilibili: rate limited by risk control")
 
 type Client struct {
 	http       *http.Client
+	// [FIXED: P2-7] mu protects concurrent reads/writes of credential and cookie.
+	mu         sync.RWMutex
 	cookie     string
 	credential *Credential
 	limiter    *RateLimiter // API 请求令牌桶限流（下载流不走限流）
@@ -79,19 +82,27 @@ func NewClientWithCredential(cred *Credential) *Client {
 
 // GetCredential 返回当前 Client 使用的 Credential（可能为 nil）
 func (c *Client) GetCredential() *Credential {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.credential
 }
 
-// UpdateCredential 更新 Client 的凭证（线程安全由调用方保证）
+// UpdateCredential 更新 Client 的凭证
+// [FIXED: P2-7] Internally guarded by a write lock; callers no longer need
+// to guarantee thread safety externally.
 func (c *Client) UpdateCredential(cred *Credential) {
 	if cred != nil && !cred.IsEmpty() {
+		c.mu.Lock()
 		c.credential = cred
 		c.cookie = cred.ToCookieString()
+		c.mu.Unlock()
 	}
 }
 
 // GetCookieString 返回当前使用的 cookie 字符串
 func (c *Client) GetCookieString() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.cookie
 }
 
@@ -491,8 +502,12 @@ func (c *Client) get(rawURL string, result interface{}) error {
 	}
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
-	if c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
+	// [FIXED: P2-7] Read cookie under lock to avoid data race with UpdateCredential.
+	c.mu.RLock()
+	cookie := c.cookie
+	c.mu.RUnlock()
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 
 	resp, err := c.http.Do(req)
@@ -919,17 +934,24 @@ func (c *Client) GetWatchLater() ([]WatchLaterVideoItem, error) {
 // ExtractFavoriteInfo 从 URL 提取收藏夹信息
 // 支持: https://space.bilibili.com/{mid}/favlist?fid={mediaID}
 func ExtractFavoriteInfo(rawURL string) (mid int64, mediaID int64, err error) {
-	// 提取 mid
+	// [FIXED: P2-1] Use strconv.ParseInt to detect overflow instead of fmt.Sscanf
+	// which silently truncates values larger than int64.
 	reMid := reSpaceMID
 	m := reMid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &mid)
+		mid, err = strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("cannot parse mid %q: %w", m[1], err)
+		}
 	}
 	// 提取 mediaID (fid)
 	reFid := reFID
 	m = reFid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &mediaID)
+		mediaID, err = strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("cannot parse fid %q: %w", m[1], err)
+		}
 	}
 	if mid == 0 {
 		err = fmt.Errorf("cannot extract mid from: %s", rawURL)
@@ -955,17 +977,24 @@ func ExtractWatchLaterInfo(rawURL string) (mid int64, err error) {
 //
 //	https://space.bilibili.com/{mid}/channel/collectiondetail?sid={seasonID}
 func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
+	// [FIXED: P2-1] Use strconv.ParseInt consistently to detect overflow.
 	reMid := reSpaceMID
 	m := reMid.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &mid)
+		mid, err = strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("cannot parse mid %q: %w", m[1], err)
+		}
 	}
 
 	// /lists/{id}?type=season
 	reLists := reListsID
 	m = reLists.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &seasonID)
+		seasonID, err = strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("cannot parse season id %q: %w", m[1], err)
+		}
 	}
 
 	// collectiondetail?sid={id}
@@ -973,7 +1002,10 @@ func ExtractSeasonInfo(rawURL string) (mid int64, seasonID int64, err error) {
 		reSid := reSID
 		m = reSid.FindStringSubmatch(rawURL)
 		if len(m) > 1 {
-			fmt.Sscanf(m[1], "%d", &seasonID)
+			seasonID, err = strconv.ParseInt(m[1], 10, 64)
+			if err != nil {
+				return 0, 0, fmt.Errorf("cannot parse sid %q: %w", m[1], err)
+			}
 		}
 	}
 
@@ -1028,23 +1060,28 @@ func (c *Client) GetSeriesVideos(mid, seriesID int64, page, pageSize int) ([]Ser
 
 // ExtractCollectionInfo 统一解析合集 URL（Season 和 Series）
 func ExtractCollectionInfo(rawURL string) (*CollectionInfo, error) {
+	// [FIXED: P2-1] Use strconv.ParseInt consistently to detect overflow.
 	var mid, id int64
 
 	m := reSpaceMID.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &mid)
+		var parseErr error
+		mid, parseErr = strconv.ParseInt(m[1], 10, 64)
+		if parseErr != nil {
+			return nil, fmt.Errorf("cannot parse mid %q: %w", m[1], parseErr)
+		}
 	}
 
 	// Series: /lists/{id}?type=series 或 seriesdetail?sid={id}
 	if strings.Contains(rawURL, "type=series") || strings.Contains(rawURL, "seriesdetail") {
 		m = reListsID.FindStringSubmatch(rawURL)
 		if len(m) > 1 {
-			fmt.Sscanf(m[1], "%d", &id)
+			id, _ = strconv.ParseInt(m[1], 10, 64)
 		}
 		if id == 0 {
 			m = reSID.FindStringSubmatch(rawURL)
 			if len(m) > 1 {
-				fmt.Sscanf(m[1], "%d", &id)
+				id, _ = strconv.ParseInt(m[1], 10, 64)
 			}
 		}
 		if mid > 0 && id > 0 {
@@ -1053,14 +1090,15 @@ func ExtractCollectionInfo(rawURL string) (*CollectionInfo, error) {
 	}
 
 	// Season: /lists/{id}?type=season 或 collectiondetail?sid={id}
+	id = 0
 	m = reListsID.FindStringSubmatch(rawURL)
 	if len(m) > 1 {
-		fmt.Sscanf(m[1], "%d", &id)
+		id, _ = strconv.ParseInt(m[1], 10, 64)
 	}
 	if id == 0 {
 		m = reSID.FindStringSubmatch(rawURL)
 		if len(m) > 1 {
-			fmt.Sscanf(m[1], "%d", &id)
+			id, _ = strconv.ParseInt(m[1], 10, 64)
 		}
 	}
 
@@ -1198,12 +1236,16 @@ func (c *Client) SearchFollowedUppers(name string, page, pageSize int) (*Followe
 
 // getDedeUserID 从 credential 或 cookie 中提取 DedeUserID
 func (c *Client) getDedeUserID() string {
-	if c.credential != nil && c.credential.DedeUserID != "" {
-		return c.credential.DedeUserID
+	c.mu.RLock()
+	cred := c.credential
+	cookie := c.cookie
+	c.mu.RUnlock()
+	if cred != nil && cred.DedeUserID != "" {
+		return cred.DedeUserID
 	}
 	// 从 cookie 字符串解析
-	if c.cookie != "" {
-		for _, part := range strings.Split(c.cookie, ";") {
+	if cookie != "" {
+		for _, part := range strings.Split(cookie, ";") {
 			part = strings.TrimSpace(part)
 			if strings.HasPrefix(part, "DedeUserID=") {
 				return strings.TrimPrefix(part, "DedeUserID=")
