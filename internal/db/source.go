@@ -165,6 +165,12 @@ func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
 		return 0, fmt.Errorf("该订阅源有 %d 个正在进行的下载任务，请等待完成后再删除", activeCount)
 	}
 
+	// P0-5: 先将 source 标记为 disabled，防止崩溃后被重新调度
+	// 若进程在删文件后、删 DB 前崩溃，重启时 disabled source 不会被调度，避免幽灵记录
+	if _, err := d.Exec("UPDATE sources SET enabled=0 WHERE id=?", id); err != nil {
+		log.Printf("[source] Warning: failed to disable source %d before deletion: %v", id, err)
+	}
+
 	// 1. 查询所有 file_path + thumb_path
 	rows, err := d.Query("SELECT COALESCE(file_path,''), COALESCE(thumb_path,'') FROM downloads WHERE source_id = ?", id)
 	if err != nil {
@@ -196,7 +202,7 @@ func (d *DB) DeleteSourceWithFiles(id int64) (int, error) {
 		}
 	}
 
-	// 3. 删 DB 记录（[FIXED: P0-2] 事务包裹，确保原子性）
+	// 3. 删 DB 记录（事务包裹，确保原子性）
 	tx, err := d.Begin()
 	if err != nil {
 		return deleted, err

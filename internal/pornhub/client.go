@@ -757,32 +757,36 @@ var clearInterval = function(){};
 		// 有变量名 → goja eval 后序列化
 		js := domStub + "var playerObjList = {};\n" + scriptContent + "\nvar _json = JSON.stringify(" + flashvarsVar + ");"
 		vm := goja.New()
-		// [FIXED: P1-3] 在独立 goroutine 中执行 JS，通过 channel + select + timeout 等待结果，
-		// 超时时中断 VM 并返回错误，避免 RunString 在当前 goroutine 长期阻塞
+		// P0-6: goja VM 非线程安全，所有 VM 操作（RunString、vm.Get、Interrupt）
+		// 必须在同一 goroutine 中执行。通过 channel + select timeout 等待结果。
 		type jsResult struct {
-			err error
+			jsonStr string
+			err     error
 		}
 		jsCh := make(chan jsResult, 1)
 		go func() {
-			_, evalErr := vm.RunString(js)
-			jsCh <- jsResult{evalErr}
+			if _, evalErr := vm.RunString(js); evalErr != nil {
+				jsCh <- jsResult{err: evalErr}
+				return
+			}
+			jsonVal := vm.Get("_json")
+			if jsonVal == nil || jsonVal.String() == "undefined" {
+				jsCh <- jsResult{err: fmt.Errorf("_json is undefined after eval")}
+				return
+			}
+			jsCh <- jsResult{jsonStr: jsonVal.String()}
 		}()
 		select {
 		case res := <-jsCh:
 			if res.err != nil {
 				return "", fmt.Errorf("%w: goja eval failed: %v", ErrParseFailed, res.err)
 			}
+			if err := json.Unmarshal([]byte(res.jsonStr), &fv); err != nil {
+				return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
+			}
 		case <-time.After(10 * time.Second):
 			vm.Interrupt("js eval timeout")
 			return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
-		}
-
-		jsonVal := vm.Get("_json")
-		if jsonVal == nil || jsonVal.String() == "undefined" {
-			return "", fmt.Errorf("%w: _json is undefined after eval", ErrParseFailed)
-		}
-		if err := json.Unmarshal([]byte(jsonVal.String()), &fv); err != nil {
-			return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 		}
 	} else {
 		// 兜底：直接从 script 文本中提取 mediaDefinitions JSON 数组

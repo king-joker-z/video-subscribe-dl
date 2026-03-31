@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -146,6 +147,11 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		videos = append(videos, dl)
+	}
+	// P0-10: check for iteration errors after the loop
+	if err := rows.Err(); err != nil {
+		apiError(w, CodeInternal, "读取数据失败: "+err.Error())
+		return
 	}
 	if videos == nil {
 		videos = []db.Download{}
@@ -573,9 +579,18 @@ func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Reques
 	}
 
 	// 异步检测，立即返回
+	// P0-11: 使用 context 限制整体超时，并在每次 API 调用前检查取消信号
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
 		detected := 0
 		for _, v := range items {
+			select {
+			case <-ctx.Done():
+				log.Printf("[detect-charge] 检测超时，已中止 (%d/%d 完成)", detected, len(items))
+				return
+			default:
+			}
 			bvid := v.VideoID
 			if parts := strings.SplitN(v.VideoID, "_P", 2); len(parts) == 2 {
 				bvid = parts[0]

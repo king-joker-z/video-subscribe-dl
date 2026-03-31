@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"video-subscribe-dl/internal/bilibili"
@@ -26,8 +25,12 @@ import (
 )
 
 // Rate limiter 结构
+// P0-9: mu protects windowEnd and count together to prevent data races.
+// windowEnd is a plain time.Time (not atomically addressable), so all reads
+// and writes of windowEnd AND count must be done under the same mutex.
 type rateLimitEntry struct {
-	count     atomic.Int64
+	mu        sync.Mutex
+	count     int64
 	windowEnd time.Time
 }
 
@@ -500,12 +503,15 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		})
 		entry := val.(*rateLimitEntry)
 
+		entry.mu.Lock()
 		if now.After(entry.windowEnd) {
-			entry.count.Store(0)
+			entry.count = 0
 			entry.windowEnd = now.Add(rateLimitWindow)
 		}
+		entry.count++
+		current := entry.count
+		entry.mu.Unlock()
 
-		current := entry.count.Add(1)
 		if int(current) > rateLimitMax {
 			w.Header().Set("Retry-After", "60")
 			jsonError(w, "rate limit exceeded", http.StatusTooManyRequests)

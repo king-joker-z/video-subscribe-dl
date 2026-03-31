@@ -52,6 +52,7 @@ func (l *RingLogger) Writer() io.Writer {
 }
 
 type logWriter struct {
+	mu     sync.Mutex
 	logger *RingLogger
 	buf    []byte
 }
@@ -59,6 +60,10 @@ type logWriter struct {
 func (w *logWriter) Write(p []byte) (n int, err error) {
 	// Write to stdout first
 	os.Stdout.Write(p)
+
+	// P0-8: guard buf against concurrent writes from multiple goroutines
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	// Buffer incomplete lines
 	w.buf = append(w.buf, p...)

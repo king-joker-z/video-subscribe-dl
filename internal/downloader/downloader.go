@@ -58,10 +58,12 @@ type Downloader struct {
 	bili           *bilibili.Client
 	queue          chan *Job
 	paused         bool
+	stopped        bool // true after Stop() is called; guarded by mu
 	pauseCh        chan struct{}
 	resumeCh       chan struct{}
 	activeJobs     int64
 	mu             sync.Mutex
+	wg             sync.WaitGroup // tracks all running workers
 	rateLimitBps   int64 // bytes per second, 0 = unlimited
 	downloadChunks int   // parallel chunks for large files, 0 = use default (4)
 
@@ -128,7 +130,11 @@ func New(config Config, biliClient *bilibili.Client) *Downloader {
 		rootCancel: cancel,
 	}
 	for i := 0; i < config.MaxConcurrent; i++ {
-		go d.worker(i)
+		d.wg.Add(1)
+		go func(id int) {
+			defer d.wg.Done()
+			d.worker(id)
+		}(i)
 	}
 	return d
 }
@@ -160,7 +166,11 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 	paused := d.paused
 	d.mu.Unlock()
 	if paused {
-		<-d.resumeCh
+		select {
+		case <-d.resumeCh:
+		case <-d.rootCtx.Done():
+			return
+		}
 	}
 
 	log.Printf("[w%d] Downloading: %s (%s)", id, job.Title, job.BvID)
@@ -205,6 +215,12 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 }
 
 func (d *Downloader) Submit(job *Job) error {
+	d.mu.Lock()
+	stopped := d.stopped
+	d.mu.Unlock()
+	if stopped {
+		return fmt.Errorf("downloader is stopped, could not submit %s", job.BvID)
+	}
 	select {
 	case d.queue <- job:
 		return nil
@@ -223,10 +239,14 @@ func (d *Downloader) Pause() {
 	}
 }
 
-// Stop 优雅关闭下载器：取消所有进行中的下载任务
+// Stop 优雅关闭下载器：取消所有进行中的下载任务，并等待所有 worker 退出
 func (d *Downloader) Stop() {
+	d.mu.Lock()
+	d.stopped = true
+	d.mu.Unlock()
 	d.rootCancel()
 	close(d.queue) // 关闭队列让 worker 退出
+	d.wg.Wait()    // 等待所有 worker goroutine 完全退出
 }
 
 func (d *Downloader) Resume() {

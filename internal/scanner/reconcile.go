@@ -123,7 +123,7 @@ func (s *Scanner) Reconcile() (*ReconcileResult, error) {
 			result.StaleDownloading = append(result.StaleDownloading, dl.ID)
 		}
 	}
-	result.StaleCount = len(result.StaleDownloading)
+	result.StaleCount += len(result.StaleDownloading)
 
 	result.IsConsistent = result.OrphanCount == 0 && result.MissingCount == 0 && result.StaleCount == 0
 

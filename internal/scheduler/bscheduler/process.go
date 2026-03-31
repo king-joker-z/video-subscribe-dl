@@ -193,6 +193,8 @@ func (s *BiliScheduler) submitDownload(src db.Source, videoID string, cid int64,
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
 		log.Printf("[bscheduler] Queue full for %s, keeping pending for next sync", videoID)
+		// P0-4: 标记为 failed，防止记录永远卡在 downloading 状态
+		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed")
 		close(resultCh)
 		return
 	}
@@ -249,6 +251,8 @@ func (s *BiliScheduler) submitDownloadFlat(src db.Source, videoID string, cid in
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
 		log.Printf("[bscheduler] Queue full for %s, keeping pending for next sync", videoID)
+		// P0-4: 标记为 failed，防止记录永远卡在 downloading 状态
+		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed")
 		close(resultCh)
 		return
 	}
@@ -435,17 +439,24 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 			log.Printf("[bscheduler][TIMEOUT] 超时但 downloader 处于暂停状态 (videoID=%s)", videoID)
 			s.db.UpdateDownloadStatus(dlID, "pending", "", 0, "timeout during pause, will retry")
 			// 确保 resultCh 被消费，避免 downloader worker 在 resume 后发送结果时无人读取
+			// 兜底超时防止 goroutine 永久阻塞（P0-3）
 			go func() {
-				<-ch
+				select {
+				case <-ch:
+				case <-time.After(60 * time.Second):
+				}
 			}()
 			return
 		}
 		log.Printf("[bscheduler][TIMEOUT] 等待超时 (videoID=%s)", videoID)
 		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("download timeout (%v)", timeout))
 		s.notifier.Send(notify.EventDownloadFailed, "下载超时: "+videoID, fmt.Sprintf("等待下载结果超过%v", timeout))
-		// 同样确保 resultCh 被消费，防止 worker 阻塞
+		// 同样确保 resultCh 被消费，防止 worker 阻塞（P0-3）
 		go func() {
-			<-ch
+			select {
+			case <-ch:
+			case <-time.After(60 * time.Second):
+			}
 		}()
 		return
 	}
