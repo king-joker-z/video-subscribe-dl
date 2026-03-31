@@ -39,7 +39,9 @@ function ensureGlobalSSE() {
     } catch {}
   });
 
+  // [FIXED: P1-2] onerror 里先 close 旧实例再置 null，避免极短窗口内旧实例 readyState 未变 CLOSED
   globalSSE.onerror = () => {
+    if (globalSSE) { globalSSE.close(); globalSSE = null; }
     setTimeout(ensureGlobalSSE, 5000);
   };
 }

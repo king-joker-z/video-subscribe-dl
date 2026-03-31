@@ -26,8 +26,8 @@ export function extractBiliUrl(text) {
   if (/bilibili\.com\/video\/(BV[\w]+|av\d+)/i.test(trimmed)) return trimmed;
   // b23.tv 短链接
   if (/b23\.tv\/[\w]+/i.test(trimmed)) return trimmed;
-  // 纯 BV 号
-  if (/^BV[\w]{10}$/i.test(trimmed)) return trimmed;
+  // 纯 BV 号（[FIXED: P2-6] 去掉 /i flag，BV 必须大写开头，与 B 站实际格式一致）
+  if (/^BV[\w]{10}$/.test(trimmed)) return trimmed;
   // 纯 AV 号
   if (/^av\d+$/i.test(trimmed)) return trimmed;
   // 从混合文本中提取 bilibili 链接
@@ -35,8 +35,8 @@ export function extractBiliUrl(text) {
   if (urlMatch) return urlMatch[0];
   const shortMatch = trimmed.match(/https?:\/\/b23\.tv\/[\w]+/i);
   if (shortMatch) return shortMatch[0];
-  // 从混合文本中提取 BV 号
-  const bvMatch = trimmed.match(/(BV[\w]{10})/i);
+  // 从混合文本中提取 BV 号（[FIXED: P2-6] 去掉 /i flag）
+  const bvMatch = trimmed.match(/(BV[\w]{10})/);
   if (bvMatch) return bvMatch[1];
   return '';
 }

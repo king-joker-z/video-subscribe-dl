@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton } from '../components/utils.js';
+import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton, ConfirmDialog } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
 const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集', pornhub: 'Pornhub' };
@@ -308,6 +308,22 @@ function ImportFollowTab({ onDone }) {
     )
   );
 }
+// [FIXED: P1-5] 三选项删除弹窗：取消 / 仅删订阅 / 删订阅+文件
+function DeleteSourceDialog({ name, onCancel, onDeleteOnly, onDeleteWithFiles }) {
+  return h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4' },
+    h('div', { className: 'absolute inset-0 bg-black/40', onClick: onCancel }),
+    h('div', { className: 'relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4' },
+      h('h3', { className: 'text-base font-semibold text-slate-800' }, '删除订阅源'),
+      h('p', { className: 'text-sm text-slate-500' }, `确定删除订阅「${name}」？`),
+      h('div', { className: 'flex flex-col gap-2' },
+        h('button', { onClick: onDeleteWithFiles, className: 'px-4 py-2 rounded-lg text-sm bg-red-500 text-white hover:bg-red-600 text-left' }, '删订阅 + 本地文件'),
+        h('button', { onClick: onDeleteOnly, className: 'px-4 py-2 rounded-lg text-sm bg-amber-500 text-white hover:bg-amber-600 text-left' }, '仅删订阅（保留文件）'),
+        h('button', { onClick: onCancel, className: 'px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100' }, '取消')
+      )
+    )
+  );
+}
+
 export function SourcesPage({ onNavigate }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -318,6 +334,8 @@ export function SourcesPage({ onNavigate }) {
   const [newURL, setNewURL] = useState('');
   const [adding, setAdding] = useState(false);
   const [editSource, setEditSource] = useState(null);
+  // [FIXED: P1-5] 用自定义弹窗替换双重 confirm()
+  const [deleteSource, setDeleteSource] = useState(null); // { id, name }
   const [parsing, setParsing] = useState(false);
   const [parseResult, setParseResult] = useState(null);
   const [addForm, setAddForm] = useState({
@@ -448,11 +466,15 @@ export function SourcesPage({ onNavigate }) {
     setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200 });
   };
 
-  const handleDelete = async (id, name) => {
-    // Build a confirm dialog with a checkbox option
-    const confirmed = confirm('确定删除订阅「' + name + '」？');
-    if (!confirmed) return;
-    const withFiles = confirm('是否同时删除本地视频文件？\n\n点击「确定」= 同时删除本地文件和下载记录\n点击「取消」= 仅删除订阅，保留本地文件');
+  // [FIXED: P1-5] 改为自定义弹窗，一次性提供三个选项
+  const handleDelete = (id, name) => {
+    setDeleteSource({ id, name });
+  };
+
+  const executeDelete = async (withFiles) => {
+    if (!deleteSource) return;
+    const { id } = deleteSource;
+    setDeleteSource(null);
     try {
       await api.deleteSource(id, withFiles);
       toast.success(withFiles ? '已删除（含本地文件）' : '已删除');
@@ -532,6 +554,13 @@ export function SourcesPage({ onNavigate }) {
       source: editSource,
       onSave: () => { setEditSource(null); load(); },
       onClose: () => setEditSource(null)
+    }),
+    // [FIXED: P1-5] 删除订阅源三选项弹窗
+    deleteSource && h(DeleteSourceDialog, {
+      name: deleteSource.name,
+      onCancel: () => setDeleteSource(null),
+      onDeleteOnly: () => executeDelete(false),
+      onDeleteWithFiles: () => executeDelete(true),
     }),
     // 移动端 FAB 新增按钮（固定右下角，仅手机端显示）
     h('button', {
@@ -840,7 +869,8 @@ export function SourcesPage({ onNavigate }) {
       ? h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
           Array.from({ length: 6 }, (_, i) => h(SourceCardSkeleton, { key: i })))
       : sources.length === 0
-        ? h(EmptyState, { icon: 'rss', message: '还没有订阅源', action: h(Button, { onClick: () => setShowAdd(true), size: 'sm' }, h(Icon, { name: 'plus', size: 14 }), '添加第一个') })
+        // [FIXED: P2-2] action 改为 { label, onClick } 对象形式，而不是 Button 元素
+        ? h(EmptyState, { icon: 'rss', message: '还没有订阅源', action: { label: '添加第一个', onClick: () => setShowAdd(true) } })
         : h('div', { className: 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4' },
             sources.map(s => h(Card, { key: s.id, hover: true, className: 'group' },
               h('div', { className: 'flex items-start justify-between mb-3' },

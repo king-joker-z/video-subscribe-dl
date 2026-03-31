@@ -1,7 +1,7 @@
 import React from 'react';
 import { api } from '../api.js';
 import { cn, Icon } from './utils.js';
-const { createElement: h, useState, useEffect, useRef, useCallback, Fragment } = React;
+const { createElement: h, useState, useEffect, useRef, useCallback, useMemo, Fragment } = React;
 
 // 页面导航选项
 const NAV_ITEMS = [
@@ -50,8 +50,8 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
     }
   }, [open]);
 
-  // 计算显示项：静态导航 + 动态搜索结果
-  const getDisplayItems = useCallback(() => {
+  // [FIXED: P1-8] 用 useMemo 替代 useCallback，避免每次渲染重新计算触发依赖 displayItems.length 的 effect
+  const displayItems = useMemo(() => {
     const q = query.toLowerCase().trim();
 
     if (!q) {
@@ -73,8 +73,6 @@ export function CommandPalette({ open, onClose, onNavigate, onAction }) {
     // 合并静态匹配 + 动态搜索结果
     return [...matchedNav, ...matchedActions, ...results];
   }, [query, results]);
-
-  const displayItems = getDisplayItems();
 
   // 搜索 API 调用（防抖）
   useEffect(() => {

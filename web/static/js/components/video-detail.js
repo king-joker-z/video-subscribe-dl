@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Badge } from './utils.js';
+import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Badge, ConfirmDialog } from './utils.js';
 const { createElement: h, useState, useEffect, useCallback, Fragment } = React;
 
 // 从文件路径/文件名推断分辨率标签
@@ -51,6 +51,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const [imgError, setImgError] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [progress, setProgress] = useState(null); // SSE 实时进度
+  const [confirmAction, setConfirmAction] = useState(null); // { title, message, onConfirm }
   const videoRef = React.useRef(null);
 
   useEffect(() => {
@@ -73,6 +74,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   }, [video, onClose]);
 
   // SSE 进度监听（通过全局单例，避免重复建连）
+  // [FIXED: P0-1] 依赖改为 [video?.id, video?.video_id]，避免 stale closure 读到旧 video_id
   useEffect(() => {
     if (!video) return;
     const handler = (e) => {
@@ -87,7 +89,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
     };
     window.addEventListener('vsd:progress', handler);
     return () => window.removeEventListener('vsd:progress', handler);
-  }, [video.id]);
+  }, [video?.id, video?.video_id]);
 
   if (!video) return null;
 
@@ -106,32 +108,65 @@ export function VideoDetailModal({ video, onClose, onAction }) {
     try { await api.retryVideo(v.id); toast.success('已重试'); if (onAction) onAction(); }
     catch (e) { toast.error(e.message); }
   };
-  const handleRedownload = async () => {
-    if (!confirm('将删除旧文件并重新下载，确认？')) return;
-    try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); if (onAction) onAction(); }
-    catch (e) { toast.error(e.message); }
+  // [FIXED: P2-8] 替换 confirm() 为 ConfirmDialog
+  const handleRedownload = () => {
+    setConfirmAction({
+      title: '重新下载',
+      message: '将删除旧文件并重新下载，确认？',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); if (onAction) onAction(); }
+        catch (e) { toast.error(e.message); }
+      }
+    });
   };
-  const handleDelete = async () => {
-    if (!confirm('确定删除？')) return;
-    try { await api.deleteVideo(v.id); toast.success('已删除'); if (onAction) onAction(); onClose(); }
-    catch (e) { toast.error(e.message); }
+  const handleDelete = () => {
+    setConfirmAction({
+      title: '删除视频',
+      message: '确定删除？',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try { await api.deleteVideo(v.id); toast.success('已删除'); if (onAction) onAction(); onClose(); }
+        catch (e) { toast.error(e.message); }
+      }
+    });
   };
-  const handleDeleteFiles = async () => {
-    if (!confirm('删除本地文件（保留记录）？')) return;
-    try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); if (onAction) onAction(); }
-    catch (e) { toast.error(e.message); }
+  const handleDeleteFiles = () => {
+    setConfirmAction({
+      title: '删除文件',
+      message: '删除本地文件（保留记录）？',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); if (onAction) onAction(); }
+        catch (e) { toast.error(e.message); }
+      }
+    });
   };
-  const handleRestore = async () => {
-    if (!confirm('恢复并重新下载？')) return;
-    try { await api.restoreVideo(v.id); toast.success('已恢复'); if (onAction) onAction(); }
-    catch (e) { toast.error(e.message); }
+  const handleRestore = () => {
+    setConfirmAction({
+      title: '恢复视频',
+      message: '恢复并重新下载？',
+      onConfirm: async () => {
+        setConfirmAction(null);
+        try { await api.restoreVideo(v.id); toast.success('已恢复'); if (onAction) onAction(); }
+        catch (e) { toast.error(e.message); }
+      }
+    });
   };
   const handleStartDownload = async () => {
     try { await api.redownloadVideo(v.id); toast.success('已触发下载'); if (onAction) onAction(); }
     catch (e) { toast.error(e.message); }
   };
 
-  return h('div', {
+  return h(Fragment, null,
+    // [FIXED: P2-8] 确认弹窗
+    confirmAction && h(ConfirmDialog, {
+      title: confirmAction.title,
+      message: confirmAction.message,
+      onConfirm: confirmAction.onConfirm,
+      onCancel: () => setConfirmAction(null),
+    }),
+  h('div', {
     className: 'fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center pt-[8vh] sm:pt-[12vh]',
     onClick: (e) => { if (e.target === e.currentTarget) onClose(); }
   },
@@ -275,7 +310,7 @@ export function VideoDetailModal({ video, onClose, onAction }) {
         )
       )
     )
-  );
+  ));
 }
 
 // 信息展示项

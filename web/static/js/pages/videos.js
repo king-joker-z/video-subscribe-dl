@@ -1,6 +1,6 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState, VideoCardSkeleton } from '../components/utils.js';
+import { cn, formatBytes, formatSpeed, formatETA, formatTime, toast, Icon, Card, Button, StatusBadge, Pagination, EmptyState, VideoCardSkeleton, ConfirmDialog } from '../components/utils.js';
 import { VideoDetailModal } from '../components/video-detail.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
@@ -63,22 +63,20 @@ export function VideosPage({ params = {} } = {}) {
 
   useEffect(() => { load(); }, [load]);
 
-  // 从 URL 参数同步 uploader
+  // [FIXED: P1-6] 合并 uploader/source_id 同步为单个 useEffect，避免同时变化时双重 setPage(1)
   useEffect(() => {
+    let changed = false;
     if (params.uploader !== undefined) {
       setUploader(params.uploader || '');
-      setPage(1);
+      changed = true;
     }
-  }, [params.uploader]);
-
-  // 从 URL 参数同步 source_id
-  useEffect(() => {
     if (params.source_id !== undefined) {
       setSourceId(params.source_id || '');
       setSourceName(params.source_name || '');
-      setPage(1);
+      changed = true;
     }
-  }, [params.source_id, params.source_name]);
+    if (changed) setPage(1);
+  }, [params.uploader, params.source_id, params.source_name]);
 
   // SSE 进度（通过全局单例）
   useEffect(() => {
@@ -218,8 +216,15 @@ export function VideosPage({ params = {} } = {}) {
   };
 
   const [repairLoading, setRepairLoading] = useState(false);
-  const handleRepairThumbs = async () => {
-    if (!confirm('将对所有已完成但缺少封面的视频截帧补全，可能需要较长时间，确认？')) return;
+  // [FIXED: P2-8] 替换 confirm() 为 ConfirmDialog
+  const handleRepairThumbs = () => {
+    setConfirmAction({
+      title: '补全封面',
+      message: '将对所有已完成但缺少封面的视频截帧补全，可能需要较长时间，确认？',
+      action: '__repair_thumbs__',
+    });
+  };
+  const executeRepairThumbs = async () => {
     setRepairLoading(true);
     try {
       const res = await api.repairThumbs();
@@ -253,11 +258,21 @@ export function VideosPage({ params = {} } = {}) {
   };
 
   return h('div', { className: 'page-enter space-y-4' },
-    // 自定义确认弹窗（批量操作）
+    // 自定义确认弹窗（批量操作 + 单视频操作 + repair thumbs）
     confirmAction && h(ConfirmDialog, {
       title: confirmAction.title,
       message: confirmAction.message,
-      onConfirm: () => executeBatch(confirmAction.action),
+      onConfirm: async () => {
+        const act = confirmAction.action;
+        const vid = confirmAction._videoId;
+        setConfirmAction(null);
+        if (act === '__repair_thumbs__') { executeRepairThumbs(); return; }
+        if (act === '__redownload__') { try { await api.redownloadVideo(vid); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } return; }
+        if (act === '__delete_files__') { try { await api.deleteVideoFiles(vid); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } return; }
+        if (act === '__restore__') { try { await api.restoreVideo(vid); toast.success('已恢复'); load(); } catch (e) { toast.error(e.message); } return; }
+        if (act === '__delete__') { try { await api.deleteVideo(vid); toast.success('已删除'); load(); } catch (e) { toast.error(e.message); } return; }
+        executeBatch(act);
+      },
       onCancel: () => setConfirmAction(null),
     }),
     // 视频详情弹窗
@@ -449,11 +464,11 @@ export function VideosPage({ params = {} } = {}) {
                             className: 'p-1.5 rounded hover:bg-slate-100 text-slate-400', title: '重试'
                           }, h(Icon, { name: 'refresh', size: 14 })),
                           (v.status === 'completed' || v.status === 'relocated') && h('button', {
-                            onClick: async (e) => { e.stopPropagation(); if (confirm('将删除旧文件并重新下载，确认？')) { try { await api.redownloadVideo(v.id); toast.success('已提交重新下载'); load(); } catch (err) { toast.error(err.message); } } },
+                            onClick: (e) => { e.stopPropagation(); setConfirmAction({ title: '重新下载', message: '将删除旧文件并重新下载，确认？', action: '__redownload__', _videoId: v.id }); },
                             className: 'p-1.5 rounded hover:bg-blue-50 text-slate-400 hover:text-blue-600', title: '重新下载'
                           }, h(Icon, { name: 'refresh', size: 14 })),
                           (v.status === 'completed' || v.status === 'relocated') && v.file_size > 0 && h('button', {
-                            onClick: async (e) => { e.stopPropagation(); if (confirm('删除本地文件（保留记录）？')) { try { await api.deleteVideoFiles(v.id); toast.success('文件已删除'); load(); } catch (err) { toast.error(err.message); } } },
+                            onClick: (e) => { e.stopPropagation(); setConfirmAction({ title: '删除文件', message: '删除本地文件（保留记录）？', action: '__delete_files__', _videoId: v.id }); },
                             className: 'p-1.5 rounded hover:bg-orange-50 text-slate-400 hover:text-orange-600', title: '删除文件'
                           }, h(Icon, { name: 'file-x', size: 14 })),
                           v.status === 'cancelled' && h('button', {
@@ -461,11 +476,11 @@ export function VideosPage({ params = {} } = {}) {
                             className: 'p-1.5 rounded hover:bg-green-50 text-slate-400 hover:text-green-600', title: '恢复下载'
                           }, h(Icon, { name: 'download', size: 14 })),
                           v.status === 'deleted' && h('button', {
-                            onClick: async (e) => { e.stopPropagation(); if (confirm('恢复并重新下载？')) { try { await api.restoreVideo(v.id); toast.success('已恢复'); load(); } catch (err) { toast.error(err.message); } } },
+                            onClick: (e) => { e.stopPropagation(); setConfirmAction({ title: '恢复视频', message: '恢复并重新下载？', action: '__restore__', _videoId: v.id }); },
                             className: 'p-1.5 rounded hover:bg-emerald-50 text-slate-400 hover:text-emerald-600', title: '恢复'
                           }, h(Icon, { name: 'undo', size: 14 })),
                           h('button', {
-                            onClick: async (e) => { e.stopPropagation(); if (confirm('确定删除？')) { try { await api.deleteVideo(v.id); toast.success('已删除'); load(); } catch (err) { toast.error(err.message); } } },
+                            onClick: (e) => { e.stopPropagation(); setConfirmAction({ title: '删除视频', message: '确定删除？', action: '__delete__', _videoId: v.id }); },
                             className: 'p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-500', title: '删除'
                           }, h(Icon, { name: 'trash', size: 14 }))
                         )
@@ -483,25 +498,11 @@ export function VideosPage({ params = {} } = {}) {
                 selected: selected.has(v.id),
                 onSelect: toggleSelect,
                 onClick: () => setDetailVideo(v),
-                onAction: load
+                onAction: load,
+                onConfirm: setConfirmAction
               }))
             ),
     h(Pagination, { page, pageSize, total, onChange: setPage })
-  );
-}
-
-// 自定义确认弹窗（替换 window.confirm，移动端兼容）
-function ConfirmDialog({ title, message, onConfirm, onCancel }) {
-  return h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4' },
-    h('div', { className: 'absolute inset-0 bg-black/40', onClick: onCancel }),
-    h('div', { className: 'relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4' },
-      h('h3', { className: 'text-base font-semibold text-slate-800' }, title),
-      h('p', { className: 'text-sm text-slate-500' }, message),
-      h('div', { className: 'flex gap-3 justify-end' },
-        h('button', { onClick: onCancel, className: 'px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100' }, '取消'),
-        h('button', { onClick: onConfirm, className: 'px-4 py-2 rounded-lg text-sm bg-red-500 text-white hover:bg-red-600' }, '确认')
-      )
-    )
   );
 }
 
@@ -530,7 +531,8 @@ function DouyinLogo({ size = 40 }) {
 }
 
 // 视频卡片组件（带封面图）
-function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction, selected = false, onSelect }) {
+// [FIXED: P0-2] 卡片视图快捷按钮也使用 ConfirmDialog（通过回调传入父组件）
+function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onAction, selected = false, onSelect, onConfirm }) {
   const [imgError, setImgError] = React.useState(false);
   const thumbSrc = `/api/thumb/${v.id}`;
   const isDownloading = v.status === 'downloading';
@@ -632,11 +634,11 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
           className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-slate-100 text-slate-600 text-xs font-medium active:bg-slate-200'
         }, h(Icon, { name: 'refresh', size: 14 }), '重试'),
         (v.status === 'completed' || v.status === 'relocated') && h('button', {
-          onClick: async (e) => { e.stopPropagation(); if (!confirm('删除本地文件（保留记录）？')) return; try { await api.deleteVideoFiles(v.id); if (onAction) onAction(); } catch (err) { toast.error(err.message || '操作失败'); } },
+          onClick: (e) => { e.stopPropagation(); if (onConfirm) onConfirm({ title: '删除文件', message: '删除本地文件（保留记录）？', action: '__delete_files__', _videoId: v.id }); },
           className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-orange-50 text-orange-700 text-xs font-medium active:bg-orange-100'
         }, h(Icon, { name: 'file-x', size: 14 }), '删文件'),
         v.status === 'deleted' && h('button', {
-          onClick: async (e) => { e.stopPropagation(); if (!confirm('恢复并重新下载？')) return; try { await api.restoreVideo(v.id); if (onAction) onAction(); } catch (err) { toast.error(err.message || '操作失败'); } },
+          onClick: (e) => { e.stopPropagation(); if (onConfirm) onConfirm({ title: '恢复视频', message: '恢复并重新下载？', action: '__restore__', _videoId: v.id }); },
           className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-emerald-50 text-emerald-700 text-xs font-medium active:bg-emerald-100'
         }, h(Icon, { name: 'undo', size: 14 }), '恢复')
       )

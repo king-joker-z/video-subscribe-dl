@@ -68,9 +68,10 @@ export const api = {
   importSources: (jsonData) => request("/api/sources/import", { method: "POST", body: JSON.stringify(jsonData) }),
 
   // Videos
+  // [FIXED: P2-1] 过滤条件改为排除 undefined/null/""，保留合法的 0 值（page=0, source_id=0 等）
   getVideos: (params = {}) => {
     const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') qs.set(k, v); });
     return request('/api/videos?' + qs.toString());
   },
   getVideo: (id) => request(`/api/videos/${id}`),
@@ -87,14 +88,15 @@ export const api = {
   }),
 
   // Uploaders
+  // [FIXED: P2-1] 同 getVideos，过滤条件排除 undefined/null/""
   getUploaders: (params = {}) => {
     const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') qs.set(k, v); });
     return request('/api/uploaders?' + qs.toString());
   },
   getUploaderVideos: (name, params = {}) => {
     const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => { if (v) qs.set(k, v); });
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') qs.set(k, v); });
     return request(`/api/uploaders/${encodeURIComponent(name)}/videos?` + qs.toString());
   },
 

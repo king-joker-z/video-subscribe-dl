@@ -17,7 +17,20 @@ export function LogsPage() {
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
   const alreadyFallenBack = useRef(false); // P0-5: 防止 ws.onclose 和 onerror 双连
+  // [FIXED: P2-4] reconnectKey 用于手动重连按钮触发重新连接
   const [reconnectKey, setReconnectKey] = useState(0);
+
+  // [FIXED: P0-3] 提取公共 createLogHandler 工厂函数，connect 和 fallbackToSSE 两处复用
+  const createLogHandler = useCallback(() => {
+    return (entry) => {
+      if (autoScrollRef.current) {
+        setLogs(prev => [entry, ...prev.slice(0, 999)]);
+      } else {
+        bufferRef.current = [entry, ...bufferRef.current];
+        setUnreadCount(bufferRef.current.length);
+      }
+    };
+  }, []);
 
   // 连接管理：WebSocket 优先，SSE 降级
   const connect = useCallback(() => {
@@ -26,15 +39,7 @@ export function LogsPage() {
       connectionRef.current = null;
     }
 
-    const onLog = (entry) => {
-      // [FIXED: buffer in pause mode, prepend in follow mode]
-      if (autoScrollRef.current) {
-        setLogs(prev => [entry, ...prev.slice(0, 999)]);
-      } else {
-        bufferRef.current = [entry, ...bufferRef.current];
-        setUnreadCount(bufferRef.current.length);
-      }
-    };
+    const onLog = createLogHandler();
 
     const sock = createLogSocket(onLog, (type) => {
       setConnType('ws');
@@ -50,7 +55,10 @@ export function LogsPage() {
           fallbackToSSE();
         }
       };
+      // [FIXED: P1-1] 保存 origOnClose 再包装，不直接覆盖为空函数，保留 api.js 的重连逻辑
+      const origOnClose = sock.ws.onclose;
       sock.ws.onclose = () => {
+        if (origOnClose) origOnClose();
         setConnType('');
         // 如果已经因 onerror 降级到 SSE，不再重新发起 WS 连接
         if (!alreadyFallenBack.current) {
@@ -60,23 +68,15 @@ export function LogsPage() {
     }
 
     connectionRef.current = sock;
-  }, []);
+  }, [createLogHandler]);
 
   const fallbackToSSE = useCallback(() => {
-    const onLog = (entry) => {
-      // [FIXED: buffer in pause mode, prepend in follow mode]
-      if (autoScrollRef.current) {
-        setLogs(prev => [entry, ...prev.slice(0, 999)]);
-      } else {
-        bufferRef.current = [entry, ...bufferRef.current];
-        setUnreadCount(bufferRef.current.length);
-      }
-    };
+    const onLog = createLogHandler();
     const handler = (e) => { onLog(e.detail); };
     window.addEventListener('vsd:log', handler);
     setConnType('sse');
     connectionRef.current = { close: () => window.removeEventListener('vsd:log', handler), type: 'sse' };
-  }, []);
+  }, [createLogHandler]);
 
   // 加载历史日志 + 建立连接
   useEffect(() => {
@@ -103,9 +103,10 @@ export function LogsPage() {
 
   const handleScroll = () => {
     // [FIXED: 用户向下滚时暂停追随，回顶时调用 scrollToTop 合并 buffer]
+    // [FIXED: P2-5] 阈值从 20 提高到 60，避免移动端惯性滑动误触
     if (!containerRef.current) return;
     const { scrollTop } = containerRef.current;
-    if (scrollTop > 20) {
+    if (scrollTop > 60) {
       autoScrollRef.current = false;
       setAutoScroll(false);
     } else if (!autoScrollRef.current) {
@@ -203,6 +204,12 @@ export function LogsPage() {
             className: 'absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold px-1'
           }, unreadCount > 99 ? '99+' : String(unreadCount))
         ),
+        // [FIXED: P2-4] 手动重连按钮，触发 setReconnectKey 强制重建连接
+        h('button', {
+          onClick: () => setReconnectKey(k => k + 1),
+          title: '重新连接日志流',
+          className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-blue-500 transition-colors'
+        }, '🔌 重连'),
         h('button', {
           onClick: handleClear,
           className: 'px-3 py-1 rounded text-xs text-slate-500 hover:text-red-500 transition-colors'

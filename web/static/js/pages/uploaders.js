@@ -1,23 +1,8 @@
 import React from 'react';
 import { api } from '../api.js';
-import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState , UploaderCardSkeleton } from '../components/utils.js';
-const { createElement: h, useState, useEffect, useCallback, useRef } = React;
+import { cn, toast, Icon, Card, Badge, Button, Pagination, EmptyState, UploaderCardSkeleton, ConfirmDialog } from '../components/utils.js';
+const { createElement: h, useState, useEffect, useCallback, useRef, useMemo } = React;
 
-
-// [FIXED: 自定义确认弹窗，替换 window.confirm]
-function ConfirmDialog({ title, message, onConfirm, onCancel }) {
-  return h("div", { className: "fixed inset-0 z-50 flex items-center justify-center p-4" },
-    h("div", { className: "absolute inset-0 bg-black/40", onClick: onCancel }),
-    h("div", { className: "relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4" },
-      h("h3", { className: "text-base font-semibold text-slate-800" }, title),
-      h("p", { className: "text-sm text-slate-500" }, message),
-      h("div", { className: "flex gap-3 justify-end" },
-        h("button", { onClick: onCancel, className: "px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100" }, "取消"),
-        h("button", { onClick: onConfirm, className: "px-4 py-2 rounded-lg text-sm bg-red-500 text-white hover:bg-red-600" }, "确认删除")
-      )
-    )
-  );
-}
 
 // UP主头像组件
 function UploaderAvatar({ name, hasAvatar }) {
@@ -52,6 +37,8 @@ export function UploadersPage({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null); // [FIXED: 存待删除的 uploader name]
   const searchTimer = useRef(null);
+  // [FIXED: P1-7] loadRef 存最新 load 引用，handleVisibility 通过 ref 调用，从依赖数组移除 load
+  const loadRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +53,9 @@ export function UploadersPage({ onNavigate }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // [FIXED: P1-7] 同步 load 最新引用到 ref，供 visibilitychange handler 使用
+  useEffect(() => { loadRef.current = load; }, [load]);
+
   // 定时自动刷新（60s），页面不可见时暂停，切回来立即刷一次
   useEffect(() => {
     const INTERVAL = 60000;
@@ -74,15 +64,16 @@ export function UploadersPage({ onNavigate }) {
     const schedule = () => {
       timer = setTimeout(() => {
         if (!document.hidden) {
-          load();
+          if (loadRef.current) loadRef.current();
         }
         schedule();
       }, INTERVAL);
     };
 
+    // [FIXED: P1-7] 通过 loadRef 调用，不把 load 加入依赖，避免 timer 频繁重建
     const handleVisibility = () => {
       if (!document.hidden) {
-        load();
+        if (loadRef.current) loadRef.current();
       }
     };
 
@@ -92,7 +83,7 @@ export function UploadersPage({ onNavigate }) {
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [load]);
+  }, []);
 
   const handleDownloadPending = async (uploaderName, e) => {
     e.stopPropagation();

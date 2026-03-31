@@ -72,6 +72,8 @@ export function SettingsPage() {
   const previewTimer = useRef(null);
   const qrPollInterval = useRef(null);
   const qrPollTimeout = useRef(null);
+  // [FIXED: P1-4] cancelled ref: 清除 QR 定时器后标记取消，防止 Promise 回调继续执行
+  const qrCancelled = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -85,6 +87,13 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // [FIXED: P1-3] 组件卸载时清除 previewTimer，避免 unmounted setState 警告
+  useEffect(() => {
+    return () => {
+      if (previewTimer.current) clearTimeout(previewTimer.current);
+    };
+  }, []);
 
   const handleChange = (key, value) => {
     setDirty(d => ({ ...d, [key]: value }));
@@ -115,21 +124,28 @@ export function SettingsPage() {
     finally { setSaving(false); }
   };
 
+  // [FIXED: P1-4] 清除定时器时设 qrCancelled=true，防止已在途的 Promise 继续执行
   const clearQRTimers = () => {
+    qrCancelled.current = true;
     if (qrPollInterval.current) { clearInterval(qrPollInterval.current); qrPollInterval.current = null; }
     if (qrPollTimeout.current) { clearTimeout(qrPollTimeout.current); qrPollTimeout.current = null; }
   };
 
   const handleQRLogin = async () => {
     clearQRTimers(); // 防止多次点击产生多个并发 timer
+    // [FIXED: P1-4] 重置 cancelled 标记，允许新的轮询运行
+    qrCancelled.current = false;
     try {
       const res = await api.generateQRCode();
       setQrData(res.data);
       setShowQR(true);
       const key = res.data.qrcode_key;
       qrPollInterval.current = setInterval(async () => {
+        // [FIXED: P1-4] 已取消则不继续执行
+        if (qrCancelled.current) return;
         try {
           const pr = await api.pollQRCode(key);
+          if (qrCancelled.current) return;
           if (pr.data.status === 0) {
             clearQRTimers();
             setShowQR(false);

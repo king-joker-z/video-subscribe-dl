@@ -240,22 +240,23 @@ export function DashboardPage({ onNavigate }) {
     ),
 
     // 统计卡片网格
+    // [FIXED: P2-3] 用 s.label 替换 index 作为 key，避免顺序调整时 diff 无效
     h('div', { className: 'hidden sm:grid grid-cols-4 lg:grid-cols-4 xl:grid-cols-8 gap-4' },
-      stats.map((s, i) => h(Card, { key: i },
+      stats.map((s) => h(Card, { key: s.label },
         h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
         h('div', { className: cn('text-2xl font-bold', s.color) }, s.value.toLocaleString())
       ))
     ),
     // 手机端：主要4个（2x2），加粗显示
     h('div', { className: 'grid sm:hidden grid-cols-2 gap-3' },
-      stats.slice(0, 4).map((s, i) => h(Card, { key: i },
+      stats.slice(0, 4).map((s) => h(Card, { key: s.label },
         h('div', { className: 'text-xs text-slate-500 mb-1' }, s.label),
         h('div', { className: cn('text-3xl font-bold', s.color) }, s.value.toLocaleString())
       ))
     ),
     // 手机端：次要4个（2x4，紧凑）
     h('div', { className: 'grid sm:hidden grid-cols-4 gap-2' },
-      stats.slice(4).map((s, i) => h('div', { key: i, className: 'rounded-lg bg-white border border-slate-100 p-3 text-center shadow-sm' },
+      stats.slice(4).map((s) => h('div', { key: s.label, className: 'rounded-lg bg-white border border-slate-100 p-3 text-center shadow-sm' },
         h('div', { className: cn('text-xl font-bold', s.color) }, s.value.toLocaleString()),
         h('div', { className: 'text-[10px] text-slate-500 mt-0.5' }, s.label)
       ))
@@ -397,9 +398,10 @@ export function DashboardPage({ onNavigate }) {
       h('h3', { className: 'font-medium mb-4 text-slate-800' }, '视频状态分布'),
       // 堆叠条形图
       h('div', { className: 'w-full h-6 rounded-full overflow-hidden flex mb-4', style: { backgroundColor: '#e2e8f0' } },
-        statusDist.map((s, i) =>
+        // [FIXED: P2-3] key 用 s.label
+        statusDist.map((s) =>
           h('div', {
-            key: i,
+            key: s.label,
             style: {
               width: (s.value / total * 100).toFixed(1) + '%',
               backgroundColor: s.color,
@@ -412,8 +414,8 @@ export function DashboardPage({ onNavigate }) {
       ),
       // 图例
       h('div', { className: 'flex flex-wrap gap-4 text-sm' },
-        statusDist.map((s, i) =>
-          h('div', { key: i, className: 'flex items-center gap-2' },
+        statusDist.map((s) =>
+          h('div', { key: s.label, className: 'flex items-center gap-2' },
             h('div', { style: { width: 12, height: 12, borderRadius: 3, backgroundColor: s.color } }),
             h('span', { className: 'text-slate-600' }, `${s.label} `),
             h('span', { className: 'text-slate-800 font-medium' }, s.value.toLocaleString()),
@@ -429,8 +431,9 @@ export function DashboardPage({ onNavigate }) {
         h('div', { className: 'flex items-end gap-1', style: { height: 100 } },
           (() => {
             const maxCount = Math.max(...data.by_month.map(m => m.count), 1);
-            return data.by_month.map((m, i) =>
-              h('div', { key: i, className: 'flex-1 flex flex-col items-center gap-1' },
+            // [FIXED: P2-3] 月度趋势用 m.month 作为 key
+            return data.by_month.map((m) =>
+              h('div', { key: m.month, className: 'flex-1 flex flex-col items-center gap-1' },
                 h('span', { className: 'text-xs text-slate-500' }, m.count),
                 h('div', {
                   style: {

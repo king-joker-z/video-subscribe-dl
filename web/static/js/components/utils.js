@@ -145,6 +145,10 @@ const ICON_PATHS = {
 };
 
 export function Icon({ name, size = 18, className = '' }) {
+  // [FIXED: P2-9] 开发阶段对未注册图标名打印警告
+  if (!ICON_PATHS[name] && (typeof location !== 'undefined' && (location.hostname === 'localhost' || location.hostname === '127.0.0.1'))) {
+    console.warn('Unknown icon: ' + name);
+  }
   const d = ICON_PATHS[name] || '';
   return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', className }, h('path', { d }));
 }
@@ -308,6 +312,21 @@ export function EmptyState({ icon = 'video', message = '暂无数据', action })
       onClick: action.onClick,
       className: 'mt-2 px-4 py-1.5 rounded-lg text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors',
     }, action.label)
+  );
+}
+
+// [FIXED: P2-7] 提取到 utils.js 统一导出，videos.js / uploaders.js / video-detail.js 复用
+export function ConfirmDialog({ title, message, onConfirm, onCancel }) {
+  return h('div', { className: 'fixed inset-0 z-50 flex items-center justify-center p-4' },
+    h('div', { className: 'absolute inset-0 bg-black/40', onClick: onCancel }),
+    h('div', { className: 'relative bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4' },
+      h('h3', { className: 'text-base font-semibold text-slate-800' }, title),
+      h('p', { className: 'text-sm text-slate-500' }, message),
+      h('div', { className: 'flex gap-3 justify-end' },
+        h('button', { onClick: onCancel, className: 'px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100' }, '取消'),
+        h('button', { onClick: onConfirm, className: 'px-4 py-2 rounded-lg text-sm bg-red-500 text-white hover:bg-red-600' }, '确认')
+      )
+    )
   );
 }
 
