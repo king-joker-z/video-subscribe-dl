@@ -25,6 +25,10 @@ type EventsHandler struct {
 	// WebSocket 连接管理
 	wsMu    sync.Mutex
 	wsConns map[*wsConn]struct{}
+	// validateNonce, if non-nil, gates WebSocket upgrades with a short-lived nonce.
+	// The nonce is passed as ?session=<nonce> in the WS URL.
+	// When nil, nonce checking is skipped (auth disabled mode).
+	validateNonce func(string) bool
 }
 
 func NewEventsHandler(dl *downloader.Downloader) *EventsHandler {
@@ -32,6 +36,12 @@ func NewEventsHandler(dl *downloader.Downloader) *EventsHandler {
 		downloader: dl,
 		wsConns:    make(map[*wsConn]struct{}),
 	}
+}
+
+// SetValidateNonceFunc wires the session-nonce validator into the WebSocket handler.
+// Call this from Server.setupRoutes() after creating the api.Router.
+func (h *EventsHandler) SetValidateNonceFunc(fn func(string) bool) {
+	h.validateNonce = fn
 }
 
 // GET /api/events — 统一 SSE 端点（下载进度 + 日志）
@@ -319,6 +329,18 @@ func (h *EventsHandler) HandleWSLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Upgrade") != "websocket" {
 		apiError(w, CodeBadRequest, "需要 WebSocket 升级")
 		return
+	}
+
+	// Validate session nonce if a validator is configured.
+	// If the client is authenticated via cookie (authMiddleware already passed),
+	// we still require a nonce for defense-in-depth.
+	// When validateNonce is nil (auth disabled), skip the check.
+	if h.validateNonce != nil {
+		nonce := r.URL.Query().Get("session")
+		if nonce == "" || !h.validateNonce(nonce) {
+			http.Error(w, "invalid or expired session nonce", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	conn, bufrw, err := hijackConnection(w)
