@@ -13,6 +13,9 @@ func (s *Server) registerRoutes() {
 	s.apiRouter = newapi.NewRouter(s.db, s.downloader, s.downloadDir)
 	s.apiRouter.Register(s.mux)
 
+	// Session nonce endpoint (WebSocket auth, requires prior auth via cookie/header)
+	s.mux.HandleFunc("/api/session", s.handleSessionCreate)
+
 	// ========== 辅助路由（定义在 server.go）==========
 	s.mux.HandleFunc("/health", s.handleHealth) // 健康检查（兼容旧监控探针）
 

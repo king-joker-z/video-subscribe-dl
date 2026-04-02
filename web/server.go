@@ -101,6 +101,10 @@ type Server struct {
 
 	cachedRateLimit int
 	rateLimitMu     sync.RWMutex
+
+	// Session nonce store for WebSocket auth (short-lived, single-use)
+	nonceMu    sync.Mutex
+	nonceStore map[string]time.Time // nonce -> expiry
 }
 
 func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, port int, dataDir, downloadDir string) *Server {
@@ -115,6 +119,24 @@ func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, 
 		cachedRateLimit: 200,
 		startTime:       time.Now(), // P2-7: initialize so uptime is correct from start
 	}
+
+	s.nonceStore = make(map[string]time.Time)
+
+	// Periodically clean up expired nonces (same pattern as rateLimiter cleanup).
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now()
+			s.nonceMu.Lock()
+			for nonce, exp := range s.nonceStore {
+				if now.After(exp) {
+					delete(s.nonceStore, nonce)
+				}
+			}
+			s.nonceMu.Unlock()
+		}
+	}()
 
 	// 启动时从 DB 读取 rate limit 设置
 	if val, err := database.GetSetting("rate_limit_per_minute"); err == nil && val != "" {
@@ -223,6 +245,8 @@ func (s *Server) setupRoutes() {
 		if s.onRepairThumb != nil {
 			s.apiRouter.SetRepairThumbFunc(s.onRepairThumb)
 		}
+		// Wire session-nonce validator for WebSocket log auth
+		s.apiRouter.SetValidateNonceFunc(s.validateAndConsumeNonce)
 	}
 }
 
@@ -370,12 +394,12 @@ func (s *Server) Start() error {
 	s.setupRoutes()
 
 	// 自动生成 auth_token（如果未设置且未禁用）
-	// s.ensureAuthToken() // auth disabled
+	s.ensureAuthToken()
 
 	addr := fmt.Sprintf(":%d", s.port)
 	s.httpServer = &http.Server{
 		Addr:              addr,
-		Handler:           s.rateLimitMiddleware(s.mux),
+		Handler:           s.rateLimitMiddleware(s.authMiddleware(s.mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -433,12 +457,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// 2. Cookie auth_token
 		if cookie, err := r.Cookie("auth_token"); err == nil && cookie.Value == token {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// 3. Query param ?token=xxx（WebSocket 连接用）
-		if qToken := r.URL.Query().Get("token"); qToken == token {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -563,6 +581,40 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		health["disk_total_gb"] = float64(diskInfo.Total) / 1024 / 1024 / 1024
 	}
 	jsonResponse(w, health)
+}
+
+// POST /api/session
+// Issues a short-lived session nonce for WebSocket auth.
+// Nonce is single-use and expires after 60 seconds.
+// authMiddleware must pass first (nonce only issued to authenticated sessions).
+func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		jsonError(w, "nonce generation failed", http.StatusInternalServerError)
+		return
+	}
+	nonce := hex.EncodeToString(b)
+	s.nonceMu.Lock()
+	s.nonceStore[nonce] = time.Now().Add(60 * time.Second)
+	s.nonceMu.Unlock()
+	jsonResponse(w, map[string]string{"nonce": nonce})
+}
+
+// validateAndConsumeNonce checks and single-use-consumes a session nonce.
+// Returns true if the nonce exists and has not expired; deletes it in both cases.
+func (s *Server) validateAndConsumeNonce(nonce string) bool {
+	s.nonceMu.Lock()
+	defer s.nonceMu.Unlock()
+	exp, ok := s.nonceStore[nonce]
+	if !ok {
+		return false
+	}
+	delete(s.nonceStore, nonce) // single-use regardless of expiry
+	return time.Now().Before(exp)
 }
 
 func (s *Server) SetVersion(v string)      { s.version = v }

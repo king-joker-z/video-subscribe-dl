@@ -140,12 +140,6 @@ func AuthMiddleware(getToken func() string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// 从 query param 获取（WebSocket 连接用）
-			if qToken := r.URL.Query().Get("token"); qToken == token {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			// 未认证
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
