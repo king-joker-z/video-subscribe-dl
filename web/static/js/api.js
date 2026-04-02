@@ -187,10 +187,29 @@ export function createEventSource(onProgress, onLog, onConnected) {
 }
 
 // WebSocket 日志连接（带 SSE 降级）
-export function createLogSocket(onLog, onConnected) {
+// Fetches a short-lived session nonce from POST /api/session before connecting.
+// Falls back gracefully if the session endpoint fails (e.g. auth is disabled).
+export async function createLogSocket(onLog, onConnected) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/api/ws/logs`;
-  
+
+  // Step 1: obtain a short-lived session nonce for WebSocket auth.
+  let nonce = '';
+  try {
+    const res = await fetch('/api/session', { method: 'POST', credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      nonce = data.nonce || '';
+    }
+    // Non-ok response (e.g. 401 before login) → proceed without nonce;
+    // the WS upgrade will fail and the caller falls back to SSE.
+  } catch (e) {
+    // Network failure → proceed without nonce
+  }
+
+  const wsUrl = nonce
+    ? `${proto}//${location.host}/api/ws/logs?session=${encodeURIComponent(nonce)}`
+    : `${proto}//${location.host}/api/ws/logs`;
+
   let ws;
   try {
     ws = new WebSocket(wsUrl);
@@ -210,7 +229,7 @@ export function createLogSocket(onLog, onConnected) {
   } catch(e) {
     // 不支持 WebSocket
   }
-  
+
   return {
     close: () => { if (ws) ws.close(); },
     ws,

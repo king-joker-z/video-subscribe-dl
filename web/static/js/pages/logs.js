@@ -33,7 +33,7 @@ export function LogsPage() {
   }, []);
 
   // 连接管理：WebSocket 优先，SSE 降级
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (connectionRef.current) {
       connectionRef.current.close();
       connectionRef.current = null;
@@ -41,7 +41,7 @@ export function LogsPage() {
 
     const onLog = createLogHandler();
 
-    const sock = createLogSocket(onLog, (type) => {
+    const sock = await createLogSocket(onLog, (type) => {
       setConnType('ws');
     });
 
