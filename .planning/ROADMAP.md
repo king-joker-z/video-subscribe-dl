@@ -15,7 +15,7 @@ unauthenticated exposure.
 
 ---
 
-### Phase 1.1 — Auth Hardening
+### Phase 1.1 — Auth Hardening ✅ Complete (2026-04-02)
 
 **Goal:** Ensure every VSD deployment starts with authentication enabled by default, and that the
 long-lived auth token is never exposed in WebSocket URLs or server logs.
