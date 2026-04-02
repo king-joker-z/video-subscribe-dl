@@ -245,6 +245,8 @@ func (s *Server) setupRoutes() {
 		if s.onRepairThumb != nil {
 			s.apiRouter.SetRepairThumbFunc(s.onRepairThumb)
 		}
+		// Wire session-nonce validator for WebSocket log auth
+		s.apiRouter.SetValidateNonceFunc(s.validateAndConsumeNonce)
 	}
 }
 

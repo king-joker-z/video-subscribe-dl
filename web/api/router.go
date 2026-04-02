@@ -32,7 +32,8 @@ type Router struct {
 	douyinStatus  *DouyinStatusHandler
 	phCookie      *PHCookieHandler
 	phStatus      *PHStatusHandler
-	onSyncAll     func()
+	onSyncAll            func()
+	validateNonceFunc    func(string) bool
 }
 
 func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *Router {
@@ -166,6 +167,14 @@ func (rt *Router) SetPHCookieStatusFunc(fn func() (bool, string)) {
 // SetRepairThumbFunc 设置历史封面补全回调
 func (rt *Router) SetRepairThumbFunc(fn func(string, string) error) {
 	rt.videos.SetRepairThumbFunc(fn)
+}
+
+// SetValidateNonceFunc wires the session-nonce validator into the WebSocket log handler.
+func (rt *Router) SetValidateNonceFunc(fn func(string) bool) {
+	rt.validateNonceFunc = fn
+	if rt.events != nil {
+		rt.events.SetValidateNonceFunc(fn)
+	}
 }
 
 func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
