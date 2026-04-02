@@ -4,13 +4,13 @@
 **Active** | Milestone 1: Stability & Security
 
 ## Current Phase
-**Phase 1.1 — Auth Hardening** (not started)
+**Phase 1.1 — Auth Hardening** (planned — ready to execute)
 
 ## Phases
 
 | Phase | Title | Status |
 |-------|-------|--------|
-| 1.1 | Auth Hardening | ⬜ Pending |
+| 1.1 | Auth Hardening | 📋 Planned |
 | 1.2 | PH Scheduler Reliability | ⬜ Pending |
 | 1.3 | Performance & Resilience | ⬜ Pending |
 | 2.1 | Frontend Bug Fixes | ⬜ Pending |
@@ -36,4 +36,4 @@
 2026-04-02
 
 ## Last Updated
-2026-04-02
+2026-04-02 (Phase 1.1 plan finalized)
