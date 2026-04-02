@@ -459,12 +459,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 3. Query param ?token=xxx（WebSocket 连接用）
-		if qToken := r.URL.Query().Get("token"); qToken == token {
-			next.ServeHTTP(w, r)
-			return
-		}
-
 		// 未认证: API 请求返回 401, 页面请求重定向到登录
 		if strings.HasPrefix(path, "/api/") {
 			jsonError(w, "未认证，请先登录", http.StatusUnauthorized)
