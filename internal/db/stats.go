@@ -80,15 +80,31 @@ func (d *DB) GetStats() (map[string]int, error) {
 }
 
 // GetStatsDetailed 返回完整统计（总下载数、成功数、失败数、总文件大小）
+// [FIXED: P1-3] 从 7 次 QueryRow 合并为 2 次查询，减少 Dashboard 的 DB round-trips
 func (d *DB) GetStatsDetailed() (*DetailedStats, error) {
 	s := &DetailedStats{}
-	d.QueryRow("SELECT COUNT(*) FROM downloads").Scan(&s.Total)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('completed','relocated')").Scan(&s.Completed)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status IN ('failed','permanent_failed')").Scan(&s.Failed)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'pending'").Scan(&s.Pending)
-	d.QueryRow("SELECT COALESCE(SUM(file_size),0) FROM downloads WHERE status IN ('completed','relocated')").Scan(&s.TotalSize)
-	d.QueryRow("SELECT COUNT(*) FROM downloads WHERE status = 'charge_blocked'").Scan(&s.ChargeBlocked)
-	d.QueryRow("SELECT COUNT(*) FROM sources WHERE enabled = 1").Scan(&s.Sources)
+
+	// Query 1: all download-status aggregates in a single pass
+	err := d.QueryRow(`
+		SELECT
+			COUNT(*) AS total,
+			SUM(CASE WHEN status IN ('completed','relocated') THEN 1 ELSE 0 END) AS completed,
+			SUM(CASE WHEN status IN ('failed','permanent_failed') THEN 1 ELSE 0 END) AS failed,
+			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+			SUM(CASE WHEN status = 'charge_blocked' THEN 1 ELSE 0 END) AS charge_blocked,
+			COALESCE(SUM(CASE WHEN status IN ('completed','relocated') THEN file_size ELSE 0 END), 0) AS total_size
+		FROM downloads
+	`).Scan(&s.Total, &s.Completed, &s.Failed, &s.Pending, &s.ChargeBlocked, &s.TotalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Query 2: enabled sources count (unrelated to downloads; separate query is cleaner)
+	err = d.QueryRow(`SELECT COUNT(*) FROM sources WHERE enabled = 1`).Scan(&s.Sources)
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
 }
 

@@ -2,13 +2,14 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "github.com/glebarez/sqlite"
 )
 
 // initMemoryDB creates an in-memory SQLite DB for testing
-func initMemoryDB(t *testing.T) *DB {
+func initMemoryDB(t testing.TB) *DB {
 	t.Helper()
 	sqlDB, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -420,5 +421,45 @@ func TestPeople_UpsertUpdate(t *testing.T) {
 	}
 	if people[0].Name != "NewName" {
 		t.Errorf("expected 'NewName', got '%s'", people[0].Name)
+	}
+}
+
+// BenchmarkGetStatsDetailed verifies the 2-query implementation performs
+// acceptably on a realistic dataset.
+// [FIXED: P1-3] benchmark added for GetStatsDetailed consolidation
+func BenchmarkGetStatsDetailed(b *testing.B) {
+	d := initMemoryDB(b) // testing.TB — works for *testing.B after 1a
+	defer d.Close()
+
+	// Seed: insert 200 downloads spread across all tracked statuses
+	srcID, err := d.CreateSource(&Source{
+		URL:     "https://space.bilibili.com/bench",
+		Name:    "bench-src",
+		Enabled: true,
+	})
+	if err != nil {
+		b.Fatalf("create source: %v", err)
+	}
+
+	statuses := []string{"completed", "relocated", "failed", "permanent_failed", "pending", "charge_blocked", "downloading"}
+	for i := 0; i < 200; i++ {
+		status := statuses[i%len(statuses)]
+		_, err := d.CreateDownload(&Download{
+			SourceID: srcID,
+			VideoID:  fmt.Sprintf("BVbench%04d", i),
+			Title:    fmt.Sprintf("Bench Video %d", i),
+			Status:   status,
+			FileSize: int64(1024 * 1024 * (i%50 + 1)), // 1–50 MiB
+		})
+		if err != nil {
+			b.Fatalf("create download %d: %v", i, err)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := d.GetStatsDetailed(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
