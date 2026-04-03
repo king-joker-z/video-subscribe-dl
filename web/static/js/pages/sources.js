@@ -49,6 +49,13 @@ function EditModal({ source, onSave, onClose }) {
 
   const update = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
 
+  // [FIXED: P1-3 round3] EditModal 绑定 ESC 关闭，提升键盘可访问性
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   const handleSave = async () => {
     setSaving(true);
     try {

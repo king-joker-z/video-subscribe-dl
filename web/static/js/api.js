@@ -177,7 +177,13 @@ export const api = {
   };
 
 // SSE 事件源
+// @deprecated 全局 SSE 单例已在 app.js 中统一管理（ensureGlobalSSE），
+// 请勿在业务组件中直接调用此函数，否则会建立多余的 SSE 连接导致重复事件。
+// 如需监听事件，使用 window.addEventListener('vsd:progress' | 'vsd:log' | 'vsd:download-event', handler)。
 export function createEventSource(onProgress, onLog, onConnected) {
+  if (typeof console !== 'undefined') {
+    console.warn('[createEventSource] deprecated: use global vsd:* CustomEvents instead of creating a new EventSource.');
+  }
   const es = new EventSource('/api/events');
   es.addEventListener('connected', () => { if (onConnected) onConnected(); });
   es.addEventListener('progress', (e) => { if (onProgress) onProgress(JSON.parse(e.data)); });

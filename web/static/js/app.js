@@ -11,7 +11,7 @@ import { LogsPage } from './pages/logs.js';
 import { QuickDownloadDialog, QuickDownloadFAB, DropZoneOverlay, extractBiliUrl, extractVideoUrl } from './components/quick-download.js';
 import { CommandPalette } from './components/command-palette.js';
 
-const { createElement: h, useState, useEffect, useCallback, useRef } = React;
+const { createElement: h, useState, useEffect, useCallback, useRef, useMemo } = React;
 
 // ==================== 全局 SSE 单例 ====================
 // 所有组件共享同一个 EventSource，通过自定义 CustomEvent 分发
@@ -485,7 +485,9 @@ function App() {
     setMobileSidebar(false);
   }, []);
 
-  const renderPage = () => {
+  // [FIXED: P1-1 round3] 用 useMemo 缓存页面 VNode，避免 App re-render 时因 renderPage() 重新
+  // 返回新对象引用导致子页面不必要的 unmount/remount（React diff 依赖引用稳定性判断组件类型）
+  const pageNode = useMemo(() => {
     switch (page) {
       case 'dashboard': return h(DashboardPage, { onNavigate: navigate });
       case 'sources': return h(SourcesPage, { onNavigate: navigate });
@@ -495,7 +497,7 @@ function App() {
       case 'logs': return h(LogsPage);
       default: return h(DashboardPage, { onNavigate: navigate });
     }
-  };
+  }, [page, hashParams, navigate]);
 
   return h('div', { className: 'min-h-screen bg-slate-50 text-slate-900' },
     h(ToastContainer),
@@ -533,7 +535,7 @@ function App() {
         sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-56'
       )
     },
-      h('div', { className: 'p-4 lg:p-6 max-w-7xl pb-16 lg:pb-0' }, renderPage())
+      h('div', { className: 'p-4 lg:p-6 max-w-7xl pb-16 lg:pb-0' }, pageNode)
     )
   );
 }

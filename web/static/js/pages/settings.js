@@ -95,6 +95,11 @@ export function SettingsPage() {
     };
   }, []);
 
+  // [FIXED: P0-1 round3] 组件卸载时清除 QR 轮询定时器，防止 unmounted setState 泄漏
+  useEffect(() => {
+    return () => { clearQRTimers(); };
+  }, []);
+
   const handleChange = (key, value) => {
     setDirty(d => ({ ...d, [key]: value }));
   };

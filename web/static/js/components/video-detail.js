@@ -51,8 +51,21 @@ export function VideoDetailModal({ video, onClose, onAction }) {
   const [imgError, setImgError] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
   const [progress, setProgress] = useState(null); // SSE 实时进度
-  const [confirmAction, setConfirmAction] = useState(null); // { title, message, onConfirm }
+  // [FIXED: P1-4 round3] onConfirm 回调从 state 移到 ref，避免将函数存入 state 的反模式
+  // state 只保存 { title, message }，回调通过 confirmCallbackRef.current 调用
+  const [confirmAction, setConfirmAction] = useState(null); // { title, message }
+  const confirmCallbackRef = React.useRef(null);
   const videoRef = React.useRef(null);
+
+  // 辅助：同时设置弹窗内容和回调
+  const openConfirm = (title, message, onConfirmFn) => {
+    confirmCallbackRef.current = onConfirmFn;
+    setConfirmAction({ title, message });
+  };
+  const closeConfirm = () => {
+    confirmCallbackRef.current = null;
+    setConfirmAction(null);
+  };
 
   useEffect(() => {
     if (!video) return;

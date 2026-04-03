@@ -114,18 +114,15 @@ export function VideosPage({ params = {} } = {}) {
   }, [load]);
 
   // 定时自动刷新（30s），页面不可见时暂停，切回来立即刷一次
+  // [FIXED: P1-2 round3] 改为 setInterval，避免递归 setTimeout 的旧回调在 cleanup 后仍排队问题
   useEffect(() => {
-    const INTERVAL = 30000; // 从 15000 改为 30000
-    let timer = null;
+    const INTERVAL = 30000;
 
-    const schedule = () => {
-      timer = setTimeout(() => {
-        if (!document.hidden) {
-          load();
-        }
-        schedule();
-      }, INTERVAL);
-    };
+    const timer = setInterval(() => {
+      if (!document.hidden && loadRef.current) {
+        loadRef.current();
+      }
+    }, INTERVAL);
 
     // [FIXED: P2-11] 通过 loadRef 调用最新 load，避免 stale closure 问题
     const handleVisibility = () => {
@@ -134,13 +131,12 @@ export function VideosPage({ params = {} } = {}) {
       }
     };
 
-    schedule();
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
-      if (timer) clearTimeout(timer);
+      clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [load]);
+  }, []);
 
   const handleSearch = (value) => {
     setSearchInput(value);
