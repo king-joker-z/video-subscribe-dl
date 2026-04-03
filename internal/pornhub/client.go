@@ -23,10 +23,25 @@ const phMaxHTMLBodySize = 10 * 1024 * 1024
 // pageDelay GetModelVideos 翻页间延迟，避免被限流 [FIXED: P1-10]
 const pageDelay = 2 * time.Second
 
+// maxPageHardLimit GetModelVideos 翻页绝对上限，防死循环
+const maxPageHardLimit = 1000
+
 const (
 	phBaseURL   = "https://www.pornhub.com"
 	phUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+// ClientOptions configures optional Client behaviour.
+// The zero value of each field means "use the package default".
+type ClientOptions struct {
+	// PageDelay overrides the inter-page delay (default: 2 s).
+	// Set to a small value in tests to avoid slow scans.
+	PageDelay time.Duration
+	// MaxPageHardLimit overrides the maximum pages to scan (default: 1000).
+	MaxPageHardLimit int
+	// JSEvalTimeout overrides the goja JS eval timeout (default: 15 s).
+	JSEvalTimeout time.Duration
+}
 
 var (
 	// flashvarsVarRe 按优先级依次匹配多种已知的 PH 播放器变量名格式：
@@ -64,6 +79,12 @@ type Client struct {
 	httpClient *http.Client
 	mu         sync.RWMutex // [FIXED: PH-2] 保护 cookie 并发读写
 	cookie     string
+
+	// configurable overrides (zero = use package-level default)
+	jsEvalTimeout time.Duration
+	pageDelayCfg  time.Duration
+	maxPageCfg    int
+	sleepFn       func(time.Duration) // reserved for future test injection
 }
 
 // NewClient 创建 Client，自动读取 HTTPS_PROXY / HTTP_PROXY 代理
@@ -93,8 +114,31 @@ func NewClient(cookie ...string) *Client {
 			Timeout:   30 * time.Second,
 		},
 	}
+	c.sleepFn = time.Sleep // default; tests may override via NewClientWithOptions
 	if len(cookie) > 0 {
 		c.cookie = strings.TrimSpace(cookie[0])
+	}
+	return c
+}
+
+// NewClientWithOptions creates a Client with custom options.
+// Use this in tests to set short timeouts and delays:
+//
+//	client := pornhub.NewClientWithOptions(pornhub.ClientOptions{
+//	    JSEvalTimeout:    50 * time.Millisecond,
+//	    PageDelay:        0,
+//	    MaxPageHardLimit: 5,
+//	})
+func NewClientWithOptions(opts ClientOptions, cookie ...string) *Client {
+	c := NewClient(cookie...)
+	if opts.JSEvalTimeout > 0 {
+		c.jsEvalTimeout = opts.JSEvalTimeout
+	}
+	if opts.PageDelay > 0 {
+		c.pageDelayCfg = opts.PageDelay
+	}
+	if opts.MaxPageHardLimit > 0 {
+		c.maxPageCfg = opts.MaxPageHardLimit
 	}
 	return c
 }
@@ -408,7 +452,6 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 
 	// 提示页数（仅用于日志参考，不作为翻页上限）
 	hintMaxPage := extractMaxPage(doc)
-	const maxPageHardLimit = 1000 // 防止死循环的兜底上限
 
 	var allVideos []Video
 
