@@ -295,7 +295,9 @@ func (c *Client) GetUPInfo(mid int64) (*UPInfo, error) {
 	}
 	params := url.Values{}
 	params.Set("mid", fmt.Sprintf("%d", mid))
-	err := c.getWbi("https://api.bilibili.com/x/space/wbi/acc/info", params, &resp)
+	referer := fmt.Sprintf("https://space.bilibili.com/%d/", mid)
+	err := c.getWbiWithReferer("https://api.bilibili.com/x/space/wbi/acc/info", params, &resp,
+		referer, "https://space.bilibili.com")
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +346,9 @@ func (c *Client) GetUPVideos(mid int64, page, pageSize int) ([]VideoItem, int, e
 	params.Set("order_avoided", "true")
 	params.Set("platform", "web")
 	params.Set("web_location", "1550101")
-	if err := c.getWbi("https://api.bilibili.com/x/space/wbi/arc/search", params, &resp); err != nil {
+	referer := fmt.Sprintf("https://space.bilibili.com/%d/video", mid)
+	if err := c.getWbiWithReferer("https://api.bilibili.com/x/space/wbi/arc/search", params, &resp,
+		referer, "https://space.bilibili.com"); err != nil {
 		return nil, 0, err
 	}
 	if resp.Code != 0 {
@@ -412,7 +416,8 @@ func (c *Client) GetDynamicVideos(mid int64, offset string) (*DynamicResponse, e
 		} `json:"data"`
 	}
 
-	if err := c.getWbi("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", params, &resp); err != nil {
+	if err := c.getWbiWithReferer("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", params, &resp,
+		fmt.Sprintf("https://space.bilibili.com/%d/dynamic", mid), "https://space.bilibili.com"); err != nil {
 		return nil, err
 	}
 	if resp.Code != 0 {
@@ -527,6 +532,52 @@ func (c *Client) get(rawURL string, result interface{}) error {
 		return err
 	}
 	// 检测 API 响应码中的风控信号
+	return checkRateLimitCode(body)
+}
+
+// getWithHeaders 发起 GET 请求，支持自定义 Referer 和 Origin（供 WBI 请求使用）
+func (c *Client) getWithHeaders(rawURL, referer, origin string, result interface{}) error {
+	if c.limiter != nil {
+		c.limiter.Acquire()
+	}
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", c.ua)
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	} else {
+		req.Header.Set("Referer", "https://www.bilibili.com")
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	c.mu.RLock()
+	cookie := c.cookie
+	c.mu.RUnlock()
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 412 {
+		log.Printf("[WARN] B站风控: HTTP 412 请求过于频繁, url=%s", rawURL)
+		return NewInvalidStatusCode(412, "请求过于频繁")
+	}
+	if resp.StatusCode != 200 {
+		return NewInvalidStatusCode(resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
+	}
+	if err := json.Unmarshal(body, result); err != nil {
+		return err
+	}
 	return checkRateLimitCode(body)
 }
 

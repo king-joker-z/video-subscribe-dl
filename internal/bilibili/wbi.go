@@ -2,9 +2,12 @@ package bilibili
 
 import (
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -180,15 +183,87 @@ func sanitizeWbiValue(s string) string {
 	return result
 }
 
-// getWbi 发起带 WBI 签名的 GET 请求
-func (c *Client) getWbi(baseURL string, params url.Values, result interface{}) error {
-	signed, err := c.signWbi(params)
-	if err != nil {
-		// WBI 签名失败，尝试不签名直接请求
-		return c.get(baseURL+"?"+params.Encode(), result)
+// injectDmImgParams 注入浏览器画布/WebGL 指纹参数（B站风控第二层检测）
+// 参考: https://github.com/SocialSisterYi/bilibili-API-collect 及 yt-dlp/RSSHub 实现
+func injectDmImgParams(params url.Values) {
+	// dm_img_list: 鼠标轨迹，空数组即可（B站只校验字段存在）
+	params.Set("dm_img_list", "[]")
+
+	// dm_img_str / dm_cover_img_str: WebGL VERSION / UNMASKED_RENDERER 的 base64
+	// 使用随机化长度的字符串，更接近真实浏览器行为
+	params.Set("dm_img_str", randomBase64Str(24, 48))
+	params.Set("dm_cover_img_str", randomBase64Str(32, 80))
+
+	// dm_img_inter: 交互时序数据，使用随机化的合理值
+	wh1 := 1200 + rand.Intn(4000)
+	wh2 := 800 + rand.Intn(3000)
+	wh3 := 24 + rand.Intn(8)
+	of1 := rand.Intn(600)
+	of2 := rand.Intn(400)
+	of3 := rand.Intn(400)
+	params.Set("dm_img_inter", fmt.Sprintf(`{"ds":[],"wh":[%d,%d,%d],"of":[%d,%d,%d]}`,
+		wh1, wh2, wh3, of1, of2, of3))
+}
+
+// randomBase64Str 生成指定长度范围内的随机 base64 字符串（模拟浏览器 WebGL 指纹）
+func randomBase64Str(minLen, maxLen int) string {
+	n := minLen + rand.Intn(maxLen-minLen+1)
+	b := make([]byte, n)
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 /()"
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
 	}
-	// get() 内部已包含风控检测（-352/-401/-412 → ErrRateLimited）
-	return c.get(baseURL+"?"+signed.Encode(), result)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// getWbi 发起带 WBI 签名的 GET 请求
+// 内置 -352 风控重试：收到风控信号时清除 WBI 缓存，等待后重试一次
+func (c *Client) getWbi(baseURL string, params url.Values, result interface{}) error {
+	return c.getWbiWithReferer(baseURL, params, result, "", "")
+}
+
+// getWbiWithReferer 发起带 WBI 签名的 GET 请求，支持指定 Referer 和 Origin
+func (c *Client) getWbiWithReferer(baseURL string, params url.Values, result interface{}, referer, origin string) error {
+	const maxAttempts = 2
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// 每次尝试都重新注入 dm_img_* 参数（随机值）
+		p := cloneValues(params)
+		injectDmImgParams(p)
+
+		signed, err := c.signWbi(p)
+		if err != nil {
+			// WBI 签名失败，尝试不签名直接请求（最后手段）
+			return c.getWithHeaders(baseURL+"?"+p.Encode(), referer, origin, result)
+		}
+
+		reqErr := c.getWithHeaders(baseURL+"?"+signed.Encode(), referer, origin, result)
+		if reqErr == nil {
+			return nil
+		}
+
+		// 收到风控错误且还有重试机会：清除 WBI 缓存，等待后重试
+		if IsRiskControl(reqErr) && attempt < maxAttempts {
+			log.Printf("[wbi] -352 风控，清除 WBI 缓存后重试 (attempt=%d, url=%s)", attempt, baseURL)
+			ClearWbiCache()
+			time.Sleep(time.Duration(2000+rand.Intn(1000)) * time.Millisecond)
+			continue
+		}
+
+		return reqErr
+	}
+	return fmt.Errorf("getWbi: unreachable")
+}
+
+// cloneValues 深拷贝 url.Values，避免重试时修改原始参数
+func cloneValues(src url.Values) url.Values {
+	dst := make(url.Values, len(src))
+	for k, vs := range src {
+		cp := make([]string, len(vs))
+		copy(cp, vs)
+		dst[k] = cp
+	}
+	return dst
 }
 
 // ClearWbiCache 清除 WBI 签名密钥缓存，强制下次请求重新获取

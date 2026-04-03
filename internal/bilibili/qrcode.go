@@ -123,13 +123,17 @@ func PollQRCode(httpClient *http.Client, qrcodeKey string) (*QRCodePollResult, e
 			return nil, fmt.Errorf("login succeeded but no SESSDATA in Set-Cookie")
 		}
 
-		// 获取 buvid3
-		buvid3, err := GetBuvid3(httpClient)
-		if err != nil {
-			// 不阻塞登录，记录警告
-			fmt.Printf("[qrcode] Warning: get buvid3 failed: %v\n", err)
+		// 获取 buvid3/buvid4 并激活
+		buvid3, buvid4, buvidErr := GetBuvidPair(httpClient)
+		if buvidErr != nil {
+			fmt.Printf("[qrcode] Warning: get buvid pair failed: %v\n", buvidErr)
 		} else {
 			cred.Buvid3 = buvid3
+			cred.Buvid4 = buvid4
+			// 激活 buvid（非阻塞，失败不影响登录）
+			if actErr := ActivateBuvid(httpClient, buvid3, buvid4); actErr != nil {
+				fmt.Printf("[qrcode] Warning: activate buvid failed: %v\n", actErr)
+			}
 		}
 
 		pollResult.Credential = cred
