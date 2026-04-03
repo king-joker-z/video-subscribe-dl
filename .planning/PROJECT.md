@@ -11,7 +11,7 @@
 - Phase 1.1 Auth Hardening ✅ | Phase 1.2 PH Scheduler Reliability ✅ | Phase 1.3 Performance & Resilience ✅
 
 **Milestone 2 — Quality & UX（体验提升）**
-- Web UI 体验优化（P1 前端 Bug 修复 + 交互改进）
+- Web UI 体验优化（P1 前端 Bug 修复 + 交互改进）— Phase 2.1 ✅ 2026-04-03
 - 可观测性提升（更好的指标与日志）
 - 测试覆盖率显著提升
 
