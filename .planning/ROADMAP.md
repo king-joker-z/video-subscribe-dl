@@ -45,7 +45,7 @@ long-lived auth token is never exposed in WebSocket URLs or server logs.
 
 ---
 
-### Phase 1.2 — PH Scheduler Reliability
+### Phase 1.2 — PH Scheduler Reliability ✅ Complete (2026-04-02)
 
 **Goal:** Pornhub scheduler goroutine never hangs permanently; page scans are cancellable when
 the scheduler is stopped.

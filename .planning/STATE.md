@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-04-02T12:03:51.251Z"
+status: Executing Phase 01.3
+last_updated: "2026-04-02T03:25:00Z"
 progress:
-  total_phases: 1
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 2
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # Project State — VSD v3.0
@@ -19,15 +19,15 @@ progress:
 
 ## Current Phase
 
-**Phase 1.2 — PH Scheduler Reliability** (next to execute)
+**Phase 1.3 — Performance & Resilience** (next to execute)
 
 ## Phases
 
 | Phase | Title | Status |
 |-------|-------|--------|
 | 1.1 | Auth Hardening | ✅ Complete (2026-04-02) |
-| 1.2 | PH Scheduler Reliability | 📋 Planned |
-| 1.3 | Performance & Resilience | ⬜ Pending |
+| 1.2 | PH Scheduler Reliability | ✅ Complete (2026-04-02) |
+| 1.3 | Performance & Resilience | 📋 Planned |
 | 2.1 | Frontend Bug Fixes | ⬜ Pending |
 | 2.2 | Observability | ⬜ Pending |
 | 2.3 | Test Coverage | ⬜ Pending |
@@ -50,12 +50,15 @@ progress:
 - Nonce store: in-process map[string]time.Time (not DB) — ephemeral, 60s TTL
 - ?token= query-param removed as dead code from both middleware files
 - api/middleware.go AuthMiddleware cleaned but not wired (consolidation deferred)
+- ClientOptions zero-value = package default pattern (Phase 1.2) ✅
+- context.Context threading from scheduler Stop() through HTTP fetch loop (Phase 1.2) ✅
+- getWithCookie/getJSON left without ctx (tv-mode/cookie paths, not pagination) ✅
 
 ## Session Continuity
 
-- Stopped at: Completed Phase 1.1-auth-hardening PLAN.md
+- Stopped at: Completed Phase 1.2-ph-scheduler-reliability PLAN.md
 - Resume file: None
-- Last executed commits: e5babb6 → cdec724 (T1–T8)
+- Last executed commits: 3933a64 → fba93cd (T3, T1, T2, T4, T5)
 
 ## Created
 
@@ -63,4 +66,4 @@ progress:
 
 ## Last Updated
 
-2026-04-02 (Phase 1.1 complete)
+2026-04-02 (Phase 1.2 complete)
