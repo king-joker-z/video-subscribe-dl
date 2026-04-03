@@ -350,6 +350,16 @@ func (c *Credential) Refresh(httpClient *http.Client) (*Credential, error) {
 	}
 
 	log.Printf("[credential] Cookie 刷新成功 (new refresh_token=%s...)", truncateStr(newCred.ACTimeValue, 8))
+
+	// Step 5: 重新激活 buvid
+	// Cookie 刷新后服务端 session 已更换，需重新激活设备指纹，否则新 session 与 buvid 不匹配会触发 -352 风控
+	if newCred.Buvid3 != "" {
+		log.Printf("[credential] 重新激活 buvid...")
+		if activateErr := ActivateBuvid(httpClient, newCred.Buvid3, newCred.Buvid4); activateErr != nil {
+			log.Printf("[credential] buvid 激活失败（非致命）: %v", activateErr)
+		}
+	}
+
 	return newCred, nil
 }
 
