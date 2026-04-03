@@ -57,7 +57,7 @@ func (s *PHScheduler) CheckPHModel(src db.Source) {
 	var videos []pornhub.Video
 	var fetchErr error
 	for attempt := 1; attempt <= 3; attempt++ {
-		videos, fetchErr = client.GetModelVideos(src.URL)
+		videos, fetchErr = client.GetModelVideos(s.rootCtx, src.URL)
 		if fetchErr == nil {
 			break
 		}
@@ -199,7 +199,7 @@ func (s *PHScheduler) FullScanPHModel(src db.Source) {
 
 	log.Printf("[phscheduler·full-scan] %s: 开始全量补漏扫描", uploaderName)
 
-	videos, err := client.GetModelVideos(src.URL)
+	videos, err := client.GetModelVideos(s.rootCtx, src.URL)
 	if err != nil {
 		log.Printf("[phscheduler·full-scan] 获取视频列表失败: %v", err)
 		return

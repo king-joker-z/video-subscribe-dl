@@ -1,6 +1,7 @@
 package pornhub
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,10 +24,25 @@ const phMaxHTMLBodySize = 10 * 1024 * 1024
 // pageDelay GetModelVideos 翻页间延迟，避免被限流 [FIXED: P1-10]
 const pageDelay = 2 * time.Second
 
+// maxPageHardLimit GetModelVideos 翻页绝对上限，防死循环
+const maxPageHardLimit = 1000
+
 const (
 	phBaseURL   = "https://www.pornhub.com"
 	phUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+// ClientOptions configures optional Client behaviour.
+// The zero value of each field means "use the package default".
+type ClientOptions struct {
+	// PageDelay overrides the inter-page delay (default: 2 s).
+	// Set to a small value in tests to avoid slow scans.
+	PageDelay time.Duration
+	// MaxPageHardLimit overrides the maximum pages to scan (default: 1000).
+	MaxPageHardLimit int
+	// JSEvalTimeout overrides the goja JS eval timeout (default: 15 s).
+	JSEvalTimeout time.Duration
+}
 
 var (
 	// flashvarsVarRe 按优先级依次匹配多种已知的 PH 播放器变量名格式：
@@ -64,6 +80,12 @@ type Client struct {
 	httpClient *http.Client
 	mu         sync.RWMutex // [FIXED: PH-2] 保护 cookie 并发读写
 	cookie     string
+
+	// configurable overrides (zero = use package-level default)
+	jsEvalTimeout time.Duration
+	pageDelayCfg  time.Duration
+	maxPageCfg    int
+	sleepFn       func(time.Duration) // reserved for future test injection
 }
 
 // NewClient 创建 Client，自动读取 HTTPS_PROXY / HTTP_PROXY 代理
@@ -93,10 +115,58 @@ func NewClient(cookie ...string) *Client {
 			Timeout:   30 * time.Second,
 		},
 	}
+	c.sleepFn = time.Sleep // default; tests may override via NewClientWithOptions
 	if len(cookie) > 0 {
 		c.cookie = strings.TrimSpace(cookie[0])
 	}
 	return c
+}
+
+// NewClientWithOptions creates a Client with custom options.
+// Use this in tests to set short timeouts and delays:
+//
+//	client := pornhub.NewClientWithOptions(pornhub.ClientOptions{
+//	    JSEvalTimeout:    50 * time.Millisecond,
+//	    PageDelay:        0,
+//	    MaxPageHardLimit: 5,
+//	})
+func NewClientWithOptions(opts ClientOptions, cookie ...string) *Client {
+	c := NewClient(cookie...)
+	if opts.JSEvalTimeout > 0 {
+		c.jsEvalTimeout = opts.JSEvalTimeout
+	}
+	if opts.PageDelay > 0 {
+		c.pageDelayCfg = opts.PageDelay
+	}
+	if opts.MaxPageHardLimit > 0 {
+		c.maxPageCfg = opts.MaxPageHardLimit
+	}
+	return c
+}
+
+// evalTimeout returns the effective goja JS eval timeout.
+// Zero value (not set via ClientOptions) defaults to 15 s.
+func (c *Client) evalTimeout() time.Duration {
+	if c.jsEvalTimeout > 0 {
+		return c.jsEvalTimeout
+	}
+	return 15 * time.Second
+}
+
+// effectivePageDelay returns the inter-page delay, honouring ClientOptions.PageDelay.
+func (c *Client) effectivePageDelay() time.Duration {
+	if c.pageDelayCfg > 0 {
+		return c.pageDelayCfg
+	}
+	return pageDelay
+}
+
+// effectiveMaxPage returns the hard page limit, honouring ClientOptions.MaxPageHardLimit.
+func (c *Client) effectiveMaxPage() int {
+	if c.maxPageCfg > 0 {
+		return c.maxPageCfg
+	}
+	return maxPageHardLimit
 }
 
 // SetCookie 设置用户 Cookie
@@ -146,7 +216,7 @@ func (c *Client) Close() {
 // GetVideoThumbnail 从视频详情页提取封面图 URL（og:image meta 标签）
 // 用于补充历史遗留的空 thumbnail 记录
 func (c *Client) GetVideoThumbnail(videoPageURL string) string {
-	body, status, err := c.get(videoPageURL)
+	body, status, err := c.get(context.Background(), videoPageURL)
 	if err != nil || status != 200 {
 		return ""
 	}
@@ -179,8 +249,8 @@ func (c *Client) GetVideoThumbnail(videoPageURL string) string {
 }
 
 // get 发送 GET 请求，返回响应体字节
-func (c *Client) get(rawURL string) ([]byte, int, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+func (c *Client) get(ctx context.Context, rawURL string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -258,7 +328,7 @@ func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
 	}
 	cleanURL = strings.TrimRight(cleanURL, "/")
 
-	body, status, err := c.get(cleanURL)
+	body, status, err := c.get(context.Background(), cleanURL)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +442,7 @@ func validateModelPage(doc *html.Node, modelBaseURL string) error {
 }
 
 // GetModelVideos 获取博主视频列表（全量翻页）
-func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
+func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, error) {
 	// 规范化：去掉 query string、末尾斜杠、/videos 后缀
 	if idx := strings.IndexByte(modelURL, '?'); idx != -1 {
 		modelURL = modelURL[:idx]
@@ -381,7 +451,7 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 	videosURL := baseURL + "/videos"
 
 	// 第一页：同时获取最大页数
-	body, status, err := c.get(videosURL)
+	body, status, err := c.get(ctx, videosURL)
 	if err != nil {
 		return nil, err
 	}
@@ -408,7 +478,6 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 
 	// 提示页数（仅用于日志参考，不作为翻页上限）
 	hintMaxPage := extractMaxPage(doc)
-	const maxPageHardLimit = 1000 // 防止死循环的兜底上限
 
 	var allVideos []Video
 
@@ -418,11 +487,26 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 
 	log.Printf("[pornhub·client] GetModelVideos: %s, 分页提示=%d页（实际采用探测翻页）", modelURL, hintMaxPage)
 
+	// context check before entering the pagination loop
+	select {
+	case <-ctx.Done():
+		log.Printf("[pornhub·client] GetModelVideos: 上下文已取消，跳过翻页")
+		return allVideos, ctx.Err()
+	default:
+	}
+
 	// 探测翻页：不依赖 extractMaxPage，只要当页有视频就继续翻
 	// 避免 Pornhub 分页 UI 只展示临近页码导致总页数被低估
-	for page := 2; page <= maxPageHardLimit; page++ {
+	for page := 2; page <= c.effectiveMaxPage(); page++ {
+		// context check at top of each iteration
+		select {
+		case <-ctx.Done():
+			log.Printf("[pornhub·client] GetModelVideos: 上下文已取消，停止翻页 (page=%d)", page)
+			return allVideos, ctx.Err()
+		default:
+		}
 		pageURL := fmt.Sprintf("%s?page=%d", videosURL, page)
-		pageBody, pageStatus, pageErr := c.get(pageURL)
+		pageBody, pageStatus, pageErr := c.get(ctx, pageURL)
 		if pageErr != nil {
 			log.Printf("[pornhub·client] 获取第 %d 页失败: %v", page, pageErr)
 			break
@@ -451,7 +535,13 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 		log.Printf("[pornhub·client] 第 %d 页获取 %d 条，累计 %d 条", page, len(pageVideos), len(allVideos))
 
 		// [FIXED: P1-10] 提取页间延迟为具名常量，便于统一调整反爬策略
-		time.Sleep(pageDelay)
+		// ctx-aware sleep: exit immediately if context is cancelled during delay
+		select {
+		case <-ctx.Done():
+			log.Printf("[pornhub·client] GetModelVideos: 上下文已取消（延迟中）, 停止翻页 (page=%d)", page)
+			return allVideos, ctx.Err()
+		case <-time.After(c.effectivePageDelay()):
+		}
 	}
 
 	return allVideos, nil
@@ -646,7 +736,7 @@ func extractVideoFromContainer(n *html.Node) Video {
 // GetVideoURL 获取视频 MP4 直链
 // 流程：GET 视频页面 → 提取 #player script → goja eval flashvars → 解析 mediaDefinitions
 func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
-	body, status, err := c.get(videoPageURL)
+	body, status, err := c.get(context.Background(), videoPageURL)
 	if err != nil {
 		return "", err
 	}
@@ -784,9 +874,10 @@ var clearInterval = function(){};
 			if err := json.Unmarshal([]byte(res.jsonStr), &fv); err != nil {
 				return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(c.evalTimeout()):
 			vm.Interrupt("js eval timeout")
-			return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
+			log.Printf("[pornhub·client] WARN: goja JS eval timeout (>%v), url=%s", c.evalTimeout(), videoPageURL)
+			return "", fmt.Errorf("%w: js eval timeout after %v", ErrParseFailed, c.evalTimeout())
 		}
 	} else {
 		// 兜底：直接从 script 文本中提取 mediaDefinitions JSON 数组
