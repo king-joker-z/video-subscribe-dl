@@ -509,6 +509,11 @@ func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, 
 		pageBody, pageStatus, pageErr := c.get(ctx, pageURL)
 		if pageErr != nil {
 			log.Printf("[pornhub·client] 获取第 %d 页失败: %v", page, pageErr)
+			// If the error was caused by context cancellation, propagate it so
+			// callers can distinguish cancellation from ordinary network errors.
+			if ctx.Err() != nil {
+				return allVideos, ctx.Err()
+			}
 			break
 		}
 		if pageStatus == 429 || pageStatus == 503 {
