@@ -74,7 +74,7 @@ the scheduler is stopped.
 
 ---
 
-### Phase 1.3 — Performance & Resilience
+### Phase 1.3 — Performance & Resilience ✅ Complete (2026-04-03)
 
 **Goal:** Dashboard stats load in a single DB round-trip; Douyin `a_bogus` signing never deadlocks
 under pool exhaustion.
