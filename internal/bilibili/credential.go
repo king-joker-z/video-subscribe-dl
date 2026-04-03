@@ -355,7 +355,7 @@ func (c *Credential) Refresh(httpClient *http.Client) (*Credential, error) {
 	// Cookie 刷新后服务端 session 已更换，需重新激活设备指纹，否则新 session 与 buvid 不匹配会触发 -352 风控
 	if newCred.Buvid3 != "" {
 		log.Printf("[credential] 重新激活 buvid...")
-		if activateErr := ActivateBuvid(httpClient, newCred.Buvid3, newCred.Buvid4, newCred.Sessdata); activateErr != nil {
+		if activateErr := ActivateBuvid(httpClient, newCred.Buvid3, newCred.Buvid4); activateErr != nil {
 			log.Printf("[credential] buvid 激活失败（非致命）: %v", activateErr)
 		}
 	}
@@ -441,9 +441,9 @@ func GetBuvid3(httpClient *http.Client) (string, error) {
 
 // ActivateBuvid 通过 ExClimbWuzhi 接口激活 buvid3/buvid4
 // B站风控要求：从 SPI 拿到的 buvid 必须经过此步骤"激活"，否则服务端不认
-// sessdata 可选：登录态下激活可将 buvid 与 session 绑定，防止 -352 风控
+// 注意：此接口必须在未登录态调用（仅携带 buvid 相关 cookie），携带 SESSDATA 会返回 130212 错误
 // 参考: https://github.com/Nemo2011/bilibili-api (network.py)
-func ActivateBuvid(httpClient *http.Client, buvid3, buvid4, sessdata string) error {
+func ActivateBuvid(httpClient *http.Client, buvid3, buvid4 string) error {
 	// 构造浏览器指纹 payload
 	payload := map[string]interface{}{
 		"3064":   1,
@@ -510,13 +510,10 @@ func ActivateBuvid(httpClient *http.Client, buvid3, buvid4, sessdata string) err
 	req.Header.Set("User-Agent", randUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 
-	// 构造 Cookie：buvid3/buvid4 必须携带，登录态下同时携带 SESSDATA 使激活与 session 绑定
+	// 构造 Cookie：仅携带 buvid3/buvid4，不能带 SESSDATA（登录态会被 B站拒绝，返回 130212）
 	cookieParts := []string{"buvid3=" + buvid3}
 	if buvid4 != "" {
 		cookieParts = append(cookieParts, "buvid4="+buvid4)
-	}
-	if sessdata != "" {
-		cookieParts = append(cookieParts, "SESSDATA="+sessdata)
 	}
 	req.Header.Set("Cookie", strings.Join(cookieParts, "; "))
 
