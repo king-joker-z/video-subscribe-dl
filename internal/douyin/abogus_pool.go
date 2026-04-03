@@ -2,6 +2,7 @@ package douyin
 
 import (
 	_ "embed"
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -35,6 +36,10 @@ const (
 	abogusPoolSize = 4   // 默认池大小
 	abogusMaxUses  = 500 // 每个 VM 最大使用次数后丢弃重建
 )
+
+// abogusPoolGetTimeout is the maximum time to wait for an available VM slot.
+// [FIXED: P1-3] independent constant (not shared with signPoolGetTimeout)
+const abogusPoolGetTimeout = 10 * time.Second
 
 // abogusPoolHolder 用 atomic.Value 持有 *abogusPool，支持并发安全的热更新
 // [FIXED: D-3] 用 atomic.Value 替代 sync.Once+plain var，消除并发赋值 data race
@@ -128,9 +133,17 @@ func (ap *abogusPool) newEntry() (*abogusEntry, error) {
 // sign 执行 a_bogus 签名
 // 入参: url query string (不含 ?) + user agent
 // 出参: a_bogus 签名值
+// [FIXED: P1-3] 从裸 channel receive 改为带超时的 select，避免池耗尽时永久阻塞
 func (ap *abogusPool) sign(queryStr, userAgent string) (string, error) {
-	// 从池中获取 VM
-	entry := <-ap.pool
+	// 从池中获取 VM（带超时，防止 VM 批量失败时永久阻塞）
+	ctx, cancel := context.WithTimeout(context.Background(), abogusPoolGetTimeout)
+	defer cancel()
+	var entry *abogusEntry
+	select {
+	case entry = <-ap.pool:
+	case <-ctx.Done():
+		return "", fmt.Errorf("abogus pool: timed out waiting for available VM (pool may be exhausted)")
+	}
 
 	// 对参数进行转义，防止 JS 注入（单引号）
 	safeQuery := escapeJSString(queryStr)

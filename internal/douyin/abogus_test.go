@@ -1,9 +1,11 @@
 package douyin
 
 import (
-	"sync"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestABogusPoolInit(t *testing.T) {
@@ -201,5 +203,41 @@ func TestEscapeJSString(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("escapeJSString(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// TestABogusPoolTimeout verifies that sign() returns an error containing
+// "timed out" within abogusPoolGetTimeout + a 2 s buffer when the pool is
+// fully drained (no entry is ever returned).
+// [FIXED: P1-3] tests REQ-REL-3 acceptance criterion
+func TestABogusPoolTimeout(t *testing.T) {
+	resetABogusPool()
+	defer resetABogusPool()
+
+	// Create a size=1 pool — easy to drain completely
+	pool, err := newABogusPool(1, abogusMaxUses)
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+
+	// Drain the pool — take the only entry and never return it
+	entry := <-pool.pool
+	_ = entry // intentionally held; simulates pool exhaustion
+
+	// sign() must time out and return an error
+	start := time.Now()
+	_, err = pool.sign("q=1", "ua/test")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error from sign(), got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("expected error to contain 'timed out', got: %v", err)
+	}
+	// Must complete within abogusPoolGetTimeout (10 s) + 2 s buffer
+	const maxWait = 12 * time.Second
+	if elapsed > maxWait {
+		t.Errorf("sign() took %v; expected ≤ %v", elapsed, maxWait)
 	}
 }
