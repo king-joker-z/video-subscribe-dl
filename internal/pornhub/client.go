@@ -1,6 +1,7 @@
 package pornhub
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -215,7 +216,7 @@ func (c *Client) Close() {
 // GetVideoThumbnail 从视频详情页提取封面图 URL（og:image meta 标签）
 // 用于补充历史遗留的空 thumbnail 记录
 func (c *Client) GetVideoThumbnail(videoPageURL string) string {
-	body, status, err := c.get(videoPageURL)
+	body, status, err := c.get(context.Background(), videoPageURL)
 	if err != nil || status != 200 {
 		return ""
 	}
@@ -248,8 +249,8 @@ func (c *Client) GetVideoThumbnail(videoPageURL string) string {
 }
 
 // get 发送 GET 请求，返回响应体字节
-func (c *Client) get(rawURL string) ([]byte, int, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+func (c *Client) get(ctx context.Context, rawURL string) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -327,7 +328,7 @@ func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
 	}
 	cleanURL = strings.TrimRight(cleanURL, "/")
 
-	body, status, err := c.get(cleanURL)
+	body, status, err := c.get(context.Background(), cleanURL)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +442,7 @@ func validateModelPage(doc *html.Node, modelBaseURL string) error {
 }
 
 // GetModelVideos 获取博主视频列表（全量翻页）
-func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
+func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, error) {
 	// 规范化：去掉 query string、末尾斜杠、/videos 后缀
 	if idx := strings.IndexByte(modelURL, '?'); idx != -1 {
 		modelURL = modelURL[:idx]
@@ -450,7 +451,7 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 	videosURL := baseURL + "/videos"
 
 	// 第一页：同时获取最大页数
-	body, status, err := c.get(videosURL)
+	body, status, err := c.get(ctx, videosURL)
 	if err != nil {
 		return nil, err
 	}
@@ -486,11 +487,26 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 
 	log.Printf("[pornhub·client] GetModelVideos: %s, 分页提示=%d页（实际采用探测翻页）", modelURL, hintMaxPage)
 
+	// context check before entering the pagination loop
+	select {
+	case <-ctx.Done():
+		log.Printf("[pornhub·client] GetModelVideos: 上下文已取消，跳过翻页")
+		return allVideos, ctx.Err()
+	default:
+	}
+
 	// 探测翻页：不依赖 extractMaxPage，只要当页有视频就继续翻
 	// 避免 Pornhub 分页 UI 只展示临近页码导致总页数被低估
-	for page := 2; page <= maxPageHardLimit; page++ {
+	for page := 2; page <= c.effectiveMaxPage(); page++ {
+		// context check at top of each iteration
+		select {
+		case <-ctx.Done():
+			log.Printf("[pornhub·client] GetModelVideos: 上下文已取消，停止翻页 (page=%d)", page)
+			return allVideos, ctx.Err()
+		default:
+		}
 		pageURL := fmt.Sprintf("%s?page=%d", videosURL, page)
-		pageBody, pageStatus, pageErr := c.get(pageURL)
+		pageBody, pageStatus, pageErr := c.get(ctx, pageURL)
 		if pageErr != nil {
 			log.Printf("[pornhub·client] 获取第 %d 页失败: %v", page, pageErr)
 			break
@@ -519,7 +535,13 @@ func (c *Client) GetModelVideos(modelURL string) ([]Video, error) {
 		log.Printf("[pornhub·client] 第 %d 页获取 %d 条，累计 %d 条", page, len(pageVideos), len(allVideos))
 
 		// [FIXED: P1-10] 提取页间延迟为具名常量，便于统一调整反爬策略
-		time.Sleep(pageDelay)
+		// ctx-aware sleep: exit immediately if context is cancelled during delay
+		select {
+		case <-ctx.Done():
+			log.Printf("[pornhub·client] GetModelVideos: 上下文已取消（延迟中）, 停止翻页 (page=%d)", page)
+			return allVideos, ctx.Err()
+		case <-time.After(c.effectivePageDelay()):
+		}
 	}
 
 	return allVideos, nil
@@ -714,7 +736,7 @@ func extractVideoFromContainer(n *html.Node) Video {
 // GetVideoURL 获取视频 MP4 直链
 // 流程：GET 视频页面 → 提取 #player script → goja eval flashvars → 解析 mediaDefinitions
 func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
-	body, status, err := c.get(videoPageURL)
+	body, status, err := c.get(context.Background(), videoPageURL)
 	if err != nil {
 		return "", err
 	}
