@@ -104,6 +104,7 @@ export function VideosPage({ params = {} } = {}) {
           return { ...v, ...patch };
         }));
         // [FIXED: P1-5] 完成/失败后延迟刷新，同步 file_path、detail_status 等后端字段
+        // [FIXED: P1-8] setTimeout(load, 1000) 同时覆盖 P1-8：completed 事件后完整刷新列表，同步 file_path、thumb_path 等字段
         setTimeout(load, 1000);
       } else {
         setTimeout(load, 500);
