@@ -240,6 +240,7 @@ func (rt *Router) Register(mux *http.ServeMux) {
 		rt.videos.HandleDetectCharge(w, r)
 	})
 	mux.HandleFunc("/api/videos/repair-thumbs", rt.videos.HandleRepairThumbs)
+	mux.HandleFunc("/api/videos/fix-stale-failed", rt.videos.HandleFixStaleFailed)
 	mux.HandleFunc("/api/videos/", rt.videos.HandleByID)
 	mux.HandleFunc("/api/thumb/", rt.videos.HandleThumb)
 

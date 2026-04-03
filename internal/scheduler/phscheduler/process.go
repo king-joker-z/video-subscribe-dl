@@ -85,8 +85,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		case pornhub.ErrKindParseFailed:
 			// 页面解析失败（竖屏新格式/embed外链等），标 failed 留人工排查
 			log.Printf("[phscheduler] Video %s parse failed, marking failed for manual review: %v", dl.VideoID, err)
-			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
-			s.db.IncrementRetryCount(dl.ID, err.Error())
+			s.markFailed(dl, err.Error())
 			return
 		case pornhub.ErrKindRateLimit:
 			reason := fmt.Sprintf("PH 限流触发: %v", err)
@@ -96,8 +95,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 				s.notifier.Send(notify.EventRateLimited, "Pornhub 限流触发",
 					"Pornhub 下载已暂停，请在 Web UI 手动恢复\n错误: "+err.Error())
 			}
-			s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
-			s.db.IncrementRetryCount(dl.ID, err.Error())
+			s.markFailed(dl, err.Error())
 			return
 		default: // ErrKindTransient：临时错误，继续重试
 		}
@@ -113,8 +111,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	}
 	if err != nil {
 		log.Printf("[phscheduler] GetVideoURL failed after retries for %s: %v", dl.VideoID, err)
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
-		s.db.IncrementRetryCount(dl.ID, err.Error())
+		s.markFailed(dl, err.Error())
 		return
 	}
 
@@ -147,8 +144,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	videoDir := pornhub.BuildVideoDir(s.downloadDir, srcName, title, dl.VideoID)
 	if err := os.MkdirAll(videoDir, 0755); err != nil {
 		log.Printf("[phscheduler] mkdir failed for %s: %v", videoDir, err)
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "mkdir failed: "+err.Error())
-		s.db.IncrementRetryCount(dl.ID, "mkdir failed: "+err.Error())
+		s.markFailed(dl, "mkdir failed: "+err.Error())
 		return
 	}
 
@@ -217,8 +213,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		if removeErr := os.Remove(tmpPath); removeErr == nil {
 			log.Printf("[phscheduler] Cleaned up stale tmp file: %s", tmpPath)
 		}
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, err.Error())
-		s.db.IncrementRetryCount(dl.ID, err.Error())
+		s.markFailed(dl, err.Error())
 		return
 	}
 
@@ -449,16 +444,28 @@ func captureThumbFromVideo(videoPath, destPath string) error {
 }
 
 // markFailed 标记下载失败并设置退避重试时间
-// 若 retry_count+1 >= 3，升级为 permanent_failed，不再自动重试
+// 从 DB 读取最新的 retry_count（避免并发快照问题），若 retry_count+1 >= 3 升级为 permanent_failed
 func (s *PHScheduler) markFailed(dl db.Download, errMsg string) {
-	newCount := dl.RetryCount + 1
+	// 从 DB 读最新快照，避免并发 goroutine 使用过期的 dl.RetryCount
+	current, err := s.db.GetDownload(dl.ID)
+	if err != nil || current == nil {
+		// 获取失败则降级：直接标 failed，下次 retry-worker 会补调 SetNextRetryAt
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, errMsg)
+		return
+	}
+	newCount := current.RetryCount + 1
 	if newCount >= 3 {
 		s.db.UpdateDownloadStatus(dl.ID, "permanent_failed", "", 0, errMsg)
 		log.Printf("[phscheduler] Video %s marked permanent_failed after %d retries", dl.VideoID, newCount)
 	} else {
 		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, errMsg)
 		s.db.IncrementRetryCount(dl.ID, errMsg)
-		s.db.SetNextRetryAt(dl.ID, dl.RetryCount)
-		log.Printf("[phscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", dl.VideoID, []int{15, 30, 60}[dl.RetryCount], newCount)
+		s.db.SetNextRetryAt(dl.ID, current.RetryCount)
+		delays := []int{15, 30, 60}
+		delay := 60
+		if current.RetryCount < len(delays) {
+			delay = delays[current.RetryCount]
+		}
+		log.Printf("[phscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", dl.VideoID, delay, newCount)
 	}
 }

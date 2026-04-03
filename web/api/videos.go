@@ -620,6 +620,57 @@ func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// POST /api/videos/fix-stale-failed — 修复历史脏数据：next_retry_at=0 的 PH failed 记录
+// 无 SSH 时通过此 API 在线修复。幂等操作，可重复调用。
+func (h *VideosHandler) HandleFixStaleFailed(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	now := time.Now().Unix()
+
+	// Step 1：retry_count >= 3 的旧 failed 记录升级为 permanent_failed（不再自动重试）
+	res1, err := h.db.Exec(`
+		UPDATE downloads
+		SET status = 'permanent_failed',
+		    error_message = COALESCE(error_message, '') || ' [auto-upgraded by fix-stale-failed]'
+		WHERE status = 'failed'
+		  AND COALESCE(retry_count, 0) >= 3
+		  AND source_id IN (SELECT id FROM sources WHERE type = 'pornhub')
+	`)
+	var upgraded int64
+	if err == nil {
+		upgraded, _ = res1.RowsAffected()
+	} else {
+		log.Printf("[fix-stale-failed] upgrade step error: %v", err)
+	}
+
+	// Step 2：retry_count < 3 且 next_retry_at=0 的记录设置 next_retry_at=now+15min
+	// （让它们在 15 分钟后才被 retry-worker 捞到，而不是立即再次投递）
+	nextRetry := now + 15*60
+	res2, err2 := h.db.Exec(`
+		UPDATE downloads
+		SET next_retry_at = ?
+		WHERE status = 'failed'
+		  AND COALESCE(retry_count, 0) < 3
+		  AND COALESCE(next_retry_at, 0) = 0
+		  AND source_id IN (SELECT id FROM sources WHERE type = 'pornhub')
+	`, nextRetry)
+	var scheduled int64
+	if err2 == nil {
+		scheduled, _ = res2.RowsAffected()
+	} else {
+		log.Printf("[fix-stale-failed] schedule step error: %v", err2)
+	}
+
+	log.Printf("[fix-stale-failed] done: upgraded=%d permanent_failed, scheduled=%d for retry", upgraded, scheduled)
+	apiOK(w, map[string]interface{}{
+		"upgraded":  upgraded,
+		"scheduled": scheduled,
+		"message":   fmt.Sprintf("已修复：%d 条升级为 permanent_failed，%d 条设置了下次重试时间", upgraded, scheduled),
+	})
+}
+
 // POST /api/videos/repair-thumbs — 历史封面补全
 func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Request) {
 	if !MethodGuard("POST", w, r) {
