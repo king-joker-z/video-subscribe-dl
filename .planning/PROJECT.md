@@ -5,9 +5,10 @@
 支持 Bilibili、抖音、Pornhub 三平台自动订阅与下载，提供 Web UI 管理界面。
 
 ## v3.0 Goals
-**Milestone 1 — Stability & Security（稳定化）**
+**Milestone 1 — Stability & Security（稳定化）**✅ 2026-04-03
 - 修复所有 Critical/High 安全与可靠性问题
 - 解决调度器挂死、认证缺失、性能瓶颈
+- Phase 1.1 Auth Hardening ✅ | Phase 1.2 PH Scheduler Reliability ✅ | Phase 1.3 Performance & Resilience ✅
 
 **Milestone 2 — Quality & UX（体验提升）**
 - Web UI 体验优化（P1 前端 Bug 修复 + 交互改进）
