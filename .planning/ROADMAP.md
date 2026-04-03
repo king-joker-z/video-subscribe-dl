@@ -110,7 +110,7 @@ errors surface at WARN level.
 
 ---
 
-### Phase 2.1 — Frontend Bug Fixes
+### Phase 2.1 — Frontend Bug Fixes ✅ Complete (2026-04-03)
 
 **Goal:** Eliminate the three open P1 frontend bugs and ship two UX improvements from the TODO
 backlog.
