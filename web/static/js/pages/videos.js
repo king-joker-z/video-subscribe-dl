@@ -213,6 +213,26 @@ export function VideosPage({ params = {} } = {}) {
   };
 
   const [repairLoading, setRepairLoading] = useState(false);
+  const [fixFailedLoading, setFixFailedLoading] = useState(false);
+
+  const handleFixStaleFailed = () => {
+    setConfirmAction({
+      title: '修复历史失败记录',
+      message: '将把 retry_count≥3 的 PH 失败记录升级为 permanent_failed（停止重试），并为其余失败记录设置退避重试时间，解决重复下载问题。确认执行？',
+      action: '__fix_stale_failed__',
+    });
+  };
+  const executeFixStaleFailed = async () => {
+    setFixFailedLoading(true);
+    try {
+      const res = await api.fixStaleFailed();
+      const d = res.data || {};
+      toast.success(`修复完成：${d.upgraded ?? 0} 条升级为 permanent_failed，${d.scheduled ?? 0} 条设置重试时间`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setFixFailedLoading(false); }
+  };
+
   // [FIXED: P2-8] 替换 confirm() 为 ConfirmDialog
   const handleRepairThumbs = () => {
     setConfirmAction({
@@ -264,6 +284,7 @@ export function VideosPage({ params = {} } = {}) {
         const vid = confirmAction._videoId;
         setConfirmAction(null);
         if (act === '__repair_thumbs__') { executeRepairThumbs(); return; }
+        if (act === '__fix_stale_failed__') { executeFixStaleFailed(); return; }
         if (act === '__redownload__') { try { await api.redownloadVideo(vid); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } return; }
         if (act === '__delete_files__') { try { await api.deleteVideoFiles(vid); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } return; }
         if (act === '__restore__') { try { await api.restoreVideo(vid); toast.success('已恢复'); load(); } catch (e) { toast.error(e.message); } return; }
@@ -288,6 +309,7 @@ export function VideosPage({ params = {} } = {}) {
         }, uploader ? '下载该UP主Pending' : '下载全部Pending'),
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
         h(Button, { onClick: handleRepairThumbs, variant: 'secondary', size: 'sm', disabled: repairLoading }, repairLoading ? '补全中...' : '补全封面'),
+        h(Button, { onClick: handleFixStaleFailed, variant: 'secondary', size: 'sm', disabled: fixFailedLoading }, fixFailedLoading ? '修复中...' : '修复失败记录'),
         // 手机端隐藏视图切换（强制卡片视图）
         !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
         !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),

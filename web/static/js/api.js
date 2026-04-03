@@ -83,6 +83,7 @@ export const api = {
   restoreVideo: (id) => request(`/api/videos/${id}/restore`, { method: 'POST' }),
   detectCharge: () => request('/api/videos/detect-charge', { method: 'POST' }),
   repairThumbs: () => request('/api/videos/repair-thumbs', { method: 'POST' }),
+  fixStaleFailed: () => request('/api/videos/fix-stale-failed', { method: 'POST' }),
   batchVideos: (action, ids) => request('/api/videos/batch', {
     method: 'POST', body: JSON.stringify({ action, ids })
   }),
