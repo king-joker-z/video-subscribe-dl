@@ -130,8 +130,8 @@ func PollQRCode(httpClient *http.Client, qrcodeKey string) (*QRCodePollResult, e
 		} else {
 			cred.Buvid3 = buvid3
 			cred.Buvid4 = buvid4
-			// 激活 buvid（非阻塞，失败不影响登录）
-			if actErr := ActivateBuvid(httpClient, buvid3, buvid4); actErr != nil {
+			// 登录态下激活 buvid，携带 SESSDATA 使设备指纹与 session 绑定，防止 -352 风控
+			if actErr := ActivateBuvid(httpClient, buvid3, buvid4, cred.Sessdata); actErr != nil {
 				fmt.Printf("[qrcode] Warning: activate buvid failed: %v\n", actErr)
 			}
 		}
