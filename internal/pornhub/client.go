@@ -143,6 +143,31 @@ func NewClientWithOptions(opts ClientOptions, cookie ...string) *Client {
 	return c
 }
 
+// evalTimeout returns the effective goja JS eval timeout.
+// Zero value (not set via ClientOptions) defaults to 15 s.
+func (c *Client) evalTimeout() time.Duration {
+	if c.jsEvalTimeout > 0 {
+		return c.jsEvalTimeout
+	}
+	return 15 * time.Second
+}
+
+// effectivePageDelay returns the inter-page delay, honouring ClientOptions.PageDelay.
+func (c *Client) effectivePageDelay() time.Duration {
+	if c.pageDelayCfg > 0 {
+		return c.pageDelayCfg
+	}
+	return pageDelay
+}
+
+// effectiveMaxPage returns the hard page limit, honouring ClientOptions.MaxPageHardLimit.
+func (c *Client) effectiveMaxPage() int {
+	if c.maxPageCfg > 0 {
+		return c.maxPageCfg
+	}
+	return maxPageHardLimit
+}
+
 // SetCookie 设置用户 Cookie
 func (c *Client) SetCookie(cookie string) {
 	c.mu.Lock()
@@ -827,9 +852,10 @@ var clearInterval = function(){};
 			if err := json.Unmarshal([]byte(res.jsonStr), &fv); err != nil {
 				return "", fmt.Errorf("%w: unmarshal flashvars: %v", ErrParseFailed, err)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(c.evalTimeout()):
 			vm.Interrupt("js eval timeout")
-			return "", fmt.Errorf("%w: js eval timeout", ErrParseFailed)
+			log.Printf("[pornhub·client] WARN: goja JS eval timeout (>%v), url=%s", c.evalTimeout(), videoPageURL)
+			return "", fmt.Errorf("%w: js eval timeout after %v", ErrParseFailed, c.evalTimeout())
 		}
 	} else {
 		// 兜底：直接从 script 文本中提取 mediaDefinitions JSON 数组
