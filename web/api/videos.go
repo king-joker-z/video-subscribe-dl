@@ -691,7 +691,7 @@ func (h *VideosHandler) HandleSkipVideoDisabled(w http.ResponseWriter, r *http.R
 	`)
 	if err != nil {
 		log.Printf("[skip-video-disabled] db error: %v", err)
-		apiError(w, CodeInternalError, "数据库操作失败: "+err.Error())
+		apiError(w, CodeInternal, "数据库操作失败: "+err.Error())
 		return
 	}
 	affected, _ := res.RowsAffected()
