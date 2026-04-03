@@ -214,6 +214,7 @@ export function VideosPage({ params = {} } = {}) {
 
   const [repairLoading, setRepairLoading] = useState(false);
   const [fixFailedLoading, setFixFailedLoading] = useState(false);
+  const [skipDisabledLoading, setSkipDisabledLoading] = useState(false);
 
   const handleFixStaleFailed = () => {
     setConfirmAction({
@@ -231,6 +232,24 @@ export function VideosPage({ params = {} } = {}) {
       load();
     } catch (e) { toast.error(e.message); }
     finally { setFixFailedLoading(false); }
+  };
+
+  const handleSkipVideoDisabled = () => {
+    setConfirmAction({
+      title: '跳过 Video Disabled',
+      message: '将把所有因"Video Disabled"失败的记录标记为 skipped，停止重试。此操作不可撤销，确认执行？',
+      action: '__skip_video_disabled__',
+    });
+  };
+  const executeSkipVideoDisabled = async () => {
+    setSkipDisabledLoading(true);
+    try {
+      const res = await api.skipVideoDisabled();
+      const d = res.data || {};
+      toast.success(d.message || `已跳过 ${d.skipped ?? 0} 条 Video Disabled 记录`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSkipDisabledLoading(false); }
   };
 
   // [FIXED: P2-8] 替换 confirm() 为 ConfirmDialog
@@ -285,6 +304,7 @@ export function VideosPage({ params = {} } = {}) {
         setConfirmAction(null);
         if (act === '__repair_thumbs__') { executeRepairThumbs(); return; }
         if (act === '__fix_stale_failed__') { executeFixStaleFailed(); return; }
+        if (act === '__skip_video_disabled__') { executeSkipVideoDisabled(); return; }
         if (act === '__redownload__') { try { await api.redownloadVideo(vid); toast.success('已提交重新下载'); load(); } catch (e) { toast.error(e.message); } return; }
         if (act === '__delete_files__') { try { await api.deleteVideoFiles(vid); toast.success('文件已删除'); load(); } catch (e) { toast.error(e.message); } return; }
         if (act === '__restore__') { try { await api.restoreVideo(vid); toast.success('已恢复'); load(); } catch (e) { toast.error(e.message); } return; }
@@ -310,6 +330,7 @@ export function VideosPage({ params = {} } = {}) {
         h(Button, { onClick: handleDetectCharge, variant: 'secondary', size: 'sm' }, '检测充电'),
         h(Button, { onClick: handleRepairThumbs, variant: 'secondary', size: 'sm', disabled: repairLoading }, repairLoading ? '补全中...' : '补全封面'),
         h(Button, { onClick: handleFixStaleFailed, variant: 'secondary', size: 'sm', disabled: fixFailedLoading }, fixFailedLoading ? '修复中...' : '修复失败记录'),
+        h(Button, { onClick: handleSkipVideoDisabled, variant: 'secondary', size: 'sm', disabled: skipDisabledLoading }, skipDisabledLoading ? '处理中...' : '跳过已下架'),
         // 手机端隐藏视图切换（强制卡片视图）
         !isMobile && h('button', { onClick: () => setViewMode('table'), className: cn('p-2 rounded-lg', viewMode === 'table' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'list', size: 16 })),
         !isMobile && h('button', { onClick: () => setViewMode('card'), className: cn('p-2 rounded-lg', viewMode === 'card' ? 'bg-slate-200 text-slate-800' : 'text-slate-500') }, h(Icon, { name: 'grid', size: 16 })),

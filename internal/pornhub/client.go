@@ -818,6 +818,23 @@ func (c *Client) GetVideoURL(videoPageURL string) (string, error) {
 		}
 
 		if err != nil {
+			// 检测已知的"永久不可用"页面标题，直接 skip 而非标 failed 循环重试
+			if titleText != "" {
+				lowerTitle := strings.ToLower(titleText)
+				unavailableTitles := []string{
+					"video disabled",
+					"this video has been disabled",
+					"video unavailable",
+					"this video is unavailable",
+					"page not found",
+					"video deleted",
+				}
+				for _, keyword := range unavailableTitles {
+					if strings.Contains(lowerTitle, keyword) {
+						return "", NewPHError(ErrKindUnavailable, status, fmt.Sprintf("video permanently unavailable (title=%q)", titleText))
+					}
+				}
+			}
 			return "", NewPHError(ErrKindParseFailed, status, fmt.Sprintf("page parse failed (title=%q): %v", titleText, err))
 		}
 	}

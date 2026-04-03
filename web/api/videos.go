@@ -671,6 +671,37 @@ func (h *VideosHandler) HandleFixStaleFailed(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// POST /api/videos/skip-video-disabled — 将 "Video Disabled" 的永久失败记录标记为 skipped
+// 幂等操作，可重复调用。
+func (h *VideosHandler) HandleSkipVideoDisabled(w http.ResponseWriter, r *http.Request) {
+	if !MethodGuard("POST", w, r) {
+		return
+	}
+
+	res, err := h.db.Exec(`
+		UPDATE downloads
+		SET status = 'skipped',
+		    error_message = 'skipped: video permanently disabled on Pornhub'
+		WHERE status IN ('failed', 'permanent_failed')
+		  AND (
+		    error_message LIKE '%Video Disabled%'
+		    OR error_message LIKE '%video permanently unavailable%'
+		    OR error_message LIKE '%Video Unavailable%'
+		  )
+	`)
+	if err != nil {
+		log.Printf("[skip-video-disabled] db error: %v", err)
+		apiError(w, CodeInternalError, "数据库操作失败: "+err.Error())
+		return
+	}
+	affected, _ := res.RowsAffected()
+	log.Printf("[skip-video-disabled] done: %d records marked as skipped", affected)
+	apiOK(w, map[string]interface{}{
+		"skipped": affected,
+		"message": fmt.Sprintf("已将 %d 条 Video Disabled 记录标记为 skipped，不再重试", affected),
+	})
+}
+
 // POST /api/videos/repair-thumbs — 历史封面补全
 func (h *VideosHandler) HandleRepairThumbs(w http.ResponseWriter, r *http.Request) {
 	if !MethodGuard("POST", w, r) {
