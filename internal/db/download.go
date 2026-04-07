@@ -128,6 +128,23 @@ func (d *DB) UpdateDownloadStatus(id int64, status string, filePath string, file
 	return err
 }
 
+// ClaimDownloadForProcessing 原子地将 download 状态从 pending/failed 改为 downloading。
+// 利用 SQLite 单写串行化特性实现 CAS，返回 true 表示抢占成功，false 表示已被其他 goroutine 抢先。
+func (d *DB) ClaimDownloadForProcessing(id int64) (bool, error) {
+	result, err := d.Exec(
+		`UPDATE downloads SET status='downloading', error_message='' WHERE id=? AND status IN ('pending','failed')`,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // IncrementRetryCount increments retry count and records the error
 func (d *DB) IncrementRetryCount(id int64, lastError string) error {
 	_, err := d.Exec(`UPDATE downloads SET retry_count = retry_count + 1, last_error = ? WHERE id = ?`, lastError, id)

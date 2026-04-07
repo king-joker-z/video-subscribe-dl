@@ -34,8 +34,22 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 	default:
 	}
 
+	// CAS：原子抢占任务，防止 DispatchDownload 和 ProcessAllPending 双路投递同一任务时重复执行
+	// SQLite 单写串行化保证只有一个 goroutine 能成功将 pending/failed → downloading
+	claimed, err := s.db.ClaimDownloadForProcessing(dl.ID)
+	if err != nil {
+		log.Printf("[phscheduler] ClaimDownloadForProcessing failed for %d: %v", dl.ID, err)
+		return
+	}
+	if !claimed {
+		log.Printf("[phscheduler] Download %d already claimed by another goroutine, skip", dl.ID)
+		return
+	}
+
 	if !s.downloadLimiter.Acquire() {
 		log.Printf("[phscheduler] rate limiter stopped, skip download %s", dl.VideoID)
+		// 已经 claim 了但 limiter 停止，回退状态
+		s.db.UpdateDownloadStatus(dl.ID, "pending", "", 0, "")
 		return
 	}
 
@@ -56,7 +70,7 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 		client.SetCookie(s.getCookie())
 	}
 
-	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")
+	// 状态已由 ClaimDownloadForProcessing 设为 downloading，无需再次更新
 	// 广播 started 事件
 	s.emitEvent(DownloadEvent{
 		Type:    "started",
