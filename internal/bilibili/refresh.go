@@ -110,10 +110,12 @@ func (c *Client) RefreshCookie(cookiePath string) (*CookieRefreshResult, error) 
 			saveRefreshToken(cookiePath, result.Data.RefreshToken)
 		}
 
-		// 更新内存中的 cookie
+		// 更新内存中的 cookie（持有写锁，与 UpdateCredential/getWbiKeys 等读锁互斥）
 		newCookieStr := ReadCookieFile(cookiePath)
 		if newCookieStr != "" {
+			c.mu.Lock()
 			c.cookie = newCookieStr
+			c.mu.Unlock()
 		}
 
 		log.Printf("[cookie-refresh] Cookie 刷新成功")
@@ -181,10 +183,12 @@ func extractCookieValue(cookieStr, key string) string {
 }
 
 // extractSetCookies 从 HTTP 响应中提取 Set-Cookie
+// B 站使用 Expires（非 Max-Age）设置有效期，MaxAge==0 仅代表未设置 Max-Age 属性，
+// 不代表 cookie 已过期，因此用 Expires 和 MaxAge 联合判断。
 func extractSetCookies(resp *http.Response) map[string]string {
 	cookies := map[string]string{}
 	for _, cookie := range resp.Cookies() {
-		if cookie.Value != "" && cookie.MaxAge != 0 {
+		if cookie.Value != "" && (!cookie.Expires.IsZero() || cookie.MaxAge > 0) {
 			cookies[cookie.Name] = cookie.Value
 		}
 	}
