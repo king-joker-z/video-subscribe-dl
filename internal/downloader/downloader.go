@@ -81,6 +81,10 @@ type Downloader struct {
 	totalCompleted int64
 	totalFailed    int64
 
+	// per-platform 统计计数（原子 int64，key: "bilibili"/"douyin"/"pornhub"）
+	platformCompleted map[string]*int64
+	platformFailed    map[string]*int64
+
 	// 进度追踪
 	progressMu sync.RWMutex
 	progress   map[string]*ProgressInfo // key = bvid
@@ -110,6 +114,7 @@ type Job struct {
 	PartTitle        string // 分P 标题
 	FilenameTemplate string // 文件名模板（空则使用默认）
 	CookiesFile      string
+	Platform         string // 所属平台: "bilibili"/"douyin"/"pornhub"，用于 per-platform 指标
 	ResultCh         chan *Result
 	OnStart          func() // 开始下载时回调（用于更新 DB 状态）
 }
@@ -123,16 +128,32 @@ type Result struct {
 	SubtitleDone bool // 字幕是否下载成功
 }
 
+// knownPlatforms 已知平台列表，用于初始化 per-platform 计数器
+var knownPlatforms = []string{"bilibili", "douyin", "pornhub"}
+
 func New(config Config, biliClient *bilibili.Client) *Downloader {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 初始化 per-platform 计数器
+	platformCompleted := make(map[string]*int64, len(knownPlatforms))
+	platformFailed := make(map[string]*int64, len(knownPlatforms))
+	for _, p := range knownPlatforms {
+		v1 := int64(0)
+		v2 := int64(0)
+		platformCompleted[p] = &v1
+		platformFailed[p] = &v2
+	}
+
 	d := &Downloader{
-		config:     config,
-		bili:       biliClient,
-		queue:      make(chan *Job, appconfig.DefaultQueueSize),
-		resumeCh:   make(chan struct{}),
-		progress:   make(map[string]*ProgressInfo),
-		rootCtx:    ctx,
-		rootCancel: cancel,
+		config:            config,
+		bili:              biliClient,
+		queue:             make(chan *Job, appconfig.DefaultQueueSize),
+		resumeCh:          make(chan struct{}),
+		progress:          make(map[string]*ProgressInfo),
+		rootCtx:           ctx,
+		rootCancel:        cancel,
+		platformCompleted: platformCompleted,
+		platformFailed:    platformFailed,
 	}
 	for i := 0; i < config.MaxConcurrent; i++ {
 		d.wg.Add(1)
@@ -197,6 +218,12 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 	// 广播下载事件给 SSE 订阅者
 	if result.Success {
 		atomic.AddInt64(&d.totalCompleted, 1)
+		// per-platform 计数：nil 守卫防止未知 platform 导致 panic
+		if p := job.Platform; p != "" {
+			if ptr := d.platformCompleted[p]; ptr != nil {
+				atomic.AddInt64(ptr, 1)
+			}
+		}
 		d.emitEvent(DownloadEvent{
 			Type:         "completed",
 			BvID:         job.BvID,
@@ -206,6 +233,12 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 		})
 	} else if result.Error != nil {
 		atomic.AddInt64(&d.totalFailed, 1)
+		// per-platform 计数：nil 守卫防止未知 platform 导致 panic
+		if p := job.Platform; p != "" {
+			if ptr := d.platformFailed[p]; ptr != nil {
+				atomic.AddInt64(ptr, 1)
+			}
+		}
 		d.emitEvent(DownloadEvent{
 			Type:  "failed",
 			BvID:  job.BvID,
@@ -350,6 +383,24 @@ func (d *Downloader) UnsubscribeEvents(ch chan DownloadEvent) {
 			d.eventSubs = append(d.eventSubs[:i], d.eventSubs[i+1:]...)
 			close(ch)
 			return
+		}
+	}
+}
+
+// AddPlatformCompleted 递增指定平台的完成计数（供外部调度器调用，如 dscheduler/phscheduler）
+func (d *Downloader) AddPlatformCompleted(platform string) {
+	if platform != "" {
+		if ptr := d.platformCompleted[platform]; ptr != nil {
+			atomic.AddInt64(ptr, 1)
+		}
+	}
+}
+
+// AddPlatformFailed 递增指定平台的失败计数（供外部调度器调用，如 dscheduler/phscheduler）
+func (d *Downloader) AddPlatformFailed(platform string) {
+	if platform != "" {
+		if ptr := d.platformFailed[platform]; ptr != nil {
+			atomic.AddInt64(ptr, 1)
 		}
 	}
 }

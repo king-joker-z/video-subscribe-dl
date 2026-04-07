@@ -195,6 +195,7 @@ func (s *BiliScheduler) submitDownload(src db.Source, videoID string, cid int64,
 		UploaderName:     uploaderName,
 		FilenameTemplate: s.getFilenameTemplate(),
 		CookiesFile:      cookiesFile,
+		Platform:         "bilibili",
 		ResultCh:         resultCh,
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
@@ -259,6 +260,7 @@ func (s *BiliScheduler) submitDownloadFlat(src db.Source, videoID string, cid in
 		UploaderName:     uploaderName,
 		FilenameTemplate: s.getFilenameTemplate(),
 		CookiesFile:      cookiesFile,
+		Platform:         "bilibili",
 		ResultCh:         resultCh,
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {

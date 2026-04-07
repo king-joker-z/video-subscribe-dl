@@ -223,6 +223,7 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		UploaderName:     dl.Uploader,
 		FilenameTemplate: s.getFilenameTemplate(),
 		CookiesFile:      cookiesFile,
+		Platform:         "bilibili",
 		ResultCh:         resultCh,
 		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
 	}); err != nil {
