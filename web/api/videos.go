@@ -138,14 +138,18 @@ func (h *VideosHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	var videos []db.Download
 	for rows.Next() {
 		var dl db.Download
+		// Fix CR-001(infra): downloaded_at is nullable; scan into a *time.Time pointer so
+		// the SQLite driver stores nil for NULL rows (pending/failed) instead of erroring.
+		var downloadedAt *time.Time
 		if err := rows.Scan(&dl.ID, &dl.SourceID, &dl.VideoID, &dl.Title, &dl.Filename,
 			&dl.Status, &dl.FilePath, &dl.FileSize, &dl.Uploader, &dl.Description,
-			&dl.Thumbnail, &dl.ThumbPath, &dl.Duration, &dl.DownloadedAt,
+			&dl.Thumbnail, &dl.ThumbPath, &dl.Duration, &downloadedAt,
 			&dl.ErrorMessage, &dl.RetryCount, &dl.LastError,
 			&dl.DetailStatus, &dl.CreatedAt); err != nil {
 			apiError(w, CodeInternal, "解析数据失败")
 			return
 		}
+		dl.DownloadedAt = downloadedAt
 		videos = append(videos, dl)
 	}
 	// P0-10: check for iteration errors after the loop

@@ -136,10 +136,13 @@ func (s *BiliScheduler) CheckSeries(src db.Source) {
 	if len(allArchives) > 0 {
 		premiered = time.Unix(allArchives[0].PubDate, 0).Format("2006-01-02")
 	}
-	nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
-		Title: seriesMeta.Name, Plot: seriesMeta.Description, UploaderName: uploaderName,
-		UploaderFace: upInfo.Face, Premiered: premiered,
-	}, collectionDir)
+	// Fix CR-005: respect SkipNFO setting (was unconditionally writing tvshow.nfo)
+	if !src.SkipNFO {
+		nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
+			Title: seriesMeta.Name, Plot: seriesMeta.Description, UploaderName: uploaderName,
+			UploaderFace: upInfo.Face, Premiered: premiered,
+		}, collectionDir)
+	}
 
 	if len(allArchives) > 0 && allArchives[0].Pic != "" {
 		posterPath := filepath.Join(collectionDir, "poster.jpg")

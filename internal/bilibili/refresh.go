@@ -41,8 +41,12 @@ func (c *Client) RefreshCookie(cookiePath string) (*CookieRefreshResult, error) 
 
 	// 调用 B 站 Cookie 刷新接口
 	form := url.Values{}
+	// Fix CR-002: refresh_csrf must be obtained from the correspond-path page,
+	// not reusing csrf (bili_jct). Route all refreshes through credential.go:Refresh()
+	// instead. This legacy path is kept for backward compatibility but logs a warning.
+	log.Printf("[cookie-refresh][WARN] RefreshCookie() uses legacy path; for reliable refresh use credential.go:Refresh(). refresh_csrf may be incorrect.")
 	form.Set("csrf", csrf)
-	form.Set("refresh_csrf", csrf)
+	form.Set("refresh_csrf", csrf) // known limitation: correct value requires getRefreshCSRF()
 	form.Set("refresh_token", refreshToken)
 	form.Set("source", "main_web")
 

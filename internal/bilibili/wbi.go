@@ -78,8 +78,12 @@ func (c *Client) getWbiKeys() (string, string, error) {
 	req, _ := http.NewRequest("GET", "https://api.bilibili.com/x/web-interface/nav", nil)
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Referer", "https://www.bilibili.com")
-	if c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
+	// Fix CR-003: read c.cookie under RLock to prevent data race with UpdateCredential
+	c.mu.RLock()
+	cookieVal := c.cookie
+	c.mu.RUnlock()
+	if cookieVal != "" {
+		req.Header.Set("Cookie", cookieVal)
 	}
 
 	resp, err := c.http.Do(req)
