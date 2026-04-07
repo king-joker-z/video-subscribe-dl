@@ -185,6 +185,11 @@ func (rt *Router) SetCooldownInfoFunc(fn func() (bool, int)) {
 func (rt *Router) SetPHCooldownInfoFunc(fn func() (bool, int)) {
 	rt.metrics.SetPHCooldownInfoFunc(fn)
 }
+
+// SetSchedulerLastCheckFunc 注册某平台调度器的最近检查时间回调
+func (rt *Router) SetSchedulerLastCheckFunc(platform string, fn func() time.Time) {
+	rt.metrics.SetSchedulerLastCheckFunc(platform, fn)
+}
 func (rt *Router) SetVersion(v string)         { rt.task.SetVersion(v) }
 func (rt *Router) SetBuildTime(t string)        { rt.task.SetBuildTime(t) }
 func (rt *Router) SetStartTime(t time.Time) {

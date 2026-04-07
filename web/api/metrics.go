@@ -12,18 +12,25 @@ import (
 
 // MetricsHandler 运行时指标端点
 type MetricsHandler struct {
-	dl                *downloader.Downloader
-	startTime         time.Time
-	getCooldownInfo   func() (bool, int)
-	getPHCooldownInfo func() (bool, int) // PH 冷却状态
+	dl                    *downloader.Downloader
+	startTime             time.Time
+	getCooldownInfo       func() (bool, int)
+	getPHCooldownInfo     func() (bool, int) // PH 冷却状态
+	getSchedulerLastCheck map[string]func() time.Time
 }
 
 // NewMetricsHandler 创建 MetricsHandler
 func NewMetricsHandler(dl *downloader.Downloader) *MetricsHandler {
 	return &MetricsHandler{
-		dl:        dl,
-		startTime: time.Now(),
+		dl:                    dl,
+		startTime:             time.Now(),
+		getSchedulerLastCheck: make(map[string]func() time.Time),
 	}
+}
+
+// SetSchedulerLastCheckFunc 注册某平台调度器的最近检查时间回调
+func (h *MetricsHandler) SetSchedulerLastCheckFunc(platform string, fn func() time.Time) {
+	h.getSchedulerLastCheck[platform] = fn
 }
 
 // SetStartTime 设置服务启动时间
@@ -133,4 +140,30 @@ func (h *MetricsHandler) HandlePrometheus(w http.ResponseWriter, r *http.Request
 	fmt.Fprintf(w, "# HELP vsd_downloader_failed_total Total failed downloads\n")
 	fmt.Fprintf(w, "# TYPE vsd_downloader_failed_total counter\n")
 	fmt.Fprintf(w, "vsd_downloader_failed_total %d\n", dlStats.Failed)
+
+	// per-platform download counters (alphabetical order)
+	platforms := []string{"bilibili", "douyin", "pornhub"}
+	fmt.Fprintf(w, "# HELP vsd_downloads_completed_total Total completed downloads per platform\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloads_completed_total counter\n")
+	for _, p := range platforms {
+		fmt.Fprintf(w, "vsd_downloads_completed_total{platform=%q} %d\n", p, dlStats.PlatformCompleted[p])
+	}
+	fmt.Fprintf(w, "# HELP vsd_downloads_failed_total Total failed downloads per platform\n")
+	fmt.Fprintf(w, "# TYPE vsd_downloads_failed_total counter\n")
+	for _, p := range platforms {
+		fmt.Fprintf(w, "vsd_downloads_failed_total{platform=%q} %d\n", p, dlStats.PlatformFailed[p])
+	}
+
+	// scheduler last-check timestamps per platform
+	fmt.Fprintf(w, "# HELP vsd_scheduler_last_check_timestamp Unix timestamp of the last scheduler check per platform\n")
+	fmt.Fprintf(w, "# TYPE vsd_scheduler_last_check_timestamp gauge\n")
+	for _, p := range platforms {
+		ts := int64(0)
+		if fn := h.getSchedulerLastCheck[p]; fn != nil {
+			if t := fn(); !t.IsZero() {
+				ts = t.Unix()
+			}
+		}
+		fmt.Fprintf(w, "vsd_scheduler_last_check_timestamp{platform=%q} %d\n", p, ts)
+	}
 }
