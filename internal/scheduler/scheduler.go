@@ -169,6 +169,13 @@ func (s *Scheduler) Start() {
 						return
 					default:
 					}
+					// per-platform 计数：在事件转发点递增抖音计数器
+					switch evt.Type {
+					case "completed":
+						s.dl.AddPlatformCompleted("douyin")
+					case "failed":
+						s.dl.AddPlatformFailed("douyin")
+					}
 					s.dl.EmitEvent(downloader.DownloadEvent{
 						Type:         evt.Type,
 						BvID:         evt.VideoID,
@@ -200,6 +207,13 @@ func (s *Scheduler) Start() {
 					case <-s.stopCh:
 						return
 					default:
+					}
+					// per-platform 计数：在事件转发点递增 PH 计数器
+					switch evt.Type {
+					case "completed":
+						s.dl.AddPlatformCompleted("pornhub")
+					case "failed":
+						s.dl.AddPlatformFailed("pornhub")
 					}
 					s.dl.EmitEvent(downloader.DownloadEvent{
 						Type:         evt.Type,
@@ -685,6 +699,32 @@ func (s *Scheduler) GetPHCooldownInfo() (inCooldown bool, remainingSec int) {
 		return false, 0
 	}
 	return s.ph.GetCooldownInfo()
+}
+
+// ─── 代理方法：调度器最近检查时间 ────────────────────────────────────────────────
+
+// GetBiliLastCheckAt 返回 B 站调度器最近一次检查时间
+func (s *Scheduler) GetBiliLastCheckAt() time.Time {
+	if s.bili == nil {
+		return time.Time{}
+	}
+	return s.bili.LastCheckAt()
+}
+
+// GetDouyinLastCheckAt 返回抖音调度器最近一次检查时间
+func (s *Scheduler) GetDouyinLastCheckAt() time.Time {
+	if s.douyin == nil {
+		return time.Time{}
+	}
+	return s.douyin.LastCheckAt()
+}
+
+// GetPHLastCheckAt 返回 Pornhub 调度器最近一次检查时间
+func (s *Scheduler) GetPHLastCheckAt() time.Time {
+	if s.ph == nil {
+		return time.Time{}
+	}
+	return s.ph.LastCheckAt()
 }
 
 // processRetryQueue 扫描各平台 failed 记录，按退避时间重新投递
