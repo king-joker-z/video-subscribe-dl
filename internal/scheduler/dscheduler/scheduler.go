@@ -110,6 +110,10 @@ type DouyinScheduler struct {
 
 	// [FIXED: DS-2] 复用 http.Client，避免每次下载新建 transport
 	httpClient *http.Client
+
+	// 最近一次调度检查时间戳
+	lastCheckMu sync.RWMutex
+	lastCheckAt time.Time
 }
 
 // Config 创建 DouyinScheduler 所需的配置
@@ -172,10 +176,27 @@ func (s *DouyinScheduler) resetStaleDownloading() {
 	}
 }
 
+// ─── lastCheckAt 管理 ─────────────────────────────────────────────────────────
+
+// setLastCheckAt 更新最近一次调度检查时间（私有，线程安全）
+func (s *DouyinScheduler) setLastCheckAt(t time.Time) {
+	s.lastCheckMu.Lock()
+	defer s.lastCheckMu.Unlock()
+	s.lastCheckAt = t
+}
+
+// LastCheckAt 返回最近一次调度检查时间（公共，线程安全）
+func (s *DouyinScheduler) LastCheckAt() time.Time {
+	s.lastCheckMu.RLock()
+	defer s.lastCheckMu.RUnlock()
+	return s.lastCheckAt
+}
+
 // ─── PlatformScheduler 接口实现 ───────────────────────────────────────────────
 
 // CheckSource 根据 source 类型分发到检查方法
 func (s *DouyinScheduler) CheckSource(src db.Source) {
+	defer s.setLastCheckAt(time.Now())
 	switch src.Type {
 	case "douyin_mix":
 		s.CheckDouyinMix(src)

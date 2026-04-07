@@ -69,6 +69,10 @@ type BiliScheduler struct {
 	fullScanRunning   map[int64]bool
 	fullScanRunningMu sync.Mutex
 
+	// 最近一次调度检查时间戳
+	lastCheckMu sync.RWMutex
+	lastCheckAt time.Time
+
 	// 待处理的 WaitGroup
 	wg *sync.WaitGroup
 }
@@ -108,10 +112,27 @@ func New(cfg Config) *BiliScheduler {
 	return s
 }
 
+// ─── lastCheckAt 管理 ─────────────────────────────────────────────────────────
+
+// setLastCheckAt 更新最近一次调度检查时间（私有，线程安全）
+func (s *BiliScheduler) setLastCheckAt(t time.Time) {
+	s.lastCheckMu.Lock()
+	defer s.lastCheckMu.Unlock()
+	s.lastCheckAt = t
+}
+
+// LastCheckAt 返回最近一次调度检查时间（公共，线程安全）
+func (s *BiliScheduler) LastCheckAt() time.Time {
+	s.lastCheckMu.RLock()
+	defer s.lastCheckMu.RUnlock()
+	return s.lastCheckAt
+}
+
 // ─── PlatformScheduler 接口实现 ───────────────────────────────────────────────
 
 // CheckSource 根据 source 类型分发到对应的检查方法
 func (s *BiliScheduler) CheckSource(src db.Source) {
+	defer s.setLastCheckAt(time.Now())
 	switch src.Type {
 	case "season":
 		s.CheckSeason(src)

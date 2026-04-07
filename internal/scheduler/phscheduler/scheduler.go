@@ -83,6 +83,10 @@ type PHScheduler struct {
 	fullScanRunning   map[int64]bool
 	fullScanRunningMu sync.Mutex
 
+	// 最近一次调度检查时间戳
+	lastCheckMu sync.RWMutex
+	lastCheckAt time.Time
+
 	// 生命周期 context
 	rootCtx    context.Context
 	rootCancel context.CancelFunc
@@ -127,10 +131,27 @@ func New(cfg Config) *PHScheduler {
 	return s
 }
 
+// ─── lastCheckAt 管理 ─────────────────────────────────────────────────────────
+
+// setLastCheckAt 更新最近一次调度检查时间（私有，线程安全）
+func (s *PHScheduler) setLastCheckAt(t time.Time) {
+	s.lastCheckMu.Lock()
+	defer s.lastCheckMu.Unlock()
+	s.lastCheckAt = t
+}
+
+// LastCheckAt 返回最近一次调度检查时间（公共，线程安全）
+func (s *PHScheduler) LastCheckAt() time.Time {
+	s.lastCheckMu.RLock()
+	defer s.lastCheckMu.RUnlock()
+	return s.lastCheckAt
+}
+
 // ─── PlatformScheduler 接口实现 ───────────────────────────────────────────────
 
 // CheckSource 根据 source 类型分发
 func (s *PHScheduler) CheckSource(src db.Source) {
+	defer s.setLastCheckAt(time.Now())
 	s.CheckPHModel(src)
 }
 
