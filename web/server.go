@@ -95,6 +95,9 @@ type Server struct {
 
 	onRepairThumb func(string, string) error
 
+	// 调度器最近检查时间回调（per-platform）
+	getSchedulerLastCheck map[string]func() time.Time
+
 	version   string
 	buildTime string
 	startTime time.Time
@@ -109,15 +112,16 @@ type Server struct {
 
 func NewServer(database *db.DB, dl *downloader.Downloader, sc *scanner.Scanner, port int, dataDir, downloadDir string) *Server {
 	s := &Server{
-		db:              database,
-		downloader:      dl,
-		scanner:         sc,
-		port:            port,
-		dataDir:         dataDir,
-		downloadDir:     downloadDir,
-		mux:             http.NewServeMux(),
-		cachedRateLimit: 200,
-		startTime:       time.Now(), // P2-7: initialize so uptime is correct from start
+		db:                    database,
+		downloader:            dl,
+		scanner:               sc,
+		port:                  port,
+		dataDir:               dataDir,
+		downloadDir:           downloadDir,
+		mux:                   http.NewServeMux(),
+		cachedRateLimit:       200,
+		startTime:             time.Now(), // P2-7: initialize so uptime is correct from start
+		getSchedulerLastCheck: make(map[string]func() time.Time),
 	}
 
 	s.nonceStore = make(map[string]time.Time)
@@ -245,6 +249,10 @@ func (s *Server) setupRoutes() {
 		if s.onRepairThumb != nil {
 			s.apiRouter.SetRepairThumbFunc(s.onRepairThumb)
 		}
+		// Wire scheduler last-check callbacks per platform
+		for platform, fn := range s.getSchedulerLastCheck {
+			s.apiRouter.SetSchedulerLastCheckFunc(platform, fn)
+		}
 		// Wire session-nonce validator for WebSocket log auth
 		s.apiRouter.SetValidateNonceFunc(s.validateAndConsumeNonce)
 	}
@@ -348,6 +356,11 @@ func (s *Server) SetPHCookieStatusFunc(fn func() (bool, string)) {
 
 func (s *Server) SetRepairThumbFunc(fn func(string, string) error) {
 	s.onRepairThumb = fn
+}
+
+// SetSchedulerLastCheckFunc 注册某平台调度器最近检查时间回调
+func (s *Server) SetSchedulerLastCheckFunc(platform string, fn func() time.Time) {
+	s.getSchedulerLastCheck[platform] = fn
 }
 
 func (s *Server) SetNotifier(n *notify.Notifier) {

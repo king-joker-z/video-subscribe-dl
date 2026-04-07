@@ -205,6 +205,9 @@ func main() {
 	server.SetPHPauseFunc(sched.PausePH)
 	server.SetPHCookieStatusFunc(sched.GetPHCookieStatus)
 	server.SetRepairThumbFunc(phscheduler.CaptureThumbFromVideo)
+	server.SetSchedulerLastCheckFunc("bilibili", sched.GetBiliLastCheckAt)
+	server.SetSchedulerLastCheckFunc("douyin", sched.GetDouyinLastCheckAt)
+	server.SetSchedulerLastCheckFunc("pornhub", sched.GetPHLastCheckAt)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {
