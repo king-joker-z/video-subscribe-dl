@@ -55,7 +55,9 @@ func (s *PHScheduler) retryOneDownload(dl db.Download) {
 
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
-		log.Printf("[phscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
+		log.Printf("[phscheduler] Source %d not found for download %d, marking failed", dl.SourceID, dl.ID)
+		// CAS 已将状态改为 downloading，必须回退，否则记录永远卡住无法重试
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "source not found")
 		return
 	}
 	if !src.Enabled {

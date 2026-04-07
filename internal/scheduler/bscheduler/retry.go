@@ -22,9 +22,21 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// CAS：原子抢占，防止 ProcessAllPending 和 retry-worker 双路投递同一任务时重复执行
+	claimed, err := s.db.ClaimDownloadForProcessing(dl.ID)
+	if err != nil {
+		log.Printf("[bscheduler] ClaimDownloadForProcessing failed for %d: %v", dl.ID, err)
+		return
+	}
+	if !claimed {
+		log.Printf("[bscheduler] Download %d already claimed by another goroutine, skip", dl.ID)
+		return
+	}
+
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
-		log.Printf("[bscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
+		log.Printf("[bscheduler] Source %d not found for download %d, marking failed", dl.SourceID, dl.ID)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "source not found")
 		return
 	}
 	if !src.Enabled {
@@ -100,8 +112,7 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
-	s.db.UpdateDownloadStatus(dl.ID, "pending", "", 0, "")
-
+	// 状态已由 ClaimDownloadForProcessing 设为 downloading，无需再次更新
 	cookiesFile := src.CookiesFile
 	if cookiesFile == "" {
 		cookiesFile = s.cookiePath

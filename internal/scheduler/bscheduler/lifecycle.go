@@ -46,6 +46,9 @@ func (s *BiliScheduler) Stop() {
 	if s.downloadLimiter != nil {
 		s.downloadLimiter.Stop()
 	}
+
+	// 等待所有 handleDownloadResult goroutine 完成，确保优雅关闭时 DB 写入不被截断
+	s.wg.Wait()
 }
 
 // ReloadConfig 手动触发配置重载

@@ -222,7 +222,11 @@ func downloadStream(ctx context.Context, stream *DashStream, dest string) error 
 		if err == nil {
 			return nil
 		}
-		log.Printf("Download failed from %s: %v, trying backup...", u[:80], err)
+		preview := u
+		if len(preview) > 80 {
+			preview = preview[:80]
+		}
+		log.Printf("Download failed from %s: %v, trying backup...", preview, err)
 	}
 	return fmt.Errorf("all URLs failed")
 }

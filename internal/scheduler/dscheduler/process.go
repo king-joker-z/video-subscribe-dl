@@ -23,11 +23,22 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 		return
 	}
 
-	// P1-2: check source existence/enabled BEFORE consuming a rate-limit token;
-	// otherwise a disabled/missing source wastes a token each call.
+	// CAS：原子抢占，防止 ProcessAllPending 和 retry-worker 双路投递同一任务时重复执行
+	claimed, err := s.db.ClaimDownloadForProcessing(dl.ID)
+	if err != nil {
+		log.Printf("[dscheduler] ClaimDownloadForProcessing failed for %d: %v", dl.ID, err)
+		return
+	}
+	if !claimed {
+		log.Printf("[dscheduler] Download %d already claimed by another goroutine, skip", dl.ID)
+		return
+	}
+
+	// P1-2: check source existence/enabled BEFORE consuming a rate-limit token
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
-		log.Printf("[dscheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
+		log.Printf("[dscheduler] Source %d not found for download %d, marking failed", dl.SourceID, dl.ID)
+		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "source not found")
 		return
 	}
 	if !src.Enabled {
@@ -41,7 +52,7 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	client := s.newClient()
 	defer client.Close()
 
-	s.db.UpdateDownloadStatus(dl.ID, "downloading", "", 0, "")
+	// 状态已由 ClaimDownloadForProcessing 设为 downloading，无需再次更新
 	// 广播 started 事件，让前端立即将状态从 pending 更新为 downloading
 	s.emitEvent(DownloadEvent{
 		Type:    "started",

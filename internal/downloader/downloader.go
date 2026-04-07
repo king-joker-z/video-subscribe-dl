@@ -224,15 +224,28 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 }
 
 func (d *Downloader) Submit(job *Job) error {
+	// 持锁期间发送，与 Stop() 的 stopped=true + close(queue) 互斥，
+	// 避免 stopped 检查和 send 之间出现 close(queue) 导致的 panic。
 	d.mu.Lock()
-	stopped := d.stopped
-	d.mu.Unlock()
-	if stopped {
+	if d.stopped {
+		d.mu.Unlock()
 		return fmt.Errorf("downloader is stopped, could not submit %s", job.BvID)
 	}
+	// 在持锁状态下尝试非阻塞发送；队列满时释放锁后等待。
+	select {
+	case d.queue <- job:
+		d.mu.Unlock()
+		return nil
+	default:
+	}
+	d.mu.Unlock()
+
+	// 队列满：锁外等待（此时 Stop() 若触发，queue 被关闭，select 会走 rootCtx.Done 分支）
 	select {
 	case d.queue <- job:
 		return nil
+	case <-d.rootCtx.Done():
+		return fmt.Errorf("downloader is stopped, could not submit %s", job.BvID)
 	case <-time.After(5 * time.Second):
 		log.Printf("[WARN] Download queue is full, failed to submit job: %s (%s)", job.Title, job.BvID)
 		return fmt.Errorf("download queue is full, could not submit %s within 5s timeout", job.BvID)
@@ -585,7 +598,9 @@ func (d *Downloader) download(job *Job) *Result {
 	os.MkdirAll(videoDir, 0755)
 
 	// 5. 构造进度回调
+	// progressCb 可能被视频/音频分片的并发 goroutine 同时调用，必须加锁保护对 prog 字段的写入。
 	progressCb := func(phase string, downloaded, total int64, speed float64) {
+		d.progressMu.Lock()
 		prog.Phase = phase
 		prog.Downloaded = downloaded
 		prog.Total = total
@@ -598,7 +613,8 @@ func (d *Downloader) download(job *Job) *Result {
 		if total > 0 {
 			prog.Percent = float64(downloaded) / float64(total) * 100
 		}
-		d.setProgress(job.BvID, prog)
+		d.progress[job.BvID] = prog
+		d.progressMu.Unlock()
 	}
 
 	d.mu.Lock()
