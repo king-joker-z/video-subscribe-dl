@@ -146,6 +146,9 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	// 清洗 URL：提取纯 URL，去除抖音分享文本追加的社交内容（如 "9@2.com :1pm"）
 	source.URL = extractURL(source.URL)
 
+	// 新建源默认启用（JSON 未传 enabled 时 bool 零值为 false，需显式设为 true）
+	source.Enabled = true
+
 	// 默认 type
 	if source.Type == "" {
 		source.Type = "up"
