@@ -1,6 +1,7 @@
 package bilibili
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -88,8 +89,8 @@ func IsRiskControl(err error) bool {
 	if be, ok := err.(*BiliError); ok {
 		return be.IsRiskControlRelated()
 	}
-	// 兼容旧的 ErrRateLimited
-	return err == ErrRateLimited
+	// 兼容旧的 ErrRateLimited（使用 errors.Is 支持 wrapped error）
+	return errors.Is(err, ErrRateLimited)
 }
 
 // IsAccessDenied 检查是否为 -403 访问权限不足（WBI 签名/鉴权异常，非频率风控）

@@ -590,21 +590,21 @@ func checkRateLimitCode(body []byte) error {
 		return nil // 无法解析就不检测
 	}
 	// 将风控/鉴权错误分类返回：
-	//   -352/-401/-412 → ErrRateLimited（触发冷却）
+	//   -352/-401/-412 → *BiliError{ErrKindRiskControl}（触发冷却，IsRiskControl=true）
 	//   -403           → *BiliError{ErrKindErrorResponse}（WBI 签名失效，清缓存重试，不触发冷却）
 	switch base.Code {
 	case -352:
 		log.Printf("[WARN] B站风控: code=-352 (风控校验失败)")
-		return fmt.Errorf("%s: %w", "风控校验失败", ErrRateLimited)
+		return NewRiskControlError("风控校验失败 (code=-352)")
 	case -401:
 		log.Printf("[WARN] B站风控: code=-401 (未登录/鉴权失败)")
-		return fmt.Errorf("%s: %w", "未登录/鉴权失败", ErrRateLimited)
+		return NewRiskControlError("未登录/鉴权失败 (code=-401)")
 	case -403:
 		log.Printf("[WARN] B站风控: code=-403 (访问权限不足/鉴权异常)")
 		return NewErrorResponse(-403, "访问权限不足")
 	case -412:
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
-		return fmt.Errorf("%s: %w", "请求过于频繁", ErrRateLimited)
+		return NewRiskControlError("请求过于频繁 (code=-412)")
 	}
 
 	// v_voucher 风控检测: data.v_voucher 非空即触发
@@ -615,7 +615,7 @@ func checkRateLimitCode(body []byte) error {
 	}
 	if err := json.Unmarshal(body, &voucherCheck); err == nil && voucherCheck.Data.VVoucher != "" {
 		log.Printf("[WARN] B站风控: v_voucher detected (需要人机验证)")
-		return fmt.Errorf("%s: %w", "v_voucher detected, 需要人机验证", ErrRateLimited)
+		return NewRiskControlError("v_voucher detected, 需要人机验证")
 	}
 
 	return nil
