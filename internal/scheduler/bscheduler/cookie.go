@@ -92,6 +92,30 @@ func (s *BiliScheduler) VerifyCookie(trigger string) {
 }
 
 func (s *BiliScheduler) tryCookieRefresh(trigger string) {
+	// 优先从 DB credential_json 获取 Credential（含正确的 ACTimeValue/refresh_token）
+	// 走 credential.go:Refresh() 正确流程（需要 correspond-path 获取 refresh_csrf）
+	// 旧的 RefreshCookie(cookiePath) 路径使用错误的 refresh_csrf，会导致刷新后 session 无效
+	credJSON, dbErr := s.db.GetSetting("credential_json")
+	if dbErr == nil && credJSON != "" {
+		cred := bilibili.CredentialFromJSON(credJSON)
+		if cred != nil && !cred.IsEmpty() && cred.ACTimeValue != "" {
+			httpClient := s.getBili().GetHTTPClient()
+			newCred, err := cred.Refresh(httpClient)
+			if err != nil {
+				log.Printf("[bscheduler][WARN] Credential refresh failed (trigger: %s): %v", trigger, err)
+				s.notifier.Send(notify.EventCookieExpired, "Cookie 刷新失败", fmt.Sprintf("错误: %v，请手动更新 Cookie", err))
+				return
+			}
+			if err := s.db.SetSetting("credential_json", newCred.ToJSON()); err != nil {
+				log.Printf("[bscheduler][WARN] Save refreshed credential failed: %v", err)
+			}
+			s.UpdateCredential(newCred)
+			log.Printf("[bscheduler][INFO] Credential 自动刷新成功 (trigger: %s)", trigger)
+			return
+		}
+	}
+
+	// fallback：无 DB credential，尝试 cookie 文件路径
 	cookiePath := s.cookiePath
 	if cookiePath == "" {
 		log.Printf("[bscheduler][WARN] No cookie path configured, cannot auto-refresh")
