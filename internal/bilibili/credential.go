@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/bits"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -441,19 +442,25 @@ func GetBuvid3(httpClient *http.Client) (string, error) {
 
 // ActivateBuvid 通过 ExClimbWuzhi 接口激活 buvid3/buvid4
 // B站风控要求：从 SPI 拿到的 buvid 必须经过此步骤"激活"，否则服务端不认
-// 注意：此接口必须在未登录态调用（仅携带 buvid 相关 cookie），携带 SESSDATA 会返回 130212 错误
+// 请求格式：Content-Type: application/json，body = {"payload":"<inner_json>"}
+// Cookie 需携带 buvid3、buvid4、_uuid、buvid_fp 四个字段
 // 参考: https://github.com/Nemo2011/bilibili-api (network.py)
 func ActivateBuvid(httpClient *http.Client, buvid3, buvid4 string) error {
-	// 构造浏览器指纹 payload
-	payload := map[string]interface{}{
-		"3064":   1,
-		"5062":   fmt.Sprintf("%d", time.Now().UnixMilli()),
-		"03bf":   "https://www.bilibili.com/",
-		"39c8":   "333.788.fp.risk",
-		"34f1":   "",
-		"d402":   "",
-		"654a":   "",
-		"6e7c":   "841x959",
+	// Step 1: 生成 _uuid（同时用作 innerPayload 的 df35 字段）
+	uuid := genUUIDInfoc()
+
+	// Step 2: 构造 inner payload
+	//   "5062" 必须是整数（毫秒时间戳）
+	//   "df35" 必须与 Cookie 中的 _uuid 值一致
+	innerPayload := map[string]interface{}{
+		"3064": 1,
+		"5062": time.Now().UnixMilli(),
+		"03bf": "https://www.bilibili.com/",
+		"39c8": "333.788.fp.risk",
+		"34f1": "",
+		"d402": "",
+		"654a": "",
+		"6e7c": "841x959",
 		"3c43": map[string]interface{}{
 			"2673": 0,
 			"3c45": "",
@@ -490,28 +497,42 @@ func ActivateBuvid(httpClient *http.Client, buvid3, buvid4 string) error {
 		"07a4": "zh-CN",
 		"5f45": 0,
 		"ua":   randUA(),
+		"df35": uuid,
 	}
 
-	payloadBytes, err := json.Marshal(payload)
+	// Step 3: 序列化 inner payload → JSON 字符串
+	innerBytes, err := json.Marshal(innerPayload)
 	if err != nil {
-		return fmt.Errorf("marshal ExClimbWuzhi payload: %w", err)
+		return fmt.Errorf("marshal ExClimbWuzhi inner payload: %w", err)
 	}
 
-	postData := url.Values{}
-	postData.Set("payload", string(payloadBytes))
+	// Step 4: 计算 buvid_fp = MurmurHash3 x64 128(inner_json, seed=31) → hex32
+	h1, h2 := murmur3x64_128(innerBytes, 31)
+	buvidFP := fmt.Sprintf("%016x%016x", h1, h2)
+
+	// Step 5: 构造 outer payload = {"payload": "<inner_json_string>"}
+	outerPayload := map[string]string{"payload": string(innerBytes)}
+	bodyBytes, err := json.Marshal(outerPayload)
+	if err != nil {
+		return fmt.Errorf("marshal ExClimbWuzhi outer payload: %w", err)
+	}
 
 	req, err := http.NewRequest("POST",
 		"https://api.bilibili.com/x/internal/gaia-gateway/ExClimbWuzhi",
-		strings.NewReader(postData.Encode()))
+		strings.NewReader(string(bodyBytes)))
 	if err != nil {
 		return fmt.Errorf("create ExClimbWuzhi request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", randUA())
 	req.Header.Set("Referer", "https://www.bilibili.com")
 
-	// 构造 Cookie：仅携带 buvid3/buvid4，不能带 SESSDATA（登录态会被 B站拒绝，返回 130212）
-	cookieParts := []string{"buvid3=" + buvid3}
+	// Step 6: Cookie 携带 4 个字段：buvid3、buvid4、_uuid、buvid_fp
+	cookieParts := []string{
+		"buvid3=" + buvid3,
+		"_uuid=" + uuid,
+		"buvid_fp=" + buvidFP,
+	}
 	if buvid4 != "" {
 		cookieParts = append(cookieParts, "buvid4="+buvid4)
 	}
@@ -529,16 +550,152 @@ func ActivateBuvid(httpClient *http.Client, buvid3, buvid4 string) error {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		// 激活失败不阻塞，记录警告即可
 		log.Printf("[buvid] ExClimbWuzhi parse response failed: %v (body=%s)", err, string(body))
 		return nil
 	}
 	if result.Code != 0 {
 		log.Printf("[buvid] ExClimbWuzhi returned code=%d msg=%s (non-fatal)", result.Code, result.Message)
 	} else {
-		log.Printf("[buvid] ExClimbWuzhi 激活成功")
+		log.Printf("[buvid] ExClimbWuzhi 激活成功 (buvid_fp=%s...)", buvidFP[:8])
 	}
 	return nil
+}
+
+// genUUIDInfoc 生成 B站风控所需的 _uuid cookie 格式
+// 格式: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX{5位时间戳尾}infoc
+// 字符集: 大写十六进制 0123456789ABCDEF
+func genUUIDInfoc() string {
+	const hexChars = "0123456789ABCDEF"
+	genSeg := func(n int) string {
+		buf := make([]byte, n)
+		_, _ = rand.Read(buf)
+		seg := make([]byte, n)
+		for i, b := range buf {
+			seg[i] = hexChars[b&0x0F]
+		}
+		return string(seg)
+	}
+	parts := []string{genSeg(8), genSeg(4), genSeg(4), genSeg(4), genSeg(12)}
+	base := strings.Join(parts, "-")
+	millis := time.Now().UnixMilli()
+	return base + fmt.Sprintf("%05d", millis%100000) + "infoc"
+}
+
+// murmur3x64_128 实现 MurmurHash3 x64 128-bit（带 seed）
+// 参考: https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp
+// 用于计算 buvid_fp：输入 inner payload JSON 字符串，seed=31
+func murmur3x64_128(data []byte, seed uint32) (h1, h2 uint64) {
+	const (
+		c1 = uint64(0x87c37b91114253d5)
+		c2 = uint64(0x4cf5ad432745937f)
+	)
+	h1 = uint64(seed)
+	h2 = uint64(seed)
+	length := len(data)
+	nblocks := length / 16
+	for i := 0; i < nblocks; i++ {
+		k1 := readUint64LE(data, i*16)
+		k2 := readUint64LE(data, i*16+8)
+		k1 *= c1
+		k1 = bits.RotateLeft64(k1, 31)
+		k1 *= c2
+		h1 ^= k1
+		h1 = bits.RotateLeft64(h1, 27)
+		h1 += h2
+		h1 = h1*5 + 0x52dce729
+		k2 *= c2
+		k2 = bits.RotateLeft64(k2, 33)
+		k2 *= c1
+		h2 ^= k2
+		h2 = bits.RotateLeft64(h2, 31)
+		h2 += h1
+		h2 = h2*5 + 0x38495ab5
+	}
+	tail := data[nblocks*16:]
+	var k1, k2 uint64
+	switch len(tail) & 15 {
+	case 15:
+		k2 ^= uint64(tail[14]) << 48
+		fallthrough
+	case 14:
+		k2 ^= uint64(tail[13]) << 40
+		fallthrough
+	case 13:
+		k2 ^= uint64(tail[12]) << 32
+		fallthrough
+	case 12:
+		k2 ^= uint64(tail[11]) << 24
+		fallthrough
+	case 11:
+		k2 ^= uint64(tail[10]) << 16
+		fallthrough
+	case 10:
+		k2 ^= uint64(tail[9]) << 8
+		fallthrough
+	case 9:
+		k2 ^= uint64(tail[8])
+		k2 *= c2
+		k2 = bits.RotateLeft64(k2, 33)
+		k2 *= c1
+		h2 ^= k2
+		fallthrough
+	case 8:
+		k1 ^= uint64(tail[7]) << 56
+		fallthrough
+	case 7:
+		k1 ^= uint64(tail[6]) << 48
+		fallthrough
+	case 6:
+		k1 ^= uint64(tail[5]) << 40
+		fallthrough
+	case 5:
+		k1 ^= uint64(tail[4]) << 32
+		fallthrough
+	case 4:
+		k1 ^= uint64(tail[3]) << 24
+		fallthrough
+	case 3:
+		k1 ^= uint64(tail[2]) << 16
+		fallthrough
+	case 2:
+		k1 ^= uint64(tail[1]) << 8
+		fallthrough
+	case 1:
+		k1 ^= uint64(tail[0])
+		k1 *= c1
+		k1 = bits.RotateLeft64(k1, 31)
+		k1 *= c2
+		h1 ^= k1
+	}
+	h1 ^= uint64(length)
+	h2 ^= uint64(length)
+	h1 += h2
+	h2 += h1
+	h1 = fmix64(h1)
+	h2 = fmix64(h2)
+	h1 += h2
+	h2 += h1
+	return h1, h2
+}
+
+func fmix64(k uint64) uint64 {
+	k ^= k >> 33
+	k *= 0xff51afd7ed558ccd
+	k ^= k >> 33
+	k *= 0xc4ceb9fe1a85ec53
+	k ^= k >> 33
+	return k
+}
+
+func readUint64LE(data []byte, offset int) uint64 {
+	return uint64(data[offset]) |
+		uint64(data[offset+1])<<8 |
+		uint64(data[offset+2])<<16 |
+		uint64(data[offset+3])<<24 |
+		uint64(data[offset+4])<<32 |
+		uint64(data[offset+5])<<40 |
+		uint64(data[offset+6])<<48 |
+		uint64(data[offset+7])<<56
 }
 
 // truncateStr 截断字符串用于日志
