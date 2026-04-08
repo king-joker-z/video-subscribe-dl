@@ -175,16 +175,6 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxCreated); err != nil {
 			log.Printf("[bscheduler][WARN] 更新 latest_video_at 失败: %v", err)
 		}
-	} else if isFirstScan && totalFetched == 0 {
-		// 首次全量扫描被风控打断（第1页就失败，0条数据），maxCreated=0 不会更新时间戳。
-		// 若不处理，下次检查仍是 isFirstScan=true，反复触发全量扫描形成死循环。
-		// 用当前时间 -7天 作为基准，强制下次变为增量扫描，同时不会遗漏近期视频。
-		fallbackTS := time.Now().Add(-7 * 24 * time.Hour).Unix()
-		if err := s.db.UpdateSourceLatestVideoAt(src.ID, fallbackTS); err != nil {
-			log.Printf("[bscheduler][WARN] 首次扫描风控，设置 fallback latest_video_at 失败: %v", err)
-		} else {
-			log.Printf("[bscheduler·首次全量] %s: 首次扫描被风控打断，设置 latest_video_at=now-7d，下次将以增量模式重试", uploaderName)
-		}
 	}
 
 	if isFirstScan {
@@ -276,14 +266,6 @@ func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, m
 	if maxCreated > latestVideoAt {
 		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxCreated); err != nil {
 			log.Printf("[bscheduler][WARN] 更新 latest_video_at 失败: %v", err)
-		}
-	} else if isFirstScan && len(videos) == 0 {
-		// 动态 API 首次扫描也返回 0（风控/Cookie 不足），同样设置 fallback 避免死循环
-		fallbackTS := time.Now().Add(-7 * 24 * time.Hour).Unix()
-		if err := s.db.UpdateSourceLatestVideoAt(src.ID, fallbackTS); err != nil {
-			log.Printf("[bscheduler][WARN] 动态API首次扫描风控，设置 fallback latest_video_at 失败: %v", err)
-		} else {
-			log.Printf("[bscheduler·动态API] %s: 首次扫描返回 0，设置 latest_video_at=now-7d，下次将以增量模式重试", uploaderName)
 		}
 	}
 
