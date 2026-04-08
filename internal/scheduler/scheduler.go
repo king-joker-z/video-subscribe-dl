@@ -267,7 +267,11 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) checkAll() {
 	// 先检查 Credential 是否需要刷新（委托给 bscheduler）
-	s.bili.CheckAndRefreshCredential()
+	// 刷新后等待 30s：B站新 session 需要时间建立信任，立即请求必然触发 -352
+	if refreshed := s.bili.CheckAndRefreshCredential(); refreshed {
+		log.Printf("[scheduler] Cookie 已刷新，等待 30s 让新 session 热身后再开始检查...")
+		time.Sleep(30 * time.Second)
+	}
 	s.bili.VerifyCookie("scheduled sync")
 
 	// Retry failed downloads

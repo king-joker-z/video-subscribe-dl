@@ -164,24 +164,25 @@ func (s *BiliScheduler) PeriodicCookieCheck() {
 }
 
 // CheckAndRefreshCredential 检查 DB 中的 Credential 是否需要刷新
-func (s *BiliScheduler) CheckAndRefreshCredential() {
+// 返回 true 表示实际执行了刷新（调用方应等待一段时间再发业务请求）
+func (s *BiliScheduler) CheckAndRefreshCredential() bool {
 	credJSON, err := s.db.GetSetting("credential_json")
 	if err != nil || credJSON == "" {
-		return
+		return false
 	}
 	cred := bilibili.CredentialFromJSON(credJSON)
 	if cred == nil || cred.IsEmpty() {
-		return
+		return false
 	}
 
 	httpClient := s.getBili().GetHTTPClient()
 	needRefresh, err := cred.NeedRefresh(httpClient)
 	if err != nil {
 		log.Printf("[bscheduler] NeedRefresh check failed: %v", err)
-		return
+		return false
 	}
 	if !needRefresh {
-		return
+		return false
 	}
 
 	log.Printf("[bscheduler] Cookie needs refresh, attempting auto-refresh...")
@@ -189,14 +190,15 @@ func (s *BiliScheduler) CheckAndRefreshCredential() {
 	if err != nil {
 		log.Printf("[bscheduler][WARN] Credential auto-refresh failed: %v", err)
 		s.notifier.Send(notify.EventCookieExpired, "凭证自动刷新失败", err.Error())
-		return
+		return false
 	}
 
 	if err := s.db.SetSetting("credential_json", newCred.ToJSON()); err != nil {
 		log.Printf("[bscheduler][WARN] Save refreshed credential failed: %v", err)
-		return
+		return false
 	}
 
 	s.UpdateCredential(newCred)
 	log.Printf("[bscheduler] Auto-refresh successful")
+	return true
 }
