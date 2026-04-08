@@ -261,6 +261,10 @@ func (c *Client) get(ctx context.Context, rawURL string) ([]byte, int, error) {
 	// 不手动设置 Accept-Encoding，让 Go http.Client 自动处理 gzip 解压
 	// 手动设置后 Go 不会自动解压，会拿到原始压缩数据
 	req.Header.Set("Connection", "keep-alive")
+	// 动态提取 host 设置 Referer，cn.pornhub.com 等镜像域名无 Referer 会返回 403
+	if u, err := url.Parse(rawURL); err == nil {
+		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
+	}
 	if cookie := c.getCookie(); cookie != "" {
 		req.Header.Set("Cookie", cookie)
 	}

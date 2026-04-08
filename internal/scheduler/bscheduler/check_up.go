@@ -347,6 +347,13 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
+				// 第一页风控：降级到动态 API，避免空列表误判为"无缺失"
+				if page == 1 {
+					log.Printf("[bscheduler·full-scan] %s: 投稿 API 风控（%v），降级到动态 API 做全量补漏", uploaderName, err)
+					s.TriggerCooldown()
+					s.fullScanUPDynamic(src, client, mid, uploaderName)
+					return
+				}
 				s.TriggerCooldown()
 				log.Printf("[bscheduler·full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
 				break
