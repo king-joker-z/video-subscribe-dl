@@ -81,11 +81,14 @@ func (d *DB) GetDownloads(limit int) ([]Download, error) {
 
 func (d *DB) GetDownloadsByStatus(status string, limit int) ([]Download, error) {
 	rows, err := d.Query(`
-		SELECT id, source_id, video_id, COALESCE(title,''), COALESCE(filename,''), status,
-		       COALESCE(file_path,''), file_size, COALESCE(uploader,''), COALESCE(description,''),
-		       COALESCE(thumbnail,''), COALESCE(thumb_path,''), duration, downloaded_at,
-		       COALESCE(error_message,''), COALESCE(retry_count,0), COALESCE(last_error,''), created_at
-		FROM downloads WHERE status = ? ORDER BY created_at DESC LIMIT ?
+		SELECT d.id, d.source_id, d.video_id, COALESCE(d.title,''), COALESCE(d.filename,''), d.status,
+		       COALESCE(d.file_path,''), d.file_size, COALESCE(d.uploader,''), COALESCE(d.description,''),
+		       COALESCE(d.thumbnail,''), COALESCE(d.thumb_path,''), d.duration, d.downloaded_at,
+		       COALESCE(d.error_message,''), COALESCE(d.retry_count,0), COALESCE(d.last_error,''), d.created_at
+		FROM downloads d
+		JOIN sources s ON d.source_id = s.id
+		WHERE d.status = ? AND s.enabled = 1
+		ORDER BY d.created_at DESC LIMIT ?
 	`, status, limit)
 	if err != nil {
 		return nil, err

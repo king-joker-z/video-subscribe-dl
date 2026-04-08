@@ -436,10 +436,11 @@ func (s *Scheduler) submitDownload(dl db.Download) error {
 	if err != nil || src == nil {
 		return fmt.Errorf("source %d not found", dl.SourceID)
 	}
-	// 禁用的订阅源：将 pending 记录标为 skipped，避免每次扫描重复捞出
+	// 禁用的订阅源：跳过本次提交，但保留 pending 状态
+	// 不改为 skipped，因为 skipped 会阻止 IsVideoDownloaded 重新下载：
+	// 用户重新 enable 后，这些 pending 记录应在下次 ProcessAllPending 时正常下载
 	if !src.Enabled {
-		log.Printf("[process-pending] Source %d (%s) is disabled, marking download %d as skipped", src.ID, src.Name, dl.ID)
-		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: source disabled")
+		log.Printf("[process-pending] Source %d (%s) is disabled, skipping download %d (keeping pending)", src.ID, src.Name, dl.ID)
 		return nil
 	}
 	if src.Type == "douyin" || src.Type == "douyin_mix" {
