@@ -589,7 +589,9 @@ func checkRateLimitCode(body []byte) error {
 	if err := json.Unmarshal(body, &base); err != nil {
 		return nil // 无法解析就不检测
 	}
-	// [FIXED: P1-1] 将风控错误包装为 ErrRateLimited，使调用者可通过 errors.Is(err, ErrRateLimited) 统一检测
+	// 将风控/鉴权错误分类返回：
+	//   -352/-401/-412 → ErrRateLimited（触发冷却）
+	//   -403           → *BiliError{ErrKindErrorResponse}（WBI 签名失效，清缓存重试，不触发冷却）
 	switch base.Code {
 	case -352:
 		log.Printf("[WARN] B站风控: code=-352 (风控校验失败)")
@@ -599,7 +601,7 @@ func checkRateLimitCode(body []byte) error {
 		return fmt.Errorf("%s: %w", "未登录/鉴权失败", ErrRateLimited)
 	case -403:
 		log.Printf("[WARN] B站风控: code=-403 (访问权限不足/鉴权异常)")
-		return fmt.Errorf("%s: %w", "访问权限不足", ErrRateLimited)
+		return NewErrorResponse(-403, "访问权限不足")
 	case -412:
 		log.Printf("[WARN] B站风控: code=-412 (请求过于频繁)")
 		return fmt.Errorf("%s: %w", "请求过于频繁", ErrRateLimited)

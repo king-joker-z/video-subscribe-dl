@@ -351,6 +351,12 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 				log.Printf("[bscheduler·full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
 				break
 			}
+			// 第一页 -403（WBI 签名失效），降级到动态 API 做全量补漏
+			if page == 1 && bilibili.IsAccessDenied(err) {
+				log.Printf("[bscheduler·full-scan] %s: 投稿 API -403，降级到动态 API 做全量补漏", uploaderName)
+				s.fullScanUPDynamic(src, client, mid, uploaderName)
+				return
+			}
 			log.Printf("[bscheduler·full-scan] Get videos page %d failed: %v", page, err)
 			break
 		}
@@ -413,6 +419,45 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 	}
 
 	log.Printf("[bscheduler·full-scan] %s: 扫描完成，创建 %d 个待下载任务", uploaderName, created)
+}
+
+// fullScanUPDynamic 使用动态 API 做全量补漏扫描（投稿 API -403 时的降级路径）
+// 拉取该 UP 主所有动态视频，将缺失的创建为 pending 记录
+func (s *BiliScheduler) fullScanUPDynamic(src db.Source, client *bilibili.Client, mid int64, uploaderName string) {
+	log.Printf("[bscheduler·full-scan·动态API] %s: 开始动态 API 全量补漏", uploaderName)
+
+	videos, err := client.FetchDynamicVideosIncremental(mid, 0) // 0 = 拉取全部
+	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.TriggerCooldown()
+		}
+		log.Printf("[bscheduler·full-scan·动态API] %s: 拉取动态失败: %v", uploaderName, err)
+		return
+	}
+
+	created := 0
+	for _, v := range videos {
+		exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+		if exists {
+			continue
+		}
+		dl := &db.Download{
+			SourceID:  src.ID,
+			VideoID:   v.BvID,
+			Title:     v.Title,
+			Uploader:  uploaderName,
+			Thumbnail: v.Cover,
+			Status:    "pending",
+		}
+		if _, err := s.db.CreateDownload(dl); err != nil {
+			log.Printf("[bscheduler·full-scan·动态API] 创建记录失败 %s: %v", v.BvID, err)
+			continue
+		}
+		created++
+	}
+
+	log.Printf("[bscheduler·full-scan·动态API] %s: 扫描完成，动态共 %d 个，创建 %d 个待下载任务",
+		uploaderName, len(videos), created)
 }
 
 // processCollection UP 主空间内合集

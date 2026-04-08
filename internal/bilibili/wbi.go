@@ -247,8 +247,9 @@ func (c *Client) getWbiWithReferer(baseURL string, params url.Values, result int
 		}
 
 		// 收到风控错误且还有重试机会：清除 WBI 缓存，等待后重试
-		if IsRiskControl(reqErr) && attempt < maxAttempts {
-			log.Printf("[wbi] -352 风控，清除 WBI 缓存后重试 (attempt=%d, url=%s)", attempt, baseURL)
+		// -403 同样需要清缓存重试（WBI 签名密钥过期导致鉴权失败）
+		if (IsRiskControl(reqErr) || IsAccessDenied(reqErr)) && attempt < maxAttempts {
+			log.Printf("[wbi] 风控/鉴权失败，清除 WBI 缓存后重试 (attempt=%d, url=%s, err=%v)", attempt, baseURL, reqErr)
 			ClearWbiCache()
 			time.Sleep(time.Duration(2000+rand.Intn(1000)) * time.Millisecond)
 			continue
