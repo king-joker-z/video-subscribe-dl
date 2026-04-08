@@ -3,6 +3,7 @@
 package bscheduler
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -133,6 +134,11 @@ func (s *BiliScheduler) LastCheckAt() time.Time {
 // CheckSource 根据 source 类型分发到对应的检查方法
 func (s *BiliScheduler) CheckSource(src db.Source) {
 	defer s.setLastCheckAt(time.Now())
+	// per-source 风控冷却：新 UP 全量扫描被风控后单独冷却，避免每次调度都立即重试
+	if s.isSourceInCooldown(src.ID) {
+		log.Printf("[bscheduler] source %d (%s) 处于风控冷却期，跳过本次检查", src.ID, src.Name)
+		return
+	}
 	switch src.Type {
 	case "season":
 		s.CheckSeason(src)

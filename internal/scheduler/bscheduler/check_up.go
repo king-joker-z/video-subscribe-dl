@@ -83,6 +83,10 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 			if bilibili.IsRiskControl(err) || bilibili.IsAccessDenied(err) {
 				if page == 1 {
 					log.Printf("[bscheduler·投稿API] %s: %v，降级到动态 API", uploaderName, err)
+					// 首次全量扫描 page1 就风控：降级到动态 API，动态 API 内部会按需设置 source 冷却
+					if isFirstScan && bilibili.IsRiskControl(err) {
+						s.setSourceCooldown(src.ID)
+					}
 					s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
 					return
 				}
@@ -208,10 +212,22 @@ func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, m
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
 			s.TriggerCooldown()
+			if isFirstScan {
+				s.setSourceCooldown(src.ID)
+			}
 			return
 		}
 		log.Printf("[bscheduler·动态API] 拉取动态失败 (mid=%d): %v", mid, err)
+		if isFirstScan {
+			s.setSourceCooldown(src.ID)
+		}
 		return
+	}
+	// 首次全量扫描但动态 API 返回 0 条（Cookie 不足/被限制）：
+	// 设置 per-source 冷却，避免下次调度立即重试造成持续风控
+	if isFirstScan && len(videos) == 0 {
+		log.Printf("[bscheduler·动态API] %s: 首次扫描返回 0 条，设置 source 冷却 %.0f 分钟后重试", uploaderName, sourceCooldownDuration.Minutes())
+		s.setSourceCooldown(src.ID)
 	}
 
 	processedBVIDs := map[string]bool{}

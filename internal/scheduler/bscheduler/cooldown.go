@@ -1,12 +1,46 @@
 package bscheduler
 
 import (
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/notify"
 )
+
+// ─── Per-Source 风控冷却 ───────────────────────────────────────────────────────
+// 用 settings 表存储每个 source 的冷却截止时间，key = "source_cooldown_{id}"
+// 场景：新 UP 首次全量扫描触发风控时，对该 source 单独设置冷却，
+// 冷却期间跳过该 source，到期后重新尝试全量扫描（历史数据不丢失）
+
+const sourceCooldownDuration = 30 * time.Minute
+
+// setSourceCooldown 为指定 source 设置风控冷却
+func (s *BiliScheduler) setSourceCooldown(srcID int64) {
+	until := time.Now().Add(sourceCooldownDuration)
+	key := fmt.Sprintf("source_cooldown_%d", srcID)
+	if err := s.db.SetSetting(key, strconv.FormatInt(until.Unix(), 10)); err != nil {
+		log.Printf("[bscheduler] setSourceCooldown(%d) failed: %v", srcID, err)
+		return
+	}
+	log.Printf("[bscheduler] source %d 触发风控，冷却 %.0f 分钟后重试", srcID, sourceCooldownDuration.Minutes())
+}
+
+// isSourceInCooldown 检查指定 source 是否在冷却期内
+func (s *BiliScheduler) isSourceInCooldown(srcID int64) bool {
+	key := fmt.Sprintf("source_cooldown_%d", srcID)
+	val, err := s.db.GetSetting(key)
+	if err != nil || val == "" {
+		return false
+	}
+	ts, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return false
+	}
+	return time.Now().Unix() < ts
+}
 
 // TriggerCooldown 触发 B站风控冷却
 func (s *BiliScheduler) TriggerCooldown() {
