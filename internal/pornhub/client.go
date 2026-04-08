@@ -250,6 +250,11 @@ func (c *Client) GetVideoThumbnail(videoPageURL string) string {
 
 // get 发送 GET 请求，返回响应体字节
 func (c *Client) get(ctx context.Context, rawURL string) ([]byte, int, error) {
+	return c.getWithReferer(ctx, rawURL, "")
+}
+
+// getWithReferer 发送 GET 请求，支持指定 Referer（空字符串时自动推断为域名根）
+func (c *Client) getWithReferer(ctx context.Context, rawURL string, referer string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return nil, 0, err
@@ -261,8 +266,11 @@ func (c *Client) get(ctx context.Context, rawURL string) ([]byte, int, error) {
 	// 不手动设置 Accept-Encoding，让 Go http.Client 自动处理 gzip 解压
 	// 手动设置后 Go 不会自动解压，会拿到原始压缩数据
 	req.Header.Set("Connection", "keep-alive")
-	// 动态提取 host 设置 Referer，cn.pornhub.com 等镜像域名无 Referer 会返回 403
-	if u, err := url.Parse(rawURL); err == nil {
+	// Referer：优先用调用方指定的（翻页时传上一页URL），否则推断为域名根路径
+	// cn.pornhub.com 等镜像域名无 Referer 会返回 403
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	} else if u, err := url.Parse(rawURL); err == nil {
 		req.Header.Set("Referer", u.Scheme+"://"+u.Host+"/")
 	}
 	if cookie := c.getCookie(); cookie != "" {
@@ -501,6 +509,7 @@ func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, 
 
 	// 探测翻页：不依赖 extractMaxPage，只要当页有视频就继续翻
 	// 避免 Pornhub 分页 UI 只展示临近页码导致总页数被低估
+	prevPageURL := videosURL // 上一页 URL，用作下一页请求的 Referer
 	for page := 2; page <= c.effectiveMaxPage(); page++ {
 		// context check at top of each iteration
 		select {
@@ -510,7 +519,8 @@ func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, 
 		default:
 		}
 		pageURL := fmt.Sprintf("%s?page=%d", videosURL, page)
-		pageBody, pageStatus, pageErr := c.get(ctx, pageURL)
+		// 翻页时将上一页 URL 作为 Referer，更贴近真实浏览器行为，避免镜像域名 403
+		pageBody, pageStatus, pageErr := c.getWithReferer(ctx, pageURL, prevPageURL)
 		if pageErr != nil {
 			log.Printf("[pornhub·client] 获取第 %d 页失败: %v", page, pageErr)
 			// If the error was caused by context cancellation, propagate it so
@@ -541,6 +551,7 @@ func (c *Client) GetModelVideos(ctx context.Context, modelURL string) ([]Video, 
 			break
 		}
 		allVideos = append(allVideos, pageVideos...)
+		prevPageURL = pageURL // 更新上一页 URL 供下次翻页使用
 		log.Printf("[pornhub·client] 第 %d 页获取 %d 条，累计 %d 条", page, len(pageVideos), len(allVideos))
 
 		// [FIXED: P1-10] 提取页间延迟为具名常量，便于统一调整反爬策略
