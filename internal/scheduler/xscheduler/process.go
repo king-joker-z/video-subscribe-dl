@@ -333,12 +333,17 @@ func extractVideoPageTitle(body string) string {
 }
 
 // downloadXChinaHLS 使用 ffmpeg 下载 HLS m3u8 流并转存为 mp4
+// 优化：增大 probesize/analyzeduration 减少探测延迟，增大 thread_queue_size 提高吞吐，
+// 并行分片下载（-http_multiple 1）+ 持久连接，避免每段重新握手。
 func downloadXChinaHLS(ctx context.Context, m3u8URL, destPath string, _ int64, _ string, cb xcProgressCallback) (int64, error) {
 	tmpPath := destPath + ".tmp"
 	_ = os.Remove(tmpPath)
 
 	args := []string{
 		"-y",
+		// 减少探测时间，避免 ffmpeg 在开始下载前花大量时间分析流
+		"-probesize", "32",
+		"-analyzeduration", "0",
 		// 网络层优化：持久连接 + 并行段下载 + 自动重连
 		"-reconnect", "1",
 		"-reconnect_streamed", "1",
@@ -349,9 +354,13 @@ func downloadXChinaHLS(ctx context.Context, m3u8URL, destPath string, _ int64, _
 		"-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 		"-headers", "Referer: https://en.xchina.co/\r\n",
 		"-i", m3u8URL,
+		// 增大线程队列，减少解复用器等待
+		"-thread_queue_size", "512",
 		"-c", "copy",
 		"-bsf:a", "aac_adtstoasc",
 		"-f", "mp4",
+		// 允许非单调时间戳（HLS 分片常见）
+		"-fflags", "+genpts+discardcorrupt",
 		tmpPath,
 	}
 

@@ -800,6 +800,7 @@ func (s *Scheduler) PauseXC(reason string) {
 func (s *Scheduler) ResumeXC() {
 	if s.xc != nil {
 		s.xc.Resume()
+		s.xc.ClearCooldown()
 	}
 }
 

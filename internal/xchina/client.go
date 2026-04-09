@@ -246,65 +246,97 @@ func extractModelNameRegex(body string) string {
 }
 
 // extractVideosFromHTML 从页面 HTML 提取视频列表
-// 策略：找到每个视频链接后，在其前后 800 字节的局部片段中就近提取 title/thumb，
-// 避免全局 FindAllStringSubmatch 索引错位导致 title 对不上 videoID。
+// 策略：找到每个视频链接后，精确提取该 <a> 标签自身的 title 属性作为标题，
+// 以及链接后方 400 字节内的第一个 img src 作为封面，避免匹配到无关元素。
 func extractVideosFromHTML(body, pageURL string) []Video {
 	var videos []Video
 	seen := make(map[string]bool)
 
-	// 找出每个视频链接在 body 中的位置
-	linkRe := regexp.MustCompile(`href=["'](/video/id-([a-fA-F0-9]+)\.html)["']`)
-	// title 候选：<a> 的 title 属性、img 的 alt 属性、附近的纯文字标签
-	titleAttrRe := regexp.MustCompile(`(?i)title=["']([^"']{2,120})["']`)
-	altAttrRe := regexp.MustCompile(`(?i)alt=["']([^"']{2,120})["']`)
-	// 任意短标签内的文字（<p>/<span>/<div>/<h3> 等）
+	// 匹配完整的 <a href="/video/id-xxx.html" ... title="视频标题" ...> 标签
+	// 同时捕获 title 属性（可能在 href 前或后）
+	linkRe := regexp.MustCompile(`(?i)<a\b([^>]*\bhref=["']/video/id-([a-fA-F0-9]+)\.html["'][^>]*)>`)
+	// 从 <a> 标签属性串中提取 title 属性
+	aTitleRe := regexp.MustCompile(`(?i)\btitle=["']([^"']{2,200})["']`)
+	// 从 <a> 标签属性串中提取 href 路径
+	aHrefRe := regexp.MustCompile(`(?i)\bhref=["'](/video/id-[a-fA-F0-9]+\.html)["']`)
+	// 封面：链接后方的 img src（含 data-src 懒加载）
+	thumbRe := regexp.MustCompile(`(?i)<img\b[^>]+\bsrc=["']([^"']+)["']`)
+	thumbLazySrcRe := regexp.MustCompile(`(?i)<img\b[^>]+\bdata-src=["']([^"']+)["']`)
+	// img alt 属性作为标题备选
+	altRe := regexp.MustCompile(`(?i)\balt=["']([^"']{2,200})["']`)
+	// 附近标签内文字（仅取链接后方，避免误取前面内容）
 	innerTextRe := regexp.MustCompile(`(?i)<(?:p|span|div|h\d)[^>]*>\s*([^<]{2,120})\s*</(?:p|span|div|h\d)>`)
-	thumbRe := regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
 
 	allIdx := linkRe.FindAllStringSubmatchIndex(body, -1)
 	for _, idx := range allIdx {
 		if len(idx) < 6 {
 			continue
 		}
-		linkPath := body[idx[2]:idx[3]] // /video/id-xxx.html
+		attrStr := body[idx[2]:idx[3]] // <a> 的全部属性内容
 		videoID := body[idx[4]:idx[5]]
 		if seen[videoID] {
 			continue
 		}
 		seen[videoID] = true
 
+		linkPath := ""
+		if m := aHrefRe.FindStringSubmatch(attrStr); len(m) > 1 {
+			linkPath = m[1]
+		}
+		if linkPath == "" {
+			continue
+		}
+
 		v := Video{
 			VideoID: videoID,
 			PageURL: xcBaseURL + linkPath,
 		}
 
-		// 取链接前后各 800 字节作为局部搜索窗口
-		winStart := idx[0] - 800
-		if winStart < 0 {
-			winStart = 0
-		}
-		winEnd := idx[1] + 800
-		if winEnd > len(body) {
-			winEnd = len(body)
-		}
-		window := body[winStart:winEnd]
-
-		// 优先：title 属性
-		if m := titleAttrRe.FindStringSubmatch(window); len(m) > 1 {
+		// 优先：<a> 标签自身的 title 属性（最准确）
+		if m := aTitleRe.FindStringSubmatch(attrStr); len(m) > 1 {
 			v.Title = strings.TrimSpace(m[1])
 		}
-		// 次选：alt 属性（img alt 通常就是视频名）
-		if v.Title == "" {
-			if m := altAttrRe.FindStringSubmatch(window); len(m) > 1 {
-				v.Title = strings.TrimSpace(m[1])
+
+		// 链接后方 600 字节窗口，用于提取封面和备用标题
+		afterStart := idx[1]
+		afterEnd := afterStart + 600
+		if afterEnd > len(body) {
+			afterEnd = len(body)
+		}
+		afterWindow := body[afterStart:afterEnd]
+
+		// 封面：优先 data-src（懒加载），其次 src；取链接后方第一个 img
+		if v.Thumbnail == "" {
+			if m := thumbLazySrcRe.FindStringSubmatch(afterWindow); len(m) > 1 {
+				src := m[1]
+				if !strings.HasPrefix(src, "data:") && len(src) > 10 {
+					v.Thumbnail = src
+				}
 			}
 		}
-		// 再次：附近标签内文字
+		if v.Thumbnail == "" {
+			if m := thumbRe.FindStringSubmatch(afterWindow); len(m) > 1 {
+				src := m[1]
+				if !strings.HasPrefix(src, "data:") && len(src) > 10 {
+					v.Thumbnail = src
+				}
+			}
+		}
+
+		// 标题备选：img alt（链接后方第一个 img 标签内）
 		if v.Title == "" {
-			for _, m := range innerTextRe.FindAllStringSubmatch(window, -1) {
+			imgTagRe := regexp.MustCompile(`(?i)<img\b[^>]+>`)
+			if imgTag := imgTagRe.FindString(afterWindow); imgTag != "" {
+				if ma := altRe.FindStringSubmatch(imgTag); len(ma) > 1 {
+					v.Title = strings.TrimSpace(ma[1])
+				}
+			}
+		}
+		// 再次备选：链接后方标签内文字
+		if v.Title == "" {
+			for _, m := range innerTextRe.FindAllStringSubmatch(afterWindow, -1) {
 				if len(m) > 1 {
 					t := strings.TrimSpace(m[1])
-					// 跳过纯数字/空白/极短内容
 					if len([]rune(t)) >= 3 {
 						v.Title = t
 						break
@@ -312,19 +344,7 @@ func extractVideosFromHTML(body, pageURL string) []Video {
 				}
 			}
 		}
-		// 兜底
-		if v.Title == "" {
-			v.Title = "" // 留空，下载时从视频详情页补充
-		}
-
-		// 封面：窗口内第一个 img src
-		if m := thumbRe.FindStringSubmatch(window); len(m) > 1 {
-			src := m[1]
-			// 排除 base64 和极短占位符
-			if !strings.HasPrefix(src, "data:") && len(src) > 10 {
-				v.Thumbnail = src
-			}
-		}
+		// 兜底：留空，下载时从视频详情页补充
 
 		videos = append(videos, v)
 	}
