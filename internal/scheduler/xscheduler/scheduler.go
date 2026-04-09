@@ -105,7 +105,7 @@ func New(cfg Config) *XScheduler {
 		newClient:       newClient,
 		progressMap:     make(map[string]*ProgressInfo),
 		eventCh:         make(chan DownloadEvent, 100),
-		downloadLimiter: xchina.NewRateLimiter(1, 1, 5*time.Second),
+		downloadLimiter: xchina.NewRateLimiter(2, 2, 1*time.Second),
 		workerSem:       make(chan struct{}, 2),
 		fullScanRunning: make(map[int64]bool),
 		rootCtx:         ctx,

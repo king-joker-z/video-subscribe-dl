@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"video-subscribe-dl/internal/db"
@@ -78,10 +80,11 @@ func (s *XScheduler) retryOneDownload(dl db.Download) {
 		videoPageURL = fmt.Sprintf("https://en.xchina.co/video/id-%s.html", dl.VideoID)
 	}
 
-	// 获取 HLS m3u8 URL（最多重试 3 次，按错误分类决策）
+	// 获取 HLS m3u8 URL 及视频页标题（最多重试 3 次，按错误分类决策）
 	var m3u8URL string
+	var pageTitle string
 	for attempt := 1; attempt <= 3; attempt++ {
-		m3u8URL, err = getXChinaVideoURL(s.rootCtx, videoPageURL)
+		m3u8URL, pageTitle, err = fetchVideoPageInfo(s.rootCtx, videoPageURL)
 		if err == nil {
 			break
 		}
@@ -119,9 +122,16 @@ func (s *XScheduler) retryOneDownload(dl db.Download) {
 		}
 	}
 	if err != nil {
-		log.Printf("[xscheduler] getXChinaVideoURL failed after retries for %s: %v", dl.VideoID, err)
+		log.Printf("[xscheduler] fetchVideoPageInfo failed after retries for %s: %v", dl.VideoID, err)
 		s.markFailed(dl, err.Error())
 		return
+	}
+
+	// 若列表页没拿到标题，用视频详情页解析出的标题更新
+	if pageTitle != "" && (dl.Title == "" || strings.HasPrefix(dl.Title, "xchina_")) {
+		dl.Title = pageTitle
+		s.db.Exec("UPDATE downloads SET title = ? WHERE id = ?", pageTitle, dl.ID)
+		log.Printf("[xscheduler] Recovered title for %s: %s", dl.VideoID, pageTitle)
 	}
 
 	// 构建目录结构
@@ -169,7 +179,7 @@ func (s *XScheduler) retryOneDownload(dl db.Download) {
 	var fileSize int64
 	for attempt := 1; attempt <= 3; attempt++ {
 		if attempt > 1 {
-			if newURL, urlErr := getXChinaVideoURL(s.rootCtx, videoPageURL); urlErr == nil {
+			if newURL, _, urlErr := fetchVideoPageInfo(s.rootCtx, videoPageURL); urlErr == nil {
 				m3u8URL = newURL
 				log.Printf("[xscheduler] Re-fetched URL on attempt %d", attempt)
 			} else {
@@ -252,39 +262,74 @@ func (s *XScheduler) retryOneDownload(dl db.Download) {
 	}
 }
 
-// getXChinaVideoURL 从视频详情页提取 HLS m3u8 URL
-func getXChinaVideoURL(ctx context.Context, videoPageURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", videoPageURL, nil)
-	if err != nil {
-		return "", err
+// fetchVideoPageInfo 从视频详情页提取 HLS m3u8 URL 和视频标题
+func fetchVideoPageInfo(ctx context.Context, videoPageURL string) (m3u8URL, title string, err error) {
+	req, reqErr := http.NewRequestWithContext(ctx, "GET", videoPageURL, nil)
+	if reqErr != nil {
+		return "", "", reqErr
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", "https://en.xchina.co/")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	hc := &http.Client{Timeout: 30 * time.Second}
-	resp, err := hc.Do(req)
-	if err != nil {
-		return "", err
+	resp, doErr := hc.Do(req)
+	if doErr != nil {
+		return "", "", doErr
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 403 || resp.StatusCode == 410 {
-		return "", fmt.Errorf("HTTP %d: token expired or forbidden (%s)", resp.StatusCode, videoPageURL)
+		return "", "", fmt.Errorf("HTTP %d: token expired or forbidden (%s)", resp.StatusCode, videoPageURL)
 	}
 	if resp.StatusCode == 404 {
-		return "", fmt.Errorf("HTTP 404: video not found (%s)", videoPageURL)
+		return "", "", fmt.Errorf("HTTP 404: video not found (%s)", videoPageURL)
 	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, videoPageURL)
+		return "", "", fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, videoPageURL)
 	}
 
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if readErr != nil {
+		return "", "", fmt.Errorf("read body failed: %v", readErr)
+	}
+	body := string(bodyBytes)
+
+	m3u8URL, err = xchina.ExtractM3U8URL(body, videoPageURL)
 	if err != nil {
-		return "", fmt.Errorf("read body failed: %v", err)
+		return "", "", err
 	}
 
-	return xchina.ExtractM3U8URL(string(bodyBytes), videoPageURL)
+	// 从视频详情页提取标题：优先 <h1>，其次 <title>
+	title = extractVideoPageTitle(body)
+	return m3u8URL, title, nil
+}
+
+// extractVideoPageTitle 从视频详情页 HTML 提取标题
+var (
+	h1Re    = regexp.MustCompile(`(?i)<h1[^>]*>\s*([^<]{2,200})\s*</h1>`)
+	titleRe = regexp.MustCompile(`(?i)<title>\s*([^<]+?)\s*(?:\s*[-|–]\s*[^<]*)?\s*</title>`)
+)
+
+func extractVideoPageTitle(body string) string {
+	if m := h1Re.FindStringSubmatch(body); len(m) > 1 {
+		t := strings.TrimSpace(m[1])
+		if len([]rune(t)) >= 2 {
+			return t
+		}
+	}
+	if m := titleRe.FindStringSubmatch(body); len(m) > 1 {
+		t := strings.TrimSpace(m[1])
+		// 去掉 " - xchina" 等站点后缀
+		for _, suffix := range []string{" - xchina", " - XChina", " | xchina", " | XChina"} {
+			t = strings.TrimSuffix(t, suffix)
+		}
+		t = strings.TrimSpace(t)
+		if len([]rune(t)) >= 2 {
+			return t
+		}
+	}
+	return ""
 }
 
 // downloadXChinaHLS 使用 ffmpeg 下载 HLS m3u8 流并转存为 mp4
