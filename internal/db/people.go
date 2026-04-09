@@ -97,6 +97,17 @@ func (d *DB) DeleteUploaderData(name string) (int64, error) {
 	return affected, nil
 }
 
+// GetPersonByMID 按 MID 获取 UP 主信息
+func (d *DB) GetPersonByMID(mid int64) (*Person, error) {
+	var p Person
+	err := d.QueryRow("SELECT id, mid, name, COALESCE(avatar,''), created_at FROM people WHERE mid = ?",
+		fmt.Sprintf("%d", mid)).Scan(&p.ID, &p.MID, &p.Name, &p.Avatar, &p.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
 // GetPeopleByName 按名称获取 UP 主信息
 func (d *DB) GetPeopleByName(name string) (*Person, error) {
 	var p Person

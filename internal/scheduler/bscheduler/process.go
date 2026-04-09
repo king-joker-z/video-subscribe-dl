@@ -115,8 +115,9 @@ func (s *BiliScheduler) prepareVideoDir(uploaderDir, collectionName string) stri
 }
 
 // getUPInfoCached 带缓存的 UP 主信息获取
+// 查找顺序：内存缓存 → DB people 表 → B站 API
 // 始终通过 s.getBili() 获取最新 client，避免使用调用方持有的旧 client 快照
-// （场景：Cookie 刷新后 s.bili 已更新，但调用方 goroutine 里的 client 局部变量仍是旧对象）
+// DB 兜底：API 被封/限速时仍能用历史数据继续工作，不会每次重启都重新打 acc/info
 func (s *BiliScheduler) getUPInfoCached(mid int64) (*bilibili.UPInfo, error) {
 	s.upInfoCacheMu.RLock()
 	entry, ok := s.upInfoCache[mid]
@@ -133,16 +134,28 @@ func (s *BiliScheduler) getUPInfoCached(mid int64) (*bilibili.UPInfo, error) {
 	}
 
 	info, err := s.getBili().GetUPInfo(mid)
+	if err != nil {
+		// API 失败时从 DB people 表兜底，避免 IP 封禁/风控时丢失 UP 主信息
+		if person, dbErr := s.db.GetPersonByMID(mid); dbErr == nil && person.Name != "" {
+			log.Printf("[bscheduler] GetUPInfo API failed (mid=%d): %v，使用 DB 缓存: %s", mid, err, person.Name)
+			fallback := &bilibili.UPInfo{MID: mid, Name: person.Name, Face: person.Avatar}
+			s.upInfoCacheMu.Lock()
+			s.upInfoCache[mid] = &upInfoCacheEntry{info: fallback, fetchedAt: time.Now()}
+			s.upInfoCacheMu.Unlock()
+			return fallback, nil
+		}
+		// DB 也没有，缓存错误
+		s.upInfoCacheMu.Lock()
+		s.upInfoCache[mid] = &upInfoCacheEntry{err: err, fetchedAt: time.Now()}
+		s.upInfoCacheMu.Unlock()
+		return nil, err
+	}
 
 	s.upInfoCacheMu.Lock()
-	if err != nil {
-		s.upInfoCache[mid] = &upInfoCacheEntry{info: nil, err: err, fetchedAt: time.Now()}
-	} else {
-		s.upInfoCache[mid] = &upInfoCacheEntry{info: info, fetchedAt: time.Now()}
-	}
+	s.upInfoCache[mid] = &upInfoCacheEntry{info: info, fetchedAt: time.Now()}
 	s.upInfoCacheMu.Unlock()
 
-	return info, err
+	return info, nil
 }
 
 // submitDownload 创建下载记录并提交到队列
