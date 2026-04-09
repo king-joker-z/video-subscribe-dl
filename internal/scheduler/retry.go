@@ -38,6 +38,12 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		return
 	}
 
+	// XChina 类型委托给 xscheduler
+	if src.Type == "xchina" {
+		s.xc.RetryDownload(dl)
+		return
+	}
+
 	// B 站类型委托给 bscheduler
 	if s.bili != nil {
 		s.bili.RetryDownload(dl)
