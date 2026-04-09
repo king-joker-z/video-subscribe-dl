@@ -12,6 +12,7 @@ import (
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/pornhub"
+	"video-subscribe-dl/internal/xchina"
 )
 
 // SourcesHandler 订阅源 API
@@ -154,11 +155,13 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		source.Type = "up"
 	}
 
-	// 自动识别 URL 类型: 先检测抖音，再检测 Pornhub（互斥，else if 保证不覆盖）
+	// 自动识别 URL 类型: 先检测抖音，再检测 Pornhub，再检测 XChina（互斥，else if 保证不覆盖）
 	if douyin.IsDouyinURL(source.URL) {
 		source.Type = "douyin"
 	} else if isPornhubURL(source.URL) {
 		source.Type = "pornhub"
+	} else if xchina.IsXChinaURL(source.URL) {
+		source.Type = "xchina"
 	}
 	if source.Type == "up" && source.URL != "" {
 		if strings.Contains(source.URL, "favlist") {
@@ -289,6 +292,14 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 			}
 			phClient.Close()
 		}
+	case "xchina":
+		// 从模特主页 URL 自动获取名称
+		if source.Name == "" && source.URL != "" {
+			xcClient := xchina.NewClient()
+			if info, err := xcClient.GetModelInfo(source.URL); err == nil && info.Name != "" {
+				source.Name = info.Name
+			}
+		}
 	default:
 		if source.Name == "" && source.URL != "" {
 			if mid, err := bilibili.ExtractMID(source.URL); err == nil {
@@ -299,8 +310,8 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 关联全局 Cookie（抖音和 Pornhub 不需要）
-	if source.Type != "douyin" && source.Type != "pornhub" && source.CookiesFile == "" {
+	// 关联全局 Cookie（抖音、Pornhub 和 XChina 不需要）
+	if source.Type != "douyin" && source.Type != "pornhub" && source.Type != "xchina" && source.CookiesFile == "" {
 		if cookiePath, err := h.db.GetSetting("cookie_path"); err == nil && cookiePath != "" {
 			source.CookiesFile = cookiePath
 		}

@@ -8,6 +8,7 @@ import (
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/douyin"
+	"video-subscribe-dl/internal/xchina"
 )
 
 // injectSubscribed 在 result 里注入 already_subscribed 字段。
@@ -226,7 +227,24 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 5. Pornhub 博主主页（放在 B站 ExtractMID 之前，避免被误匹配）
+	// 5. XChina 模特主页
+	if xchina.IsXChinaURL(rawURL) {
+		result["type"] = "xchina"
+		result["url"] = rawURL
+		xcClient := xchina.NewClient()
+		if info, err := xcClient.GetModelInfo(rawURL); err == nil && info.Name != "" {
+			result["name"] = info.Name
+			result["uploader"] = info.Name
+			log.Printf("[source·parse] XChina model name: %s", info.Name)
+		} else if err != nil {
+			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
+		}
+		h.injectSubscribed(result, rawURL)
+		apiOK(w, result)
+		return
+	}
+
+	// 6. Pornhub 博主主页（放在 B站 ExtractMID 之前，避免被误匹配）
 	if isPornhubURL(rawURL) {
 		result["type"] = "pornhub"
 		result["url"] = rawURL
@@ -244,7 +262,7 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. UP 主主页: space.bilibili.com/xxx
+	// 7. UP 主主页: space.bilibili.com/xxx
 	mid, err := bilibili.ExtractMID(rawURL)
 	if err == nil && mid > 0 {
 		result["type"] = "up"
@@ -258,5 +276,5 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站、抖音或 Pornhub 链接")
+	apiError(w, CodeInvalidParam, "无法解析该 URL，请输入有效的 B 站、抖音、Pornhub 或 XChina 链接")
 }

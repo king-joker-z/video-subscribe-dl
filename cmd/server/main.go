@@ -208,6 +208,7 @@ func main() {
 	server.SetSchedulerLastCheckFunc("bilibili", sched.GetBiliLastCheckAt)
 	server.SetSchedulerLastCheckFunc("douyin", sched.GetDouyinLastCheckAt)
 	server.SetSchedulerLastCheckFunc("pornhub", sched.GetPHLastCheckAt)
+	server.SetSchedulerLastCheckFunc("xchina", sched.GetXCLastCheckAt)
 	server.SetVersion(version)
 	server.SetStartTime(startTime)
 	go func() {

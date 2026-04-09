@@ -17,6 +17,7 @@ import (
 	"video-subscribe-dl/internal/scheduler/bscheduler"
 	"video-subscribe-dl/internal/scheduler/dscheduler"
 	"video-subscribe-dl/internal/scheduler/phscheduler"
+	"video-subscribe-dl/internal/scheduler/xscheduler"
 )
 
 // Scheduler 顶层编排器：持有子平台 scheduler，统一管理生命周期和任务分发。
@@ -39,6 +40,9 @@ type Scheduler struct {
 
 	// Pornhub 子调度器（负责所有 Pornhub 平台逻辑）
 	ph *phscheduler.PHScheduler
+
+	// XChina 子调度器
+	xc *xscheduler.XScheduler
 
 	// cron 调度器
 	cronScheduler *cron.Cron
@@ -75,6 +79,12 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		Notifier:    notifier,
 	})
 
+	xcSched := xscheduler.New(xscheduler.Config{
+		DB:          database,
+		DownloadDir: downloadDir,
+		Notifier:    notifier,
+	})
+
 	return &Scheduler{
 		db:          database,
 		dl:          dl,
@@ -84,6 +94,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		bili:        bili,
 		douyin:      douyinSched,
 		ph:          phSched,
+		xc:          xcSched,
 	}
 }
 
@@ -228,6 +239,44 @@ func (s *Scheduler) Start() {
 		}()
 	}
 
+	// 转发 xscheduler XChina 事件到 downloader SSE 通道
+	if s.dl != nil && s.xc != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			evtCh := s.xc.GetEventChan()
+			for {
+				select {
+				case <-s.stopCh:
+					return
+				case evt, ok := <-evtCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-s.stopCh:
+						return
+					default:
+					}
+					switch evt.Type {
+					case "completed":
+						s.dl.AddPlatformCompleted("xchina")
+					case "failed":
+						s.dl.AddPlatformFailed("xchina")
+					}
+					s.dl.EmitEvent(downloader.DownloadEvent{
+						Type:         evt.Type,
+						BvID:         evt.VideoID,
+						Title:        evt.Title,
+						FileSize:     evt.FileSize,
+						Error:        evt.Error,
+						DownloadedAt: evt.DownloadedAt,
+					})
+				}
+			}
+		}()
+	}
+
 	// 独立重试 Worker：每 5 分钟扫描 failed 记录，按指数退避重试（最多 3 次）
 	s.wg.Add(1)
 	go func() {
@@ -260,6 +309,9 @@ func (s *Scheduler) Stop() {
 	}
 	if s.ph != nil {
 		s.ph.Stop()
+	}
+	if s.xc != nil {
+		s.xc.Stop()
 	}
 }
 
@@ -305,6 +357,10 @@ func (s *Scheduler) checkSourceList(sources []db.Source) {
 			if s.isPHInCooldown() {
 				continue
 			}
+		case "xchina":
+			if s.isXCInCooldown() {
+				continue
+			}
 		default:
 			if s.isBiliInCooldown() {
 				continue
@@ -348,6 +404,10 @@ func (s *Scheduler) checkAllForce() {
 			if s.isPHInCooldown() {
 				continue
 			}
+		case "xchina":
+			if s.isXCInCooldown() {
+				continue
+			}
 		default:
 			if s.isBiliInCooldown() {
 				continue
@@ -375,6 +435,9 @@ func (s *Scheduler) checkSource(src db.Source) {
 		return
 	case "pornhub":
 		s.ph.CheckSource(src)
+		return
+	case "xchina":
+		s.xc.CheckSource(src)
 		return
 	default:
 		// 所有 B 站类型委托给 bscheduler
@@ -451,6 +514,10 @@ func (s *Scheduler) submitDownload(dl db.Download) error {
 		s.ph.RetryDownload(dl)
 		return nil
 	}
+	if src.Type == "xchina" {
+		s.xc.RetryDownload(dl)
+		return nil
+	}
 	if s.bili != nil {
 		s.bili.RetryDownload(dl)
 		return nil
@@ -494,7 +561,13 @@ func (s *Scheduler) FullScanSource(sourceID int64) {
 		go func() {
 			defer s.wg.Done()
 			s.ph.FullScanPHModel(*src)
-			// 扫描完后立即触发 pending 下载，不等下次定时调度
+			s.ProcessAllPending()
+		}()
+	case "xchina":
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.xc.FullScanXChinaModel(*src)
 			s.ProcessAllPending()
 		}()
 	default:
@@ -706,6 +779,16 @@ func (s *Scheduler) GetPHCooldownInfo() (inCooldown bool, remainingSec int) {
 	return s.ph.GetCooldownInfo()
 }
 
+// ─── 代理方法：XChina 平台 ─────────────────────────────────────────────────────
+
+// isXCInCooldown 检查 XChina 是否在风控冷却期内
+func (s *Scheduler) isXCInCooldown() bool {
+	if s.xc == nil {
+		return false
+	}
+	return s.xc.IsInCooldown()
+}
+
 // ─── 代理方法：调度器最近检查时间 ────────────────────────────────────────────────
 
 // GetBiliLastCheckAt 返回 B 站调度器最近一次检查时间
@@ -732,6 +815,14 @@ func (s *Scheduler) GetPHLastCheckAt() time.Time {
 	return s.ph.LastCheckAt()
 }
 
+// GetXCLastCheckAt 返回 XChina 调度器最近一次检查时间
+func (s *Scheduler) GetXCLastCheckAt() time.Time {
+	if s.xc == nil {
+		return time.Time{}
+	}
+	return s.xc.LastCheckAt()
+}
+
 // processRetryQueue 扫描各平台 failed 记录，按退避时间重新投递
 func (s *Scheduler) processRetryQueue() {
 	platforms := []struct {
@@ -747,6 +838,11 @@ func (s *Scheduler) processRetryQueue() {
 		{"pornhub", func(dl db.Download) {
 			if s.ph != nil {
 				s.ph.RetryDownload(dl)
+			}
+		}},
+		{"xchina", func(dl db.Download) {
+			if s.xc != nil {
+				s.xc.RetryDownload(dl)
 			}
 		}},
 	}

@@ -142,7 +142,7 @@ func (h *MetricsHandler) HandlePrometheus(w http.ResponseWriter, r *http.Request
 	fmt.Fprintf(w, "vsd_downloader_failed_total %d\n", dlStats.Failed)
 
 	// per-platform download counters (alphabetical order)
-	platforms := []string{"bilibili", "douyin", "pornhub"}
+	platforms := []string{"bilibili", "douyin", "pornhub", "xchina"}
 	fmt.Fprintf(w, "# HELP vsd_downloads_completed_total Total completed downloads per platform\n")
 	fmt.Fprintf(w, "# TYPE vsd_downloads_completed_total counter\n")
 	for _, p := range platforms {

@@ -3,8 +3,8 @@ import { api } from '../api.js';
 import { cn, toast, Icon, Card, Button, Badge, EmptyState, Pagination, formatTimeAgo, formatNextCheck, SourceCardSkeleton, ConfirmDialog } from '../components/utils.js';
 const { createElement: h, useState, useEffect, useCallback, useRef } = React;
 
-const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集', pornhub: 'Pornhub' };
-const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning', pornhub: 'error' };
+const typeLabels = { up: 'UP 主', season: '合集', favorite: '收藏夹', watchlater: '稍后再看', series: '系列', douyin: '抖音', douyin_mix: '抖音合集', pornhub: 'Pornhub', xchina: 'XChina' };
+const typeColors = { up: 'default', season: 'success', favorite: 'warning', watchlater: 'outline', series: 'default', douyin: 'warning', douyin_mix: 'warning', pornhub: 'error', xchina: 'error' };
 
 const qualityOptions = [
   { value: 'best', label: '最高画质' },
@@ -98,21 +98,23 @@ function EditModal({ source, onSave, onClose }) {
         )
       ),
 
-      // Pornhub 平台说明（画质/编码不适用）
-      source.type === 'pornhub' && h('div', { className: 'text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-2' },
-        '🔞 Pornhub 平台自动下载最高画质 MP4，画质偏好/视频编码设置无效。'
+      // Pornhub / XChina 平台说明（画质/编码不适用）
+      (source.type === 'pornhub' || source.type === 'xchina') && h('div', { className: 'text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-2' },
+        source.type === 'xchina'
+          ? '🔞 XChina 平台自动下载最高画质 HLS 流，画质偏好/视频编码设置无效。'
+          : '🔞 Pornhub 平台自动下载最高画质 MP4，画质偏好/视频编码设置无效。'
       ),
 
-      // 画质（pornhub 不显示）
-      source.type !== 'pornhub' && h('div', null,
+      // 画质（pornhub/xchina 不显示）
+      source.type !== 'pornhub' && source.type !== 'xchina' && h('div', null,
         h('label', { className: labelClass }, '画质偏好'),
         h('select', { value: form.download_quality, onChange: (e) => update('download_quality', e.target.value), className: inputClass },
           qualityOptions.map(o => h('option', { key: o.value, value: o.value }, o.label))
         )
       ),
 
-      // 最低画质（pornhub 不显示）
-      source.type !== 'pornhub' && h('div', null,
+      // 最低画质（pornhub/xchina 不显示）
+      source.type !== 'pornhub' && source.type !== 'xchina' && h('div', null,
         h('label', { className: labelClass }, '最低画质（留空不限制）'),
         h('select', { value: form.download_quality_min, onChange: (e) => update('download_quality_min', e.target.value), className: inputClass },
           h('option', { value: '' }, '不限制'),
@@ -120,8 +122,8 @@ function EditModal({ source, onSave, onClose }) {
         )
       ),
 
-      // 编码（pornhub 不显示）
-      source.type !== 'pornhub' && h('div', null,
+      // 编码（pornhub/xchina 不显示）
+      source.type !== 'pornhub' && source.type !== 'xchina' && h('div', null,
         h('label', { className: labelClass }, '视频编码'),
         h('select', { value: form.download_codec, onChange: (e) => update('download_codec', e.target.value), className: inputClass },
           h('option', { value: 'all' }, '自动'),
@@ -633,7 +635,7 @@ export function SourcesPage({ onNavigate }) {
     ),
     // 类型筛选
     h('div', { className: 'flex flex-wrap gap-1.5' },
-      [['', '全部'], ['up', 'UP 主'], ['season', '合集'], ['favorite', '收藏夹'], ['watchlater', '稍后再看'], ['series', '系列'], ['douyin', '抖音'], ['douyin_mix', '抖音合集'], ['pornhub', 'Pornhub']].map(([val, label]) =>
+      [['', '全部'], ['up', 'UP 主'], ['season', '合集'], ['favorite', '收藏夹'], ['watchlater', '稍后再看'], ['series', '系列'], ['douyin', '抖音'], ['douyin_mix', '抖音合集'], ['pornhub', 'Pornhub'], ['xchina', 'XChina']].map(([val, label]) =>
         h('button', {
           key: val,
           onClick: () => handleFilterType(val),
@@ -656,7 +658,8 @@ export function SourcesPage({ onNavigate }) {
         h('div', { className: 'flex gap-1 bg-slate-50 rounded-lg p-1' },
           h('button', { onClick: () => setAddPlatform('bili'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'bili' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '📺 B站'),
           h('button', { onClick: () => setAddPlatform('douyin'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'douyin' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🎵 抖音'),
-          h('button', { onClick: () => setAddPlatform('pornhub'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'pornhub' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🔞 PH')
+          h('button', { onClick: () => setAddPlatform('pornhub'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'pornhub' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🔞 PH'),
+          h('button', { onClick: () => setAddPlatform('xchina'), className: cn('flex-1 px-3 py-1.5 rounded-md text-sm transition-colors', addPlatform === 'xchina' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700') }, '🔞 XC')
         ),
 
         // === B站 Tab ===
@@ -868,7 +871,66 @@ export function SourcesPage({ onNavigate }) {
               adding ? '添加中...' : (parseResult && parseResult.already_subscribed) ? '已订阅' : '确认添加'
             )
           )
-        )  // 关闭 Pornhub 大 Tab
+        ),  // 关闭 Pornhub 大 Tab
+
+        // === XChina Tab ===
+        addPlatform === 'xchina' && h('div', { className: 'space-y-4' },
+          h('div', null,
+            h('label', { className: 'text-sm text-slate-600 mb-1' }, 'XChina 模特链接'),
+            h('div', { className: 'text-xs text-slate-400 mb-1.5' }, '支持模特主页：如 https://en.xchina.co/model/id-xxx'),
+            h('div', { className: 'flex gap-2' },
+              h('input', {
+                type: 'text', value: newURL,
+                placeholder: 'https://en.xchina.co/model/id-xxx',
+                onChange: (e) => { setNewURL(e.target.value); setParseResult(null); },
+                onKeyDown: (e) => e.key === 'Enter' && handleParse(),
+                className: 'flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500'
+              }),
+              h(Button, { onClick: handleParse, disabled: parsing || !newURL.trim(), size: 'md', variant: 'secondary' }, parsing ? '解析中...' : '解析')
+            )
+          ),
+          parseResult && h('div', { className: 'bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3' },
+            h('div', { className: 'flex items-center gap-2' },
+              h(Badge, { variant: 'error' }, 'XChina'),
+              parseResult.uploader && h('span', { className: 'text-xs text-slate-500' }, parseResult.uploader),
+              parseResult.already_subscribed && h(Badge, { variant: 'success' }, '✓ 已订阅')
+            ),
+            parseResult.already_subscribed && h('div', { className: 'text-xs text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2' },
+              '该订阅源已存在，无需重复添加。'
+            ),
+            !parseResult.already_subscribed && h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '显示名称'),
+              h('input', { type: 'text', value: addForm.name, onChange: (e) => updateAddForm('name', e.target.value), className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+            ),
+            !parseResult.already_subscribed && h('div', { className: 'flex items-center justify-between' },
+              h('label', { className: 'text-sm text-slate-600' }, '启用'),
+              h('button', {
+                onClick: () => updateAddForm('enabled', !addForm.enabled),
+                className: cn('w-10 h-6 rounded-full transition-colors', addForm.enabled ? 'bg-blue-500' : 'bg-slate-300')
+              }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.enabled ? 'translate-x-4' : 'translate-x-0') }))
+            ),
+            !parseResult.already_subscribed && h('div', null,
+              h('label', { className: 'text-sm text-slate-600 mb-1' }, '检查间隔（秒）'),
+              h('input', { type: 'number', value: addForm.check_interval, onChange: (e) => updateAddForm('check_interval', parseInt(e.target.value) || 3600), min: 600, className: 'w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500' })
+            ),
+            !parseResult.already_subscribed && h('div', { className: 'grid grid-cols-2 gap-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_nfo, onChange: (e) => updateAddForm('skip_nfo', e.target.checked), className: 'rounded border-slate-300' }),
+                h('label', { className: 'text-sm text-slate-600' }, '跳过 NFO')
+              ),
+              h('div', { className: 'flex items-center gap-2' },
+                h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
+                h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
+              )
+            )
+          ),
+          h('div', { className: 'flex justify-end gap-2 pt-2' },
+            h(Button, { onClick: resetAddModal, variant: 'ghost', size: 'md' }, '取消'),
+            h(Button, { onClick: handleAdd, disabled: adding || !newURL.trim() || !!(parseResult && parseResult.already_subscribed), size: 'md' },
+              adding ? '添加中...' : (parseResult && parseResult.already_subscribed) ? '已订阅' : '确认添加'
+            )
+          )
+        )  // 关闭 XChina 大 Tab
       )
     ),
     // 列表
