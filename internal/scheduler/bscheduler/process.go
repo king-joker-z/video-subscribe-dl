@@ -115,7 +115,9 @@ func (s *BiliScheduler) prepareVideoDir(uploaderDir, collectionName string) stri
 }
 
 // getUPInfoCached 带缓存的 UP 主信息获取
-func (s *BiliScheduler) getUPInfoCached(client *bilibili.Client, mid int64) (*bilibili.UPInfo, error) {
+// 始终通过 s.getBili() 获取最新 client，避免使用调用方持有的旧 client 快照
+// （场景：Cookie 刷新后 s.bili 已更新，但调用方 goroutine 里的 client 局部变量仍是旧对象）
+func (s *BiliScheduler) getUPInfoCached(mid int64) (*bilibili.UPInfo, error) {
 	s.upInfoCacheMu.RLock()
 	entry, ok := s.upInfoCache[mid]
 	s.upInfoCacheMu.RUnlock()
@@ -130,7 +132,7 @@ func (s *BiliScheduler) getUPInfoCached(client *bilibili.Client, mid int64) (*bi
 		}
 	}
 
-	info, err := client.GetUPInfo(mid)
+	info, err := s.getBili().GetUPInfo(mid)
 
 	s.upInfoCacheMu.Lock()
 	if err != nil {

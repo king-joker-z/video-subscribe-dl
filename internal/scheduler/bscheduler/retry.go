@@ -119,7 +119,7 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	}
 
 	mid, _ := bilibili.ExtractMID(src.URL)
-	upInfo, _ := s.getUPInfoCached(client, mid)
+	upInfo, _ := s.getUPInfoCached(mid)
 
 	uploaderName := dl.Uploader
 	if upInfo != nil && upInfo.Name != "" {

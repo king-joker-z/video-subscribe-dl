@@ -21,7 +21,7 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 		return
 	}
 
-	upInfo, err := s.getUPInfoCached(client, mid)
+	upInfo, err := s.getUPInfoCached(mid)
 	if err != nil {
 		if src.Name != "" && src.Name != "未命名" {
 			log.Printf("[bscheduler][WARN] Get UP info failed (mid=%d): %v, 使用已有名称继续: %s", mid, err, src.Name)
