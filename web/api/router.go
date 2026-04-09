@@ -32,6 +32,7 @@ type Router struct {
 	douyinStatus  *DouyinStatusHandler
 	phCookie      *PHCookieHandler
 	phStatus      *PHStatusHandler
+	xcStatus      *XCStatusHandler
 	onSyncAll            func()
 	validateNonceFunc    func(string) bool
 }
@@ -57,6 +58,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 		douyinStatus:  NewDouyinStatusHandler(),
 		phCookie:      NewPHCookieHandler(database),
 		phStatus:      NewPHStatusHandler(),
+		xcStatus:      NewXCStatusHandler(),
 	}
 }
 
@@ -162,6 +164,21 @@ func (rt *Router) SetPHCookieUpdateFunc(fn func(string)) {
 // SetPHCookieStatusFunc 设置 PH Cookie 状态查询回调
 func (rt *Router) SetPHCookieStatusFunc(fn func() (bool, string)) {
 	rt.phStatus.SetCookieStatusFunc(fn)
+}
+
+// SetXCStatusFunc 设置 XChina 暂停状态查询回调
+func (rt *Router) SetXCStatusFunc(fn func() (bool, string, time.Time)) {
+	rt.xcStatus.SetStatusFunc(fn)
+}
+
+// SetXCResumeFunc 设置 XChina 恢复回调
+func (rt *Router) SetXCResumeFunc(fn func()) {
+	rt.xcStatus.SetResumeFunc(fn)
+}
+
+// SetXCPauseFunc 设置 XChina 手动暂停回调
+func (rt *Router) SetXCPauseFunc(fn func(reason string)) {
+	rt.xcStatus.SetPauseFunc(fn)
 }
 
 // SetRepairThumbFunc 设置历史封面补全回调
@@ -360,6 +377,11 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/ph/status", rt.phStatus.HandleStatus)
 	mux.HandleFunc("/api/ph/resume", rt.phStatus.HandleResume)
 	mux.HandleFunc("/api/ph/pause", rt.phStatus.HandlePause)
+
+	// XChina Status (pause/resume)
+	mux.HandleFunc("/api/xc/status", rt.xcStatus.HandleStatus)
+	mux.HandleFunc("/api/xc/resume", rt.xcStatus.HandleResume)
+	mux.HandleFunc("/api/xc/pause", rt.xcStatus.HandlePause)
 
 	// Pornhub Cookie Management
 	mux.HandleFunc("/api/ph/cookie", func(w http.ResponseWriter, r *http.Request) {

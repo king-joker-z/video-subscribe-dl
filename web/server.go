@@ -93,6 +93,11 @@ type Server struct {
 	onPHPause         func(reason string)
 	getPHCookieStatus func() (bool, string)
 
+	// XC callbacks
+	getXCPauseStatus func() (bool, string, time.Time)
+	onXCResume       func()
+	onXCPause        func(reason string)
+
 	onRepairThumb func(string, string) error
 
 	// 调度器最近检查时间回调（per-platform）
@@ -243,6 +248,16 @@ func (s *Server) setupRoutes() {
 		if s.getPHCookieStatus != nil {
 			s.apiRouter.SetPHCookieStatusFunc(s.getPHCookieStatus)
 		}
+		// XC callbacks
+		if s.getXCPauseStatus != nil {
+			s.apiRouter.SetXCStatusFunc(s.getXCPauseStatus)
+		}
+		if s.onXCResume != nil {
+			s.apiRouter.SetXCResumeFunc(s.onXCResume)
+		}
+		if s.onXCPause != nil {
+			s.apiRouter.SetXCPauseFunc(s.onXCPause)
+		}
 		if s.notifier != nil {
 			s.apiRouter.SetNotifier(s.notifier)
 		}
@@ -352,6 +367,18 @@ func (s *Server) SetPHPauseFunc(fn func(reason string)) {
 
 func (s *Server) SetPHCookieStatusFunc(fn func() (bool, string)) {
 	s.getPHCookieStatus = fn
+}
+
+func (s *Server) SetXCPauseStatusFunc(fn func() (bool, string, time.Time)) {
+	s.getXCPauseStatus = fn
+}
+
+func (s *Server) SetXCResumeFunc(fn func()) {
+	s.onXCResume = fn
+}
+
+func (s *Server) SetXCPauseFunc(fn func(reason string)) {
+	s.onXCPause = fn
 }
 
 func (s *Server) SetRepairThumbFunc(fn func(string, string) error) {

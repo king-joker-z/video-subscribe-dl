@@ -169,6 +169,11 @@ export const api = {
   getPHStatus: () => request('/api/ph/status'),
   resumePH: () => request('/api/ph/resume', { method: 'POST' }),
   pausePH: () => request('/api/ph/pause', { method: 'POST' }),
+
+  // XChina
+  getXCStatus: () => request('/api/xc/status'),
+  resumeXC: () => request('/api/xc/resume', { method: 'POST' }),
+  pauseXC: () => request('/api/xc/pause', { method: 'POST' }),
   savePHCookie: (cookie) => request('/api/ph/cookie', { method: 'POST', body: JSON.stringify({ cookie }) }),
   deletePHCookie: () => request('/api/ph/cookie', { method: 'DELETE' }),
 

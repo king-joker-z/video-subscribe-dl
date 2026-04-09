@@ -292,6 +292,8 @@ func GenerateMovieNFO(meta *VideoMeta, nfoPath string) error {
 			role = "作者"
 		case "pornhub":
 			role = "P主"
+		case "xchina":
+			role = "XC 主播"
 		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,
@@ -401,6 +403,8 @@ func GenerateTVShowNFO(meta *TVShowMeta, dir string) error {
 			role = "作者"
 		case "pornhub":
 			role = "P主"
+		case "xchina":
+			role = "XC 主播"
 		}
 		actors = append(actors, actor{
 			Name:  meta.UploaderName,

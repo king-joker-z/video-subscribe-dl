@@ -789,6 +789,28 @@ func (s *Scheduler) isXCInCooldown() bool {
 	return s.xc.IsInCooldown()
 }
 
+// PauseXC 暂停 XChina 下载
+func (s *Scheduler) PauseXC(reason string) {
+	if s.xc != nil {
+		s.xc.Pause(reason)
+	}
+}
+
+// ResumeXC 手动恢复 XChina 下载
+func (s *Scheduler) ResumeXC() {
+	if s.xc != nil {
+		s.xc.Resume()
+	}
+}
+
+// GetXCPauseStatus 返回 XChina 暂停状态详情
+func (s *Scheduler) GetXCPauseStatus() (paused bool, reason string, pausedAt time.Time) {
+	if s.xc == nil {
+		return false, "", time.Time{}
+	}
+	return s.xc.GetPauseStatus()
+}
+
 // ─── 代理方法：调度器最近检查时间 ────────────────────────────────────────────────
 
 // GetBiliLastCheckAt 返回 B 站调度器最近一次检查时间

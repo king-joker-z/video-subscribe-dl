@@ -339,6 +339,13 @@ func downloadXChinaHLS(ctx context.Context, m3u8URL, destPath string, _ int64, _
 
 	args := []string{
 		"-y",
+		// 网络层优化：持久连接 + 并行段下载 + 自动重连
+		"-reconnect", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_delay_max", "5",
+		"-http_persistent", "1",
+		"-http_multiple", "1",
+		"-http_seekable", "0",
 		"-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 		"-headers", "Referer: https://en.xchina.co/\r\n",
 		"-i", m3u8URL,

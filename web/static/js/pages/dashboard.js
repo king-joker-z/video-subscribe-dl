@@ -17,14 +17,17 @@ export function DashboardPage({ onNavigate }) {
   const [douyinPaused, setDouyinPaused] = useState(false);
   const [phPaused, setPhPaused] = useState(false);
   const [phPausedReason, setPhPausedReason] = useState('');
+  const [xcPaused, setXcPaused] = useState(false);
+  const [xcPausedReason, setXcPausedReason] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [dash, taskRes, douyinStatus, phStatus] = await Promise.all([
+      const [dash, taskRes, douyinStatus, phStatus, xcStatus] = await Promise.all([
         api.getDashboard(),
         api.getTaskStatus(),
         api.getDouyinStatus().catch(() => null),
         api.getPHStatus().catch(() => null),
+        api.getXCStatus().catch(() => null),
       ]);
       setData(dash.data);
       setTask(taskRes.data);
@@ -36,6 +39,10 @@ export function DashboardPage({ onNavigate }) {
       if (phStatus?.data) {
         setPhPaused(!!phStatus.data.paused);
         setPhPausedReason(phStatus.data.reason || '');
+      }
+      if (xcStatus?.data) {
+        setXcPaused(!!xcStatus.data.paused);
+        setXcPausedReason(xcStatus.data.reason || '');
       }
       // 同步风控冷却倒计时
       if (dash.data?.cooldown?.active) {
@@ -181,6 +188,28 @@ export function DashboardPage({ onNavigate }) {
         }
       }, '恢复下载')
     ),
+    // XChina 暂停横幅
+    xcPaused && h('div', { className: 'bg-pink-50 border border-pink-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
+      h('div', { className: 'text-pink-500 text-xl' }, '⏸'),
+      h('div', { className: 'flex-1' },
+        h('div', { className: 'text-pink-700 font-medium' }, 'XChina 下载已暂停'),
+        h('div', { className: 'text-pink-600/70 text-sm' }, xcPausedReason || '新视频扫描正常进行，下载任务将在恢复后处理')
+      ),
+      h(Button, {
+        size: 'sm',
+        variant: 'secondary',
+        onClick: async () => {
+          try {
+            await api.resumeXC();
+            setXcPaused(false);
+            setXcPausedReason('');
+            toast('XChina 下载已恢复', 'success');
+          } catch (e) {
+            toast('恢复失败: ' + e.message, 'error');
+          }
+        }
+      }, '恢复下载')
+    ),
     // 抖音手动暂停横幅
     douyinPaused && h('div', { className: 'bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3' },
       h('div', { className: 'text-yellow-500 text-xl' }, '⏸'),
@@ -288,7 +317,10 @@ export function DashboardPage({ onNavigate }) {
             : h(Button, { onClick: () => api.pauseDouyin().then(() => { toast.success('抖音已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停抖音'),
           phPaused
             ? h(Button, { onClick: () => api.resumePH().then(() => { setPhPaused(false); setPhPausedReason(''); toast.success('PH 已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 PH')
-            : h(Button, { onClick: () => api.pausePH().then(() => { toast.success('PH 已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 PH')
+            : h(Button, { onClick: () => api.pausePH().then(() => { toast.success('PH 已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 PH'),
+          xcPaused
+            ? h(Button, { onClick: () => api.resumeXC().then(() => { setXcPaused(false); setXcPausedReason(''); toast.success('XC 已恢复'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'play', size: 14 }), '恢复 XC')
+            : h(Button, { onClick: () => api.pauseXC().then(() => { toast.success('XC 已暂停'); load(); }).catch(e => toast.error(e.message)), variant: 'secondary', size: 'sm' }, h(Icon, { name: 'pause', size: 14 }), '暂停 XC')
         )
       ),
 
