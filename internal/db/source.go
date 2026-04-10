@@ -40,10 +40,40 @@ func (d *DB) CreateSource(s *Source) (int64, error) {
 	if s.Type == "" {
 		s.Type = "channel"
 	}
+	enabled := 0
+	if s.Enabled {
+		enabled = 1
+	}
+	danmaku := 0
+	if s.DownloadDanmaku {
+		danmaku = 1
+	}
+	subtitle := 0
+	if s.DownloadSubtitle {
+		subtitle = 1
+	}
+	skipNFO := 0
+	if s.SkipNFO {
+		skipNFO = 1
+	}
+	skipPoster := 0
+	if s.SkipPoster {
+		skipPoster = 1
+	}
+	useDynamic := 0
+	if s.UseDynamicAPI {
+		useDynamic = 1
+	}
 	result, err := d.Exec(`
-		INSERT INTO sources (type, url, name, cookies_file, check_interval, download_quality, download_codec, download_danmaku, download_subtitle, enabled, filter_rules)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval, s.DownloadQuality, s.DownloadCodec, s.DownloadDanmaku, s.DownloadSubtitle, s.Enabled, s.FilterRules)
+		INSERT INTO sources (type, url, name, cookies_file, check_interval,
+		                     download_quality, download_codec, download_danmaku, download_subtitle,
+		                     enabled, download_filter, download_quality_min,
+		                     skip_nfo, skip_poster, use_dynamic_api, filter_rules)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, s.Type, s.URL, s.Name, s.CookiesFile, s.CheckInterval,
+		s.DownloadQuality, s.DownloadCodec, danmaku, subtitle,
+		enabled, s.DownloadFilter, s.DownloadQualityMin,
+		skipNFO, skipPoster, useDynamic, s.FilterRules)
 	if err != nil {
 		return 0, err
 	}

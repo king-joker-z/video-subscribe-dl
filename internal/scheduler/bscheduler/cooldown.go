@@ -66,12 +66,23 @@ func (s *BiliScheduler) IsInCooldown() bool {
 	return time.Now().Before(s.cooldownUntil)
 }
 
-// ClearCooldown 手动清除 B 站风控冷却状态
+// ClearCooldown 手动清除 B 站风控冷却状态（含所有 per-source 冷却）
 func (s *BiliScheduler) ClearCooldown() {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
 	s.cooldownUntil = time.Time{}
 	log.Printf("[bscheduler] B站风控冷却已手动清除")
+	// 同时清除所有 per-source 冷却，避免手动恢复后 source 仍被跳过
+	s.clearAllSourceCooldowns()
+}
+
+// clearAllSourceCooldowns 删除 settings 表中所有 source_cooldown_* 条目
+func (s *BiliScheduler) clearAllSourceCooldowns() {
+	if err := s.db.DeleteSettingsByPrefix("source_cooldown_"); err != nil {
+		log.Printf("[bscheduler] clearAllSourceCooldowns failed: %v", err)
+		return
+	}
+	log.Printf("[bscheduler] 所有 source 级风控冷却已清除")
 }
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用）
