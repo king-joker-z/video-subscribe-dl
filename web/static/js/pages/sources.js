@@ -234,8 +234,17 @@ function ImportFollowTab({ onDone }) {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [subscribing, setSubscribing] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [batchForm, setBatchForm] = useState({
+    download_quality: 'best',
+    download_codec: 'all',
+    check_interval: 7200,
+    use_dynamic_api: false,
+  });
   const pageSize = 20;
   const searchTimer = useRef(null);
+
+  const updateBatchForm = (key, value) => setBatchForm(prev => ({ ...prev, [key]: value }));
 
   const loadUppers = useCallback(async () => {
     setLoading(true);
@@ -270,9 +279,17 @@ function ImportFollowTab({ onDone }) {
     if (selected.size === 0) return;
     setSubscribing(true);
     try {
-      const res = await api.batchSubscribe({ mids: [...selected], type: "up" });
+      const res = await api.batchSubscribe({
+        mids: [...selected],
+        type: "up",
+        download_quality: batchForm.download_quality,
+        download_codec: batchForm.download_codec,
+        check_interval: batchForm.check_interval,
+        use_dynamic_api: batchForm.use_dynamic_api,
+      });
       toast.success(`已订阅 ${res.data?.created || 0} 个 UP 主`);
       setSelected(new Set());
+      setShowConfig(false);
       loadUppers();
       if (onDone) onDone();
     } catch (e) { toast.error(e.message); }
@@ -311,9 +328,46 @@ function ImportFollowTab({ onDone }) {
       h("span", { className: "text-xs text-slate-500" }, `${page} / ${totalPages}`),
       h(Button, { onClick: () => setPage(p => Math.min(totalPages, p + 1)), disabled: page >= totalPages, size: "sm", variant: "ghost" }, "下一页")
     ),
-    // 订阅按钮
-    selected.size > 0 && h("div", { className: "flex justify-end" },
-      h(Button, { onClick: handleSubscribe, disabled: subscribing, size: "md" }, subscribing ? "订阅中..." : `一键订阅 ${selected.size} 个 UP 主`)
+    // 批量配置面板（点「订阅」后展开）
+    selected.size > 0 && showConfig && h("div", { className: "bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3" },
+      h("div", { className: "text-sm font-medium text-slate-700" }, `批量配置（共 ${selected.size} 个 UP 主）`),
+      h("div", null,
+        h("label", { className: "text-sm text-slate-600 mb-1 block" }, "画质偏好"),
+        h("select", { value: batchForm.download_quality, onChange: (e) => updateBatchForm('download_quality', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
+          qualityOptions.map(o => h("option", { key: o.value, value: o.value }, o.label))
+        )
+      ),
+      h("div", null,
+        h("label", { className: "text-sm text-slate-600 mb-1 block" }, "视频编码"),
+        h("select", { value: batchForm.download_codec, onChange: (e) => updateBatchForm('download_codec', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
+          h("option", { value: "all" }, "自动"),
+          h("option", { value: "avc" }, "H.264 (AVC)"),
+          h("option", { value: "hevc" }, "H.265 (HEVC)"),
+          h("option", { value: "av1" }, "AV1")
+        )
+      ),
+      h("div", null,
+        h("label", { className: "text-sm text-slate-600 mb-1 block" }, "检查间隔（秒）"),
+        h("input", { type: "number", value: batchForm.check_interval, onChange: (e) => updateBatchForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" })
+      ),
+      h("div", { className: "flex items-center justify-between" },
+        h("div", null,
+          h("label", { className: "text-sm text-slate-600" }, "使用动态 API"),
+          h("div", { className: "text-xs text-slate-400 mt-0.5" }, "风控概率更低，但可能不包含部分旧视频")
+        ),
+        h("button", {
+          onClick: () => updateBatchForm('use_dynamic_api', !batchForm.use_dynamic_api),
+          className: cn("w-10 h-6 rounded-full transition-colors flex-shrink-0", batchForm.use_dynamic_api ? "bg-blue-500" : "bg-slate-300")
+        }, h("div", { className: cn("w-4 h-4 rounded-full bg-white transition-transform mx-1", batchForm.use_dynamic_api ? "translate-x-4" : "translate-x-0") }))
+      ),
+      h("div", { className: "flex justify-end gap-2 pt-1" },
+        h(Button, { onClick: () => setShowConfig(false), variant: "ghost", size: "sm" }, "取消"),
+        h(Button, { onClick: handleSubscribe, disabled: subscribing, size: "sm" }, subscribing ? "订阅中..." : `确认订阅 ${selected.size} 个`)
+      )
+    ),
+    // 订阅按钮（未展开配置时显示）
+    selected.size > 0 && !showConfig && h("div", { className: "flex justify-end" },
+      h(Button, { onClick: () => setShowConfig(true), size: "md" }, `订阅选中 ${selected.size} 个 UP 主`)
     )
   );
 }
@@ -356,6 +410,7 @@ export function SourcesPage({ onNavigate }) {
     skip_nfo: false,
     skip_poster: false,
     check_interval: 7200,
+    use_dynamic_api: false,
   });
 
   const [douyinPaused, setDouyinPaused] = useState(null);
@@ -460,10 +515,11 @@ export function SourcesPage({ onNavigate }) {
       body.skip_nfo = addForm.skip_nfo;
       body.skip_poster = addForm.skip_poster;
       body.check_interval = addForm.check_interval;
+      body.use_dynamic_api = addForm.use_dynamic_api;
       const res = await api.createSource(body);
       toast.success('已添加: ' + (res.data.name || '新订阅源'));
       setNewURL(''); setShowAdd(false); setParseResult(null);
-      setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200 });
+      setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200, use_dynamic_api: false });
       load();
     } catch (e) { toast.error(e.message); }
     finally { setAdding(false); }
@@ -472,7 +528,7 @@ export function SourcesPage({ onNavigate }) {
   const resetAddModal = () => {
     setShowAdd(false); setNewURL(''); setParseResult(null);
     setAddPlatform('bili'); setAddBiliTab('url'); setAddDouyinTab('url');
-    setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200 });
+    setAddForm({ name: '', enabled: true, download_quality: 'best', download_codec: 'all', download_filter: '', skip_nfo: false, skip_poster: false, check_interval: 7200, use_dynamic_api: false });
   };
 
   // [FIXED: P1-5] 改为自定义弹窗，一次性提供三个选项
@@ -739,6 +795,16 @@ export function SourcesPage({ onNavigate }) {
                 h('input', { type: 'checkbox', checked: addForm.skip_poster, onChange: (e) => updateAddForm('skip_poster', e.target.checked), className: 'rounded border-slate-300' }),
                 h('label', { className: 'text-sm text-slate-600' }, '跳过封面')
               )
+            ),
+            !parseResult.already_subscribed && parseResult.type === 'up' && h('div', { className: 'flex items-center justify-between' },
+              h('div', null,
+                h('label', { className: 'text-sm text-slate-600' }, '使用动态 API'),
+                h('div', { className: 'text-xs text-slate-400 mt-0.5' }, '风控概率更低，但可能不包含部分旧视频')
+              ),
+              h('button', {
+                onClick: () => updateAddForm('use_dynamic_api', !addForm.use_dynamic_api),
+                className: cn('w-10 h-6 rounded-full transition-colors flex-shrink-0', addForm.use_dynamic_api ? 'bg-blue-500' : 'bg-slate-300')
+              }, h('div', { className: cn('w-4 h-4 rounded-full bg-white transition-transform mx-1', addForm.use_dynamic_api ? 'translate-x-4' : 'translate-x-0') }))
             )
           ),
 

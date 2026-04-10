@@ -118,9 +118,13 @@ func (h *MeHandler) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		MIDs []int64  `json:"mids"` // UP 主 mid 列表
-		FIDs []int64  `json:"fids"` // 收藏夹 id 列表
-		Type string   `json:"type"` // "up" 或 "favorite"
+		MIDs            []int64 `json:"mids"`             // UP 主 mid 列表
+		FIDs            []int64 `json:"fids"`             // 收藏夹 id 列表
+		Type            string  `json:"type"`             // "up" 或 "favorite"
+		DownloadQuality string  `json:"download_quality"` // 画质偏好
+		DownloadCodec   string  `json:"download_codec"`   // 视频编码
+		CheckInterval   int     `json:"check_interval"`   // 检查间隔（秒）
+		UseDynamicAPI   bool    `json:"use_dynamic_api"`  // 使用动态 API
 	}
 	if err := parseJSON(r, &req); err != nil {
 		apiError(w, CodeInvalidParam, "参数错误")
@@ -137,6 +141,18 @@ func (h *MeHandler) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 	var errors []string
 
 	if req.Type == "up" && len(req.MIDs) > 0 {
+		quality := req.DownloadQuality
+		if quality == "" {
+			quality = "best"
+		}
+		codec := req.DownloadCodec
+		if codec == "" {
+			codec = "all"
+		}
+		interval := req.CheckInterval
+		if interval == 0 {
+			interval = 7200
+		}
 		for _, mid := range req.MIDs {
 			// 检查是否已订阅
 			url := fmt.Sprintf("https://space.bilibili.com/%d", mid)
@@ -161,9 +177,10 @@ func (h *MeHandler) HandleSubscribe(w http.ResponseWriter, r *http.Request) {
 				URL:             url,
 				Name:            name,
 				Enabled:         true,
-				CheckInterval:   7200,
-				DownloadQuality: "best",
-				DownloadCodec:   "all",
+				CheckInterval:   interval,
+				DownloadQuality: quality,
+				DownloadCodec:   codec,
+				UseDynamicAPI:   req.UseDynamicAPI,
 			}
 			if _, err := h.db.CreateSource(src); err != nil {
 				errors = append(errors, fmt.Sprintf("mid %d: %v", mid, err))
