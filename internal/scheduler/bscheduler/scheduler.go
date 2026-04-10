@@ -3,7 +3,6 @@
 package bscheduler
 
 import (
-	"log"
 	"sync"
 	"time"
 
