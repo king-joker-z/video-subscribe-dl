@@ -1,46 +1,12 @@
 package bscheduler
 
 import (
-	"fmt"
 	"log"
-	"strconv"
 	"time"
 
 	"video-subscribe-dl/internal/config"
 	"video-subscribe-dl/internal/notify"
 )
-
-// ─── Per-Source 风控冷却 ───────────────────────────────────────────────────────
-// 用 settings 表存储每个 source 的冷却截止时间，key = "source_cooldown_{id}"
-// 场景：新 UP 首次全量扫描触发风控时，对该 source 单独设置冷却，
-// 冷却期间跳过该 source，到期后重新尝试全量扫描（历史数据不丢失）
-
-const sourceCooldownDuration = 30 * time.Minute
-
-// setSourceCooldown 为指定 source 设置风控冷却
-func (s *BiliScheduler) setSourceCooldown(srcID int64) {
-	until := time.Now().Add(sourceCooldownDuration)
-	key := fmt.Sprintf("source_cooldown_%d", srcID)
-	if err := s.db.SetSetting(key, strconv.FormatInt(until.Unix(), 10)); err != nil {
-		log.Printf("[bscheduler] setSourceCooldown(%d) failed: %v", srcID, err)
-		return
-	}
-	log.Printf("[bscheduler] source %d 触发风控，冷却 %.0f 分钟后重试", srcID, sourceCooldownDuration.Minutes())
-}
-
-// isSourceInCooldown 检查指定 source 是否在冷却期内
-func (s *BiliScheduler) isSourceInCooldown(srcID int64) bool {
-	key := fmt.Sprintf("source_cooldown_%d", srcID)
-	val, err := s.db.GetSetting(key)
-	if err != nil || val == "" {
-		return false
-	}
-	ts, err := strconv.ParseInt(val, 10, 64)
-	if err != nil {
-		return false
-	}
-	return time.Now().Unix() < ts
-}
 
 // TriggerCooldown 触发 B站风控冷却
 func (s *BiliScheduler) TriggerCooldown() {
@@ -66,23 +32,12 @@ func (s *BiliScheduler) IsInCooldown() bool {
 	return time.Now().Before(s.cooldownUntil)
 }
 
-// ClearCooldown 手动清除 B 站风控冷却状态（含所有 per-source 冷却）
+// ClearCooldown 手动清除 B 站风控冷却状态
 func (s *BiliScheduler) ClearCooldown() {
 	s.rateLimitMu.Lock()
 	defer s.rateLimitMu.Unlock()
 	s.cooldownUntil = time.Time{}
 	log.Printf("[bscheduler] B站风控冷却已手动清除")
-	// 同时清除所有 per-source 冷却，避免手动恢复后 source 仍被跳过
-	s.clearAllSourceCooldowns()
-}
-
-// clearAllSourceCooldowns 删除 settings 表中所有 source_cooldown_* 条目
-func (s *BiliScheduler) clearAllSourceCooldowns() {
-	if err := s.db.DeleteSettingsByPrefix("source_cooldown_"); err != nil {
-		log.Printf("[bscheduler] clearAllSourceCooldowns failed: %v", err)
-		return
-	}
-	log.Printf("[bscheduler] 所有 source 级风控冷却已清除")
 }
 
 // GetCooldownInfo 返回风控冷却状态（供 API 使用）

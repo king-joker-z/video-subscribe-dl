@@ -19,8 +19,3 @@ func (d *DB) SetSetting(key, value string) error {
 	return err
 }
 
-// DeleteSettingsByPrefix 删除所有以 prefix 开头的 settings 条目
-func (d *DB) DeleteSettingsByPrefix(prefix string) error {
-	_, err := d.Exec("DELETE FROM settings WHERE key LIKE ?", prefix+"%")
-	return err
-}
