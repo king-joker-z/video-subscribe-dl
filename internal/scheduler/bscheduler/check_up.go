@@ -310,11 +310,6 @@ func (s *BiliScheduler) FullScanSource(sourceID int64) {
 }
 
 func (s *BiliScheduler) fullScanUP(src db.Source) {
-	if s.IsInCooldown() {
-		log.Printf("[bscheduler·full-scan] %s: 当前处于风控冷却期，跳过", src.Name)
-		return
-	}
-
 	client := s.clientForSource(src)
 
 	mid, err := bilibili.ExtractMID(src.URL)
@@ -340,11 +335,6 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 
 	log.Printf("[bscheduler·full-scan] %s: 第一阶段 - 拉取视频列表", uploaderName)
 	for {
-		if s.IsInCooldown() {
-			log.Printf("[bscheduler·full-scan] %s: 风控冷却中，已拉取 %d 个视频 ID（第 %d 页）", uploaderName, len(allVideos), page)
-			return
-		}
-
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {

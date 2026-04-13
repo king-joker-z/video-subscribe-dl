@@ -361,10 +361,6 @@ func (s *Scheduler) checkSourceList(sources []db.Source) {
 			if s.isXCInCooldown() {
 				continue
 			}
-		default:
-			if s.isBiliInCooldown() {
-				continue
-			}
 		}
 
 		s.safeCheckSource(src)
@@ -406,10 +402,6 @@ func (s *Scheduler) checkAllForce() {
 			}
 		case "xchina":
 			if s.isXCInCooldown() {
-				continue
-			}
-		default:
-			if s.isBiliInCooldown() {
 				continue
 			}
 		}
@@ -606,11 +598,6 @@ func (s *Scheduler) UpdateCookie(cookiePath string) {
 	s.bili.UpdateCookie(cookiePath)
 }
 
-// GetBiliCooldownInfo 返回 B 站风控冷却状态
-func (s *Scheduler) GetBiliCooldownInfo() (bool, int) {
-	return s.bili.GetCooldownInfo()
-}
-
 // ReloadConfig 手动触发配置重载
 func (s *Scheduler) ReloadConfig() {
 	s.bili.ReloadConfig()
@@ -630,30 +617,14 @@ func (s *Scheduler) GetNotifier() *notify.Notifier {
 
 // ─── 风控冷却（顶层汇总）──────────────────────────────────────────────────────
 
-// isBiliInCooldown 检查 B 站是否在风控冷却期内
-func (s *Scheduler) isBiliInCooldown() bool {
-	if s.bili == nil {
-		return false
-	}
-	return s.bili.IsInCooldown()
-}
-
 // isDouyinInCooldown 检查抖音是否在风控冷却期内
 func (s *Scheduler) isDouyinInCooldown() bool {
 	return s.douyin.IsInCooldown()
 }
 
-// GetCooldownInfo 返回风控冷却状态（供 API 使用，合并三个平台）
+// GetCooldownInfo 返回风控冷却状态（供 API 使用，合并非 B 站平台）
 func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	_, douyinSec := s.douyin.GetCooldownInfo()
-
-	var biliSec int
-	if s.bili != nil {
-		biliIn, sec := s.bili.GetCooldownInfo()
-		if biliIn {
-			biliSec = sec
-		}
-	}
 
 	var phSec int
 	if s.ph != nil {
@@ -662,9 +633,6 @@ func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	}
 
 	maxSec := douyinSec
-	if biliSec > maxSec {
-		maxSec = biliSec
-	}
 	if phSec > maxSec {
 		maxSec = phSec
 	}
@@ -675,17 +643,14 @@ func (s *Scheduler) GetCooldownInfo() (inCooldown bool, remainingSec int) {
 	return false, 0
 }
 
-// ─── B 站风控恢复（手动）────────────────────────────────────────────────────
+// ─── B 站下载器恢复（手动）────────────────────────────────────────────────────
 
-// ResumeBili 手动恢复 B 站下载器（风控触发后需手动恢复）
+// ResumeBili 手动恢复 B 站下载器
 func (s *Scheduler) ResumeBili() {
-	if s.bili != nil {
-		s.bili.ClearCooldown()
-	}
 	if s.dl != nil {
 		s.dl.Resume()
 	}
-	log.Printf("[scheduler] B站风控已手动恢复")
+	log.Printf("[scheduler] B站下载器已手动恢复")
 }
 
 // IsBiliPaused 检查 B 站下载器是否被暂停
