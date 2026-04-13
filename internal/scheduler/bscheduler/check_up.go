@@ -195,15 +195,19 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 }
 
 // checkUPDynamic 使用动态 API 检查 UP 主新视频
+// 首次全量扫描：优先走 medialist API（能拿完整历史），增量检查走动态 API
 func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, mid int64,
 	upInfo *bilibili.UPInfo, uploaderName, uploaderDir string, latestVideoAt int64, isFirstScan bool, firstScanPages int) {
 
 	if isFirstScan {
-		log.Printf("[bscheduler·动态API·首次全量] %s (mid=%d): 开始全量扫描", uploaderName, mid)
-	} else {
-		log.Printf("[bscheduler·动态API·增量] %s (mid=%d): 基准时间 %s",
-			uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
+		log.Printf("[bscheduler·动态API·首次全量] %s (mid=%d): 优先尝试 medialist API 全量拉取", uploaderName, mid)
+		s.checkUPDynamicFirstScan(src, client, mid, upInfo, uploaderName, uploaderDir, firstScanPages)
+		return
 	}
+
+	// 增量检查：走动态 API
+	log.Printf("[bscheduler·动态API·增量] %s (mid=%d): 基准时间 %s",
+		uploaderName, mid, time.Unix(latestVideoAt, 0).Format("2006-01-02 15:04:05"))
 
 	videos, err := client.FetchDynamicVideosIncremental(mid, latestVideoAt)
 	if err != nil {
@@ -217,51 +221,19 @@ func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, m
 
 	processedBVIDs := map[string]bool{}
 	totalNew := 0
-	firstScanPendingCreated := 0
 	var maxCreated int64
-
-	maxVideos := 0
-	if isFirstScan && firstScanPages > 0 {
-		maxVideos = firstScanPages * 12
-	}
 
 	for _, v := range videos {
 		if processedBVIDs[v.BvID] {
 			continue
 		}
 		processedBVIDs[v.BvID] = true
-
 		if v.PubTS > maxCreated {
 			maxCreated = v.PubTS
 		}
 		totalNew++
-
-		if maxVideos > 0 && totalNew > maxVideos {
-			log.Printf("[bscheduler·动态API·首次全量] 达到数量限制 %d，停止", maxVideos)
-			break
-		}
-
-		if isFirstScan {
-			exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
-			if !exists {
-				dl := &db.Download{
-					SourceID:  src.ID,
-					VideoID:   v.BvID,
-					Title:     v.Title,
-					Uploader:  uploaderName,
-					Thumbnail: v.Cover,
-					Status:    "pending",
-				}
-				if _, err := s.db.CreateDownload(dl); err != nil {
-					log.Printf("[bscheduler·动态API·首次全量] 创建 pending 记录失败 %s: %v", v.BvID, err)
-				} else {
-					firstScanPendingCreated++
-				}
-			}
-		} else {
-			s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
-			time.Sleep(time.Duration(1000+rand.Intn(1000)) * time.Millisecond)
-		}
+		s.processOneVideo(src, client, v.BvID, v.Title, v.Cover, uploaderName, uploaderDir, "", upInfo)
+		time.Sleep(time.Duration(1000+rand.Intn(1000)) * time.Millisecond)
 	}
 
 	if maxCreated > latestVideoAt {
@@ -269,12 +241,141 @@ func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, m
 			log.Printf("[bscheduler][WARN] 更新 latest_video_at 失败: %v", err)
 		}
 	}
+	log.Printf("[bscheduler·动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
+}
 
-	if isFirstScan {
-		log.Printf("[bscheduler·动态API] %s: 获取 %d 个新视频，创建 %d 个 pending 记录 (共返回 %d)",
-			uploaderName, totalNew, firstScanPendingCreated, len(videos))
-	} else {
-		log.Printf("[bscheduler·动态API] %s: 获取 %d 个新视频 (共返回 %d)", uploaderName, totalNew, len(videos))
+// checkUPDynamicFirstScan 首次全量扫描：优先 medialist，失败降级动态 API
+func (s *BiliScheduler) checkUPDynamicFirstScan(src db.Source, client *bilibili.Client, mid int64,
+	upInfo *bilibili.UPInfo, uploaderName, uploaderDir string, firstScanPages int) {
+
+	// 先尝试 medialist API
+	mlVideos, err := client.FetchMedialistAllVideos(mid)
+	if err != nil {
+		log.Printf("[bscheduler·medialist] %s: 拉取失败 (%v)，降级到动态 API", uploaderName, err)
+		s.checkUPDynamicFallback(src, client, mid, uploaderName, firstScanPages)
+		return
+	}
+	if len(mlVideos) == 0 {
+		log.Printf("[bscheduler·medialist] %s: 返回空列表，降级到动态 API", uploaderName)
+		s.checkUPDynamicFallback(src, client, mid, uploaderName, firstScanPages)
+		return
+	}
+
+	log.Printf("[bscheduler·medialist] %s: 共拉取 %d 个视频", uploaderName, len(mlVideos))
+
+	// firstScanPages 限制（复用：pages*12 条）
+	maxVideos := 0
+	if firstScanPages > 0 {
+		maxVideos = firstScanPages * 12
+	}
+
+	processedBVIDs := map[string]bool{}
+	firstScanPendingCreated := 0
+	var maxCreated int64
+
+	for i, v := range mlVideos {
+		if maxVideos > 0 && i >= maxVideos {
+			log.Printf("[bscheduler·medialist] %s: 达到数量限制 %d，停止", uploaderName, maxVideos)
+			break
+		}
+		if processedBVIDs[v.BvID] {
+			continue
+		}
+		processedBVIDs[v.BvID] = true
+		if v.PubTS > maxCreated {
+			maxCreated = v.PubTS
+		}
+		exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+		if !exists {
+			dl := &db.Download{
+				SourceID:  src.ID,
+				VideoID:   v.BvID,
+				Title:     v.Title,
+				Uploader:  uploaderName,
+				Thumbnail: v.Cover,
+				Status:    "pending",
+			}
+			if _, err := s.db.CreateDownload(dl); err != nil {
+				log.Printf("[bscheduler·medialist] 创建 pending 记录失败 %s: %v", v.BvID, err)
+			} else {
+				firstScanPendingCreated++
+			}
+		}
+	}
+
+	if maxCreated > 0 {
+		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxCreated); err != nil {
+			log.Printf("[bscheduler][WARN] 更新 latest_video_at 失败: %v", err)
+		}
+	}
+	log.Printf("[bscheduler·medialist] %s: 首次全量完成，共 %d 个视频，创建 %d 个 pending 记录",
+		uploaderName, len(mlVideos), firstScanPendingCreated)
+	if firstScanPendingCreated > 0 {
+		log.Printf("[bscheduler] 首次全量扫描完成，%d 个 pending 等待下载", firstScanPendingCreated)
+	}
+}
+
+// checkUPDynamicFallback medialist 失败后降级：用动态 API 做全量扫描
+func (s *BiliScheduler) checkUPDynamicFallback(src db.Source, client *bilibili.Client, mid int64, uploaderName string, firstScanPages int) {
+	log.Printf("[bscheduler·动态API·首次全量] %s (mid=%d): 开始动态 API 全量扫描", uploaderName, mid)
+
+	videos, err := client.FetchDynamicVideosIncremental(mid, 0)
+	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.TriggerCooldown()
+		}
+		log.Printf("[bscheduler·动态API·首次全量] 拉取动态失败 (mid=%d): %v", mid, err)
+		return
+	}
+
+	maxVideos := 0
+	if firstScanPages > 0 {
+		maxVideos = firstScanPages * 12
+	}
+
+	processedBVIDs := map[string]bool{}
+	firstScanPendingCreated := 0
+	var maxCreated int64
+
+	for i, v := range videos {
+		if maxVideos > 0 && i >= maxVideos {
+			log.Printf("[bscheduler·动态API·首次全量] %s: 达到数量限制 %d，停止", uploaderName, maxVideos)
+			break
+		}
+		if processedBVIDs[v.BvID] {
+			continue
+		}
+		processedBVIDs[v.BvID] = true
+		if v.PubTS > maxCreated {
+			maxCreated = v.PubTS
+		}
+		exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+		if !exists {
+			dl := &db.Download{
+				SourceID:  src.ID,
+				VideoID:   v.BvID,
+				Title:     v.Title,
+				Uploader:  uploaderName,
+				Thumbnail: v.Cover,
+				Status:    "pending",
+			}
+			if _, err := s.db.CreateDownload(dl); err != nil {
+				log.Printf("[bscheduler·动态API·首次全量] 创建 pending 记录失败 %s: %v", v.BvID, err)
+			} else {
+				firstScanPendingCreated++
+			}
+		}
+	}
+
+	if maxCreated > 0 {
+		if err := s.db.UpdateSourceLatestVideoAt(src.ID, maxCreated); err != nil {
+			log.Printf("[bscheduler][WARN] 更新 latest_video_at 失败: %v", err)
+		}
+	}
+	log.Printf("[bscheduler·动态API·首次全量] %s: 获取 %d 个视频，创建 %d 个 pending 记录 (共返回 %d)",
+		uploaderName, len(processedBVIDs), firstScanPendingCreated, len(videos))
+	if firstScanPendingCreated > 0 {
+		log.Printf("[bscheduler] 首次全量扫描完成，%d 个 pending 等待下载", firstScanPendingCreated)
 	}
 }
 
@@ -340,19 +441,19 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 			if bilibili.IsRiskControl(err) {
 				// 第一页风控：降级到动态 API，避免空列表误判为"无缺失"
 				if page == 1 {
-					log.Printf("[bscheduler·full-scan] %s: 投稿 API 风控（%v），降级到动态 API 做全量补漏", uploaderName, err)
+					log.Printf("[bscheduler·full-scan] %s: 投稿 API 风控（%v），降级到 medialist API 做全量补漏", uploaderName, err)
 					s.TriggerCooldown()
-					s.fullScanUPDynamic(src, client, mid, uploaderName)
+					s.fullScanUPMedialist(src, client, mid, uploaderName)
 					return
 				}
 				s.TriggerCooldown()
 				log.Printf("[bscheduler·full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
 				break
 			}
-			// 第一页 -403（WBI 签名失效），降级到动态 API 做全量补漏
+			// 第一页 -403（WBI 签名失效），降级到 medialist API 做全量补漏
 			if page == 1 && bilibili.IsAccessDenied(err) {
-				log.Printf("[bscheduler·full-scan] %s: 投稿 API -403，降级到动态 API 做全量补漏", uploaderName)
-				s.fullScanUPDynamic(src, client, mid, uploaderName)
+				log.Printf("[bscheduler·full-scan] %s: 投稿 API -403，降级到 medialist API 做全量补漏", uploaderName)
+				s.fullScanUPMedialist(src, client, mid, uploaderName)
 				return
 			}
 			log.Printf("[bscheduler·full-scan] Get videos page %d failed: %v", page, err)
@@ -419,22 +520,51 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 	log.Printf("[bscheduler·full-scan] %s: 扫描完成，创建 %d 个待下载任务", uploaderName, created)
 }
 
-// fullScanUPDynamic 使用动态 API 做全量补漏扫描（投稿 API -403 时的降级路径）
-// 拉取该 UP 主所有动态视频，将缺失的创建为 pending 记录
-func (s *BiliScheduler) fullScanUPDynamic(src db.Source, client *bilibili.Client, mid int64, uploaderName string) {
-	log.Printf("[bscheduler·full-scan·动态API] %s: 开始动态 API 全量补漏", uploaderName)
+// fullScanUPMedialist 使用 medialist API 做全量补漏扫描（投稿 API 被封时的降级路径）
+// 优先 medialist（完整历史），失败再降级动态 API
+func (s *BiliScheduler) fullScanUPMedialist(src db.Source, client *bilibili.Client, mid int64, uploaderName string) {
+	log.Printf("[bscheduler·full-scan·medialist] %s: 开始 medialist API 全量补漏", uploaderName)
 
-	videos, err := client.FetchDynamicVideosIncremental(mid, 0) // 0 = 拉取全部
-	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.TriggerCooldown()
+	mlVideos, err := client.FetchMedialistAllVideos(mid)
+	if err != nil || len(mlVideos) == 0 {
+		log.Printf("[bscheduler·full-scan·medialist] %s: medialist 失败或为空 (%v)，降级到动态 API", uploaderName, err)
+		// 最终降级：动态 API
+		dynVideos, dynErr := client.FetchDynamicVideosIncremental(mid, 0)
+		if dynErr != nil {
+			if bilibili.IsRiskControl(dynErr) {
+				s.TriggerCooldown()
+			}
+			log.Printf("[bscheduler·full-scan·medialist] %s: 动态 API 也失败: %v", uploaderName, dynErr)
+			return
 		}
-		log.Printf("[bscheduler·full-scan·动态API] %s: 拉取动态失败: %v", uploaderName, err)
+		created := 0
+		for _, v := range dynVideos {
+			exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
+			if exists {
+				continue
+			}
+			dl := &db.Download{
+				SourceID:  src.ID,
+				VideoID:   v.BvID,
+				Title:     v.Title,
+				Uploader:  uploaderName,
+				Thumbnail: v.Cover,
+				Status:    "pending",
+			}
+			if _, err := s.db.CreateDownload(dl); err != nil {
+				log.Printf("[bscheduler·full-scan·动态API] 创建记录失败 %s: %v", v.BvID, err)
+				continue
+			}
+			created++
+		}
+		log.Printf("[bscheduler·full-scan·动态API] %s: 扫描完成，动态共 %d 个，创建 %d 个待下载任务",
+			uploaderName, len(dynVideos), created)
 		return
 	}
 
+	log.Printf("[bscheduler·full-scan·medialist] %s: 共 %d 个视频，开始补漏检查", uploaderName, len(mlVideos))
 	created := 0
-	for _, v := range videos {
+	for _, v := range mlVideos {
 		exists, _ := s.db.IsVideoDownloaded(src.ID, v.BvID)
 		if exists {
 			continue
@@ -448,14 +578,13 @@ func (s *BiliScheduler) fullScanUPDynamic(src db.Source, client *bilibili.Client
 			Status:    "pending",
 		}
 		if _, err := s.db.CreateDownload(dl); err != nil {
-			log.Printf("[bscheduler·full-scan·动态API] 创建记录失败 %s: %v", v.BvID, err)
+			log.Printf("[bscheduler·full-scan·medialist] 创建记录失败 %s: %v", v.BvID, err)
 			continue
 		}
 		created++
 	}
-
-	log.Printf("[bscheduler·full-scan·动态API] %s: 扫描完成，动态共 %d 个，创建 %d 个待下载任务",
-		uploaderName, len(videos), created)
+	log.Printf("[bscheduler·full-scan·medialist] %s: 扫描完成，共 %d 个，创建 %d 个待下载任务",
+		uploaderName, len(mlVideos), created)
 }
 
 // processCollection UP 主空间内合集

@@ -399,6 +399,101 @@ func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 	return tags, nil
 }
 
+// MedialistItem medialist API 单条视频
+type MedialistItem struct {
+	ID     int64  `json:"id"`     // cursor，用于翻页
+	BvID   string `json:"bv_id"`
+	Title  string `json:"title"`
+	Cover  string `json:"cover"`
+	PubTS  int64  `json:"pubtime"`
+	Intro  string `json:"intro"` // 简介
+}
+
+// GetMedialistVideos 通过 medialist API 获取 UP 主投稿视频（一页，cursor 分页）
+// lastOID=0 表示获取第一页，之后用上一页最后一条的 id 作为 lastOID
+// 不需要 WBI 签名，不需要登录态
+func (c *Client) GetMedialistVideos(mid int64, lastOID int64, pageSize int) ([]MedialistItem, bool, error) {
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"message"`
+		Data struct {
+			MediaList  []MedialistItem `json:"media_list"`
+			HasMore    bool            `json:"has_more"`
+			TotalCount int             `json:"total_count"`
+		} `json:"data"`
+	}
+	params := url.Values{}
+	params.Set("type", "1")
+	params.Set("biz_id", fmt.Sprintf("%d", mid))
+	params.Set("oid", fmt.Sprintf("%d", lastOID))
+	params.Set("otype", "2")
+	params.Set("ps", fmt.Sprintf("%d", pageSize))
+	params.Set("direction", "false")
+
+	referer := fmt.Sprintf("https://space.bilibili.com/%d/video", mid)
+	reqURL := "https://api.bilibili.com/x/v2/medialist/resource/list?" + params.Encode()
+
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", referer)
+	req.Header.Set("Origin", "https://space.bilibili.com")
+
+	c.mu.RLock()
+	cookie := c.cookie
+	c.mu.RUnlock()
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+
+	httpResp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer httpResp.Body.Close()
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, false, err
+	}
+	if resp.Code != 0 {
+		return nil, false, fmt.Errorf("bilibili medialist: %d %s", resp.Code, resp.Msg)
+	}
+	return resp.Data.MediaList, resp.Data.HasMore, nil
+}
+
+// FetchMedialistAllVideos 通过 medialist API 拉取 UP 主全量投稿视频
+// 返回按时间倒序的完整列表（最新在前）
+func (c *Client) FetchMedialistAllVideos(mid int64) ([]MedialistItem, error) {
+	var result []MedialistItem
+	var lastOID int64 = 0
+	pageSize := 20
+	pageIdx := 0
+
+	for {
+		items, hasMore, err := c.GetMedialistVideos(mid, lastOID, pageSize)
+		if err != nil {
+			return result, err
+		}
+		result = append(result, items...)
+		if !hasMore || len(items) == 0 {
+			break
+		}
+		lastOID = items[len(items)-1].ID
+		pageIdx++
+		if pageIdx >= 500 {
+			log.Printf("[medialist] 达到最大翻页限制 500 页，mid=%d", mid)
+			break
+		}
+		time.Sleep(time.Duration(500+rand.Intn(500)) * time.Millisecond)
+	}
+	return result, nil
+}
+
 // GetDynamicVideos 获取 UP 主动态中的视频（单页）
 func (c *Client) GetDynamicVideos(mid int64, offset string) (*DynamicResponse, error) {
 	params := url.Values{}
