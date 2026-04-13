@@ -179,6 +179,7 @@ func main() {
 	sched.Start()
 
 	server := web.NewServer(database, dl, sc, *port, *dataDir, *downloadDir)
+	server.SetCooldownInfoFunc(sched.GetCooldownInfo)
 	server.SetPHCooldownInfoFunc(sched.GetPHCooldownInfo)
 	server.SetCheckNowFunc(sched.CheckNow)
 	server.SetCookieUpdateFunc(sched.UpdateCookie)
@@ -196,6 +197,7 @@ func main() {
 	server.SetDouyinPauseStatusFunc(sched.GetDouyinPauseStatus)
 	server.SetDouyinResumeFunc(sched.ResumeDouyin)
 	server.SetDouyinPauseFunc(sched.PauseDouyin)
+	server.SetBiliResumeFunc(sched.ResumeBili)
 	server.SetDouyinCookieStatusFunc(sched.GetDouyinCookieStatus)
 	server.SetPHCookieUpdateFunc(sched.RefreshPHUserCookie)
 	server.SetPHPauseStatusFunc(sched.GetPHPauseStatus)

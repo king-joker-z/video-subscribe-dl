@@ -497,9 +497,10 @@ func (d *Downloader) downloadWithRetry(job *Job) *Result {
 		return result
 	}
 
-	// 风控错误：不重试，直接返回
+	// 风控错误：暂停下载队列，不重试
 	if bilibili.IsRiskControl(result.Error) {
-		log.Printf("[downloader] 风控错误，跳过重试: %s", job.BvID)
+		log.Printf("[downloader] 风控错误，暂停下载队列: %s", job.BvID)
+		d.Pause()
 		return result
 	}
 

@@ -39,6 +39,11 @@ type BiliScheduler struct {
 	biliMu sync.RWMutex
 	bili   *bilibili.Client
 
+	// 风控退避
+	rateLimitMu        sync.Mutex
+	cooldownUntil      time.Time
+	lastCooldownNotify time.Time
+
 	// Cookie 定期检测
 	lastCookieCheck time.Time
 

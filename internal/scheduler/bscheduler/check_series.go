@@ -30,6 +30,10 @@ func (s *BiliScheduler) CheckSeries(src db.Source) {
 
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.TriggerCooldown()
+			return
+		}
 		log.Printf("[bscheduler·series] Get UP info failed: %v", err)
 		return
 	}
@@ -41,6 +45,10 @@ func (s *BiliScheduler) CheckSeries(src db.Source) {
 
 	seriesMeta, err := client.GetSeriesInfo(mid, seriesID)
 	if err != nil {
+		if bilibili.IsRiskControl(err) {
+			s.TriggerCooldown()
+			return
+		}
 		log.Printf("[bscheduler·series] Get series info failed: %v", err)
 		return
 	}
@@ -74,6 +82,10 @@ func (s *BiliScheduler) CheckSeries(src db.Source) {
 	for {
 		archives, _, err := client.GetSeriesVideosSorted(mid, seriesID, page, pageSize, sortOrder)
 		if err != nil {
+			if bilibili.IsRiskControl(err) {
+				s.TriggerCooldown()
+				return
+			}
 			log.Printf("[bscheduler·series] Get series page %d failed: %v", page, err)
 			break
 		}
@@ -124,6 +136,7 @@ func (s *BiliScheduler) CheckSeries(src db.Source) {
 	if len(allArchives) > 0 {
 		premiered = time.Unix(allArchives[0].PubDate, 0).Format("2006-01-02")
 	}
+	// Fix CR-005: respect SkipNFO setting (was unconditionally writing tvshow.nfo)
 	if !src.SkipNFO {
 		nfo.GenerateTVShowNFO(&nfo.TVShowMeta{
 			Title: seriesMeta.Name, Plot: seriesMeta.Description, UploaderName: uploaderName,
