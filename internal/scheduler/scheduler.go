@@ -598,11 +598,6 @@ func (s *Scheduler) UpdateCookie(cookiePath string) {
 	s.bili.UpdateCookie(cookiePath)
 }
 
-// GetBiliCooldownInfo 返回 B 站风控冷却状态
-func (s *Scheduler) GetBiliCooldownInfo() (bool, int) {
-	return s.bili.GetCooldownInfo()
-}
-
 // ReloadConfig 手动触发配置重载
 func (s *Scheduler) ReloadConfig() {
 	s.bili.ReloadConfig()
