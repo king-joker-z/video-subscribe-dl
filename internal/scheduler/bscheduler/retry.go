@@ -58,8 +58,8 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 	detail, err := client.GetVideoDetail(actualBvID)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			log.Printf("[bscheduler] 风控触发，停止重试: %s", dl.VideoID)
-			s.TriggerCooldown()
+			log.Printf("[bscheduler] 风控触发，跳过重试: %s", dl.VideoID)
+			s.db.IncrementRetryCount(dl.ID, "risk control: "+err.Error())
 			return
 		}
 		log.Printf("[bscheduler] Get detail failed for %s: %v", dl.VideoID, err)

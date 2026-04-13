@@ -83,15 +83,11 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 			if bilibili.IsRiskControl(err) || bilibili.IsAccessDenied(err) {
 				if page == 1 {
 					log.Printf("[bscheduler·投稿API] %s: %v，降级到动态 API", uploaderName, err)
-					// 首次全量扫描 page1 就风控：降级到动态 API
 					s.checkUPDynamic(src, client, mid, upInfo, uploaderName, uploaderDir, latestVideoAt, isFirstScan, firstScanPages)
 					return
 				}
-				// page > 1：已获取到部分数据，先 break 保存，再触发风控
-				log.Printf("[bscheduler·投稿API] %s: 第%d页风控，保存已获取的 %d 条后触发冷却", uploaderName, page, totalFetched)
-				if bilibili.IsRiskControl(err) {
-					s.TriggerCooldown()
-				}
+				// page > 1：已获取到部分数据，先 break 保存
+				log.Printf("[bscheduler·投稿API] %s: 第%d页风控，保存已获取的 %d 条后退出", uploaderName, page, totalFetched)
 				break
 			}
 			log.Printf("[bscheduler] Get videos page %d failed: %v", page, err)
@@ -163,7 +159,6 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 			break
 		}
 		page++
-		// 翻页间隔：5~10s，首次全量每 3 页额外休息 10~15s 模拟人类节奏
 		sleepMs := 5000 + rand.Intn(5000)
 		if isFirstScan && page%3 == 0 {
 			sleepMs += 10000 + rand.Intn(5000)
@@ -182,7 +177,6 @@ func (s *BiliScheduler) CheckUP(src db.Source) {
 		log.Printf("[bscheduler·首次全量] %s: 获取 %d 个新视频，创建 %d 个 pending 记录 (共检查 %d, 翻页 %d)",
 			uploaderName, totalNew, firstScanPendingCreated, totalFetched, page)
 		if firstScanPendingCreated > 0 {
-			// 触发 pending 处理（由调用方决定）
 			log.Printf("[bscheduler] 首次全量扫描完成，%d 个 pending 等待下载", firstScanPendingCreated)
 		}
 	} else if stopped {
@@ -207,10 +201,6 @@ func (s *BiliScheduler) checkUPDynamic(src db.Source, client *bilibili.Client, m
 
 	videos, err := client.FetchDynamicVideosIncremental(mid, latestVideoAt)
 	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.TriggerCooldown()
-			return
-		}
 		log.Printf("[bscheduler·动态API] 拉取动态失败 (mid=%d): %v", mid, err)
 		return
 	}
@@ -310,11 +300,6 @@ func (s *BiliScheduler) FullScanSource(sourceID int64) {
 }
 
 func (s *BiliScheduler) fullScanUP(src db.Source) {
-	if s.IsInCooldown() {
-		log.Printf("[bscheduler·full-scan] %s: 当前处于风控冷却期，跳过", src.Name)
-		return
-	}
-
 	client := s.clientForSource(src)
 
 	mid, err := bilibili.ExtractMID(src.URL)
@@ -340,26 +325,17 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 
 	log.Printf("[bscheduler·full-scan] %s: 第一阶段 - 拉取视频列表", uploaderName)
 	for {
-		if s.IsInCooldown() {
-			log.Printf("[bscheduler·full-scan] %s: 风控冷却中，已拉取 %d 个视频 ID（第 %d 页）", uploaderName, len(allVideos), page)
-			return
-		}
-
 		videos, total, err := client.GetUPVideos(mid, page, pageSize)
 		if err != nil {
 			if bilibili.IsRiskControl(err) {
-				// 第一页风控：降级到动态 API，避免空列表误判为"无缺失"
 				if page == 1 {
 					log.Printf("[bscheduler·full-scan] %s: 投稿 API 风控（%v），降级到动态 API 做全量补漏", uploaderName, err)
-					s.TriggerCooldown()
 					s.fullScanUPDynamic(src, client, mid, uploaderName)
 					return
 				}
-				s.TriggerCooldown()
 				log.Printf("[bscheduler·full-scan] %s: 拉取列表时风控，已获取 %d/%d", uploaderName, len(allVideos), total)
 				break
 			}
-			// 第一页 -403（WBI 签名失效），降级到动态 API 做全量补漏
 			if page == 1 && bilibili.IsAccessDenied(err) {
 				log.Printf("[bscheduler·full-scan] %s: 投稿 API -403，降级到动态 API 做全量补漏", uploaderName)
 				s.fullScanUPDynamic(src, client, mid, uploaderName)
@@ -384,7 +360,6 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 			break
 		}
 		page++
-		// 翻页间隔与常规扫描保持一致：5~10s，每3页额外休息10~15s（防风控）
 		sleepMs := 5000 + rand.Intn(5000)
 		if page%3 == 0 {
 			sleepMs += 10000 + rand.Intn(5000)
@@ -429,16 +404,12 @@ func (s *BiliScheduler) fullScanUP(src db.Source) {
 	log.Printf("[bscheduler·full-scan] %s: 扫描完成，创建 %d 个待下载任务", uploaderName, created)
 }
 
-// fullScanUPDynamic 使用动态 API 做全量补漏扫描（投稿 API -403 时的降级路径）
-// 拉取该 UP 主所有动态视频，将缺失的创建为 pending 记录
+// fullScanUPDynamic 使用动态 API 做全量补漏扫描（投稿 API -403/风控时的降级路径）
 func (s *BiliScheduler) fullScanUPDynamic(src db.Source, client *bilibili.Client, mid int64, uploaderName string) {
 	log.Printf("[bscheduler·full-scan·动态API] %s: 开始动态 API 全量补漏", uploaderName)
 
 	videos, err := client.FetchDynamicVideosIncremental(mid, 0) // 0 = 拉取全部
 	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.TriggerCooldown()
-		}
 		log.Printf("[bscheduler·full-scan·动态API] %s: 拉取动态失败: %v", uploaderName, err)
 		return
 	}

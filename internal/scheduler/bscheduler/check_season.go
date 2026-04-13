@@ -26,11 +26,7 @@ func (s *BiliScheduler) CheckSeason(src db.Source) {
 
 	upInfo, err := client.GetUPInfo(mid)
 	if err != nil {
-		if bilibili.IsRiskControl(err) {
-			s.TriggerCooldown()
-		} else {
-			log.Printf("[bscheduler] Get UP info failed (mid=%d): %v", mid, err)
-		}
+		log.Printf("[bscheduler] Get UP info failed (mid=%d): %v", mid, err)
 		return
 	}
 
@@ -68,10 +64,6 @@ func (s *BiliScheduler) fetchAndProcessSeason(src db.Source, client *bilibili.Cl
 	for {
 		archives, m, err := client.GetSeasonVideos(mid, seasonID, page, pageSize)
 		if err != nil {
-			if bilibili.IsRiskControl(err) {
-				s.TriggerCooldown()
-				return
-			}
 			log.Printf("[bscheduler] Get season %d page %d failed: %v", seasonID, page, err)
 			break
 		}

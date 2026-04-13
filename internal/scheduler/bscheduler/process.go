@@ -319,7 +319,7 @@ func (s *BiliScheduler) processOneVideo(src db.Source, client *bilibili.Client, 
 	detail, err := client.GetVideoDetail(bvid)
 	if err != nil {
 		if bilibili.IsRiskControl(err) {
-			s.TriggerCooldown()
+			log.Printf("[bscheduler] 风控触发，跳过视频: %s", bvid)
 		} else {
 			log.Printf("[bscheduler] Get detail failed for %s: %v", bvid, err)
 		}

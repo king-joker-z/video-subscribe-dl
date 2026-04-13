@@ -12,24 +12,22 @@ import (
 
 // TaskHandler 任务控制 API
 type TaskHandler struct {
-	db            *db.DB
-	downloader    *downloader.Downloader
-	startTime     time.Time
-	version       string
-	buildTime     string
-	onCheckNow    func()
-	onResumeBili  func() // 手动恢复 B站风控
+	db         *db.DB
+	downloader *downloader.Downloader
+	startTime  time.Time
+	version    string
+	buildTime  string
+	onCheckNow func()
 }
 
 func NewTaskHandler(database *db.DB, dl *downloader.Downloader) *TaskHandler {
 	return &TaskHandler{db: database, downloader: dl}
 }
 
-func (h *TaskHandler) SetCheckNowFunc(fn func())        { h.onCheckNow = fn }
-func (h *TaskHandler) SetResumeBiliFunc(fn func())      { h.onResumeBili = fn }
-func (h *TaskHandler) SetVersion(v string)              { h.version = v }
-func (h *TaskHandler) SetBuildTime(t string)            { h.buildTime = t }
-func (h *TaskHandler) SetStartTime(t time.Time)         { h.startTime = t }
+func (h *TaskHandler) SetCheckNowFunc(fn func()) { h.onCheckNow = fn }
+func (h *TaskHandler) SetVersion(v string)       { h.version = v }
+func (h *TaskHandler) SetBuildTime(t string)     { h.buildTime = t }
+func (h *TaskHandler) SetStartTime(t time.Time)  { h.startTime = t }
 
 // GET /api/task/status — 任务状态
 func (h *TaskHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +81,7 @@ func (h *TaskHandler) HandlePause(w http.ResponseWriter, r *http.Request) {
 	apiOK(w, map[string]interface{}{"message": "已暂停"})
 }
 
-// POST /api/task/resume — 恢复（通用暂停恢复）
+// POST /api/task/resume — 恢复
 func (h *TaskHandler) HandleResume(w http.ResponseWriter, r *http.Request) {
 	if !MethodGuard("POST", w, r) {
 		return
@@ -92,17 +90,6 @@ func (h *TaskHandler) HandleResume(w http.ResponseWriter, r *http.Request) {
 		h.downloader.Resume()
 	}
 	apiOK(w, map[string]interface{}{"message": "已恢复"})
-}
-
-// POST /api/bili/resume — 手动恢复 B站风控
-func (h *TaskHandler) HandleResumeBili(w http.ResponseWriter, r *http.Request) {
-	if !MethodGuard("POST", w, r) {
-		return
-	}
-	if h.onResumeBili != nil {
-		h.onResumeBili()
-	}
-	apiOK(w, map[string]interface{}{"message": "B站风控已恢复"})
 }
 
 // GET /api/version — 版本信息
