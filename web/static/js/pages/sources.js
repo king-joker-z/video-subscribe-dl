@@ -232,19 +232,24 @@ function ImportFollowTab({ onDone }) {
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState(new Set());
-  const [subscribing, setSubscribing] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
-  const [batchForm, setBatchForm] = useState({
+  // 当前正在配置的单个 UP 主（null 表示未展开配置面板）
+  const [pendingUpper, setPendingUpper] = useState(null);
+  const [singleForm, setSingleForm] = useState({
+    name: '',
+    enabled: true,
     download_quality: 'best',
     download_codec: 'all',
+    download_filter: '',
+    skip_nfo: false,
+    skip_poster: false,
     check_interval: 7200,
     use_dynamic_api: false,
   });
+  const [adding, setAdding] = useState(false);
   const pageSize = 20;
   const searchTimer = useRef(null);
 
-  const updateBatchForm = (key, value) => setBatchForm(prev => ({ ...prev, [key]: value }));
+  const updateSingleForm = (key, value) => setSingleForm(prev => ({ ...prev, [key]: value }));
 
   const loadUppers = useCallback(async () => {
     setLoading(true);
@@ -264,36 +269,45 @@ function ImportFollowTab({ onDone }) {
 
   useEffect(() => { loadUppers(); }, [loadUppers]);
 
-  const toggle = (mid) => {
-    const s = new Set(selected);
-    s.has(mid) ? s.delete(mid) : s.add(mid);
-    setSelected(s);
+  // 点击某个 UP 主的「订阅」按钮，展开配置面板
+  const handleClickSubscribe = (u) => {
+    setPendingUpper(u);
+    setSingleForm({
+      name: u.uname || u.name || '',
+      enabled: true,
+      download_quality: 'best',
+      download_codec: 'all',
+      download_filter: '',
+      skip_nfo: false,
+      skip_poster: false,
+      check_interval: 7200,
+      use_dynamic_api: false,
+    });
   };
 
-  const selectAll = () => {
-    const unsubscribed = uppers.filter(u => !u.subscribed).map(u => u.mid);
-    setSelected(new Set(unsubscribed));
-  };
-
-  const handleSubscribe = async () => {
-    if (selected.size === 0) return;
-    setSubscribing(true);
+  // 确认订阅：调 createSource，和正常链接添加完全一致
+  const handleConfirmAdd = async () => {
+    if (!pendingUpper) return;
+    setAdding(true);
     try {
-      const res = await api.batchSubscribe({
-        mids: [...selected],
-        type: "up",
-        download_quality: batchForm.download_quality,
-        download_codec: batchForm.download_codec,
-        check_interval: batchForm.check_interval,
-        use_dynamic_api: batchForm.use_dynamic_api,
-      });
-      toast.success(`已订阅 ${res.data?.created || 0} 个 UP 主`);
-      setSelected(new Set());
-      setShowConfig(false);
+      const url = `https://space.bilibili.com/${pendingUpper.mid}`;
+      const body = { url };
+      if (singleForm.name) body.name = singleForm.name;
+      body.enabled = singleForm.enabled;
+      body.download_quality = singleForm.download_quality;
+      body.download_codec = singleForm.download_codec;
+      body.download_filter = singleForm.download_filter;
+      body.skip_nfo = singleForm.skip_nfo;
+      body.skip_poster = singleForm.skip_poster;
+      body.check_interval = singleForm.check_interval;
+      body.use_dynamic_api = singleForm.use_dynamic_api;
+      const res = await api.createSource(body);
+      toast.success('已添加: ' + (res.data.name || pendingUpper.uname || pendingUpper.name || '新订阅源'));
+      setPendingUpper(null);
       loadUppers();
       if (onDone) onDone();
     } catch (e) { toast.error(e.message); }
-    finally { setSubscribing(false); }
+    finally { setAdding(false); }
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -305,8 +319,7 @@ function ImportFollowTab({ onDone }) {
         type: "text", value: searchInput, placeholder: "搜索 UP 主...",
         onChange: (e) => handleSearchChange(e.target.value),
         className: "flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
-      }),
-      h(Button, { onClick: selectAll, size: "sm", variant: "secondary" }, "全选未订阅")
+      })
     ),
     // 列表
     loading
@@ -315,10 +328,16 @@ function ImportFollowTab({ onDone }) {
         ? h("div", { className: "text-center text-slate-500 py-8" }, "未找到关注的 UP 主（请先登录 B 站）")
         : h("div", { className: "space-y-1 max-h-60 overflow-y-auto" },
             uppers.map(u =>
-              h("label", { key: u.mid, className: cn("flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-100", selected.has(u.mid) && "bg-slate-100") },
-                h("input", { type: "checkbox", checked: selected.has(u.mid) || u.subscribed, disabled: u.subscribed, onChange: () => toggle(u.mid), className: "rounded border-slate-300" }),
+              h("div", { key: u.mid, className: "flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-100" },
                 h("span", { className: "text-sm text-slate-800 flex-1 truncate" }, u.uname || u.name),
-                u.subscribed && h(Badge, { variant: "success" }, "已订阅")
+                u.subscribed
+                  ? h(Badge, { variant: "success" }, "已订阅")
+                  : h(Button, {
+                      onClick: () => handleClickSubscribe(u),
+                      size: "sm",
+                      variant: "secondary",
+                      disabled: pendingUpper && pendingUpper.mid === u.mid
+                    }, "订阅")
               )
             )
           ),
@@ -328,18 +347,32 @@ function ImportFollowTab({ onDone }) {
       h("span", { className: "text-xs text-slate-500" }, `${page} / ${totalPages}`),
       h(Button, { onClick: () => setPage(p => Math.min(totalPages, p + 1)), disabled: page >= totalPages, size: "sm", variant: "ghost" }, "下一页")
     ),
-    // 批量配置面板（点「订阅」后展开）
-    selected.size > 0 && showConfig && h("div", { className: "bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3" },
-      h("div", { className: "text-sm font-medium text-slate-700" }, `批量配置（共 ${selected.size} 个 UP 主）`),
+    // 单个 UP 主配置面板（和正常链接添加弹窗完全一致）
+    pendingUpper && h("div", { className: "bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 space-y-3" },
+      h("div", { className: "flex items-center gap-2 mb-1" },
+        h(Badge, { variant: "outline" }, "UP 主"),
+        h("span", { className: "text-xs text-slate-500" }, pendingUpper.uname || pendingUpper.name)
+      ),
+      h("div", null,
+        h("label", { className: "text-sm text-slate-600 mb-1" }, "显示名称"),
+        h("input", { type: "text", value: singleForm.name, onChange: (e) => updateSingleForm('name', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" })
+      ),
+      h("div", { className: "flex items-center justify-between" },
+        h("label", { className: "text-sm text-slate-600" }, "启用"),
+        h("button", {
+          onClick: () => updateSingleForm('enabled', !singleForm.enabled),
+          className: cn("w-10 h-6 rounded-full transition-colors", singleForm.enabled ? "bg-blue-500" : "bg-slate-300")
+        }, h("div", { className: cn("w-4 h-4 rounded-full bg-white transition-transform mx-1", singleForm.enabled ? "translate-x-4" : "translate-x-0") }))
+      ),
       h("div", null,
         h("label", { className: "text-sm text-slate-600 mb-1 block" }, "画质偏好"),
-        h("select", { value: batchForm.download_quality, onChange: (e) => updateBatchForm('download_quality', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
+        h("select", { value: singleForm.download_quality, onChange: (e) => updateSingleForm('download_quality', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
           qualityOptions.map(o => h("option", { key: o.value, value: o.value }, o.label))
         )
       ),
       h("div", null,
         h("label", { className: "text-sm text-slate-600 mb-1 block" }, "视频编码"),
-        h("select", { value: batchForm.download_codec, onChange: (e) => updateBatchForm('download_codec', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
+        h("select", { value: singleForm.download_codec, onChange: (e) => updateSingleForm('download_codec', e.target.value), className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" },
           h("option", { value: "all" }, "自动"),
           h("option", { value: "avc" }, "H.264 (AVC)"),
           h("option", { value: "hevc" }, "H.265 (HEVC)"),
@@ -347,8 +380,22 @@ function ImportFollowTab({ onDone }) {
         )
       ),
       h("div", null,
+        h("label", { className: "text-sm text-slate-600 mb-1 block" }, "标题过滤关键词（匹配才下载，留空不过滤）"),
+        h("input", { type: "text", value: singleForm.download_filter, onChange: (e) => updateSingleForm('download_filter', e.target.value), placeholder: "关键词1|关键词2", className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" })
+      ),
+      h("div", null,
         h("label", { className: "text-sm text-slate-600 mb-1 block" }, "检查间隔（秒）"),
-        h("input", { type: "number", value: batchForm.check_interval, onChange: (e) => updateBatchForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" })
+        h("input", { type: "number", value: singleForm.check_interval, onChange: (e) => updateSingleForm('check_interval', parseInt(e.target.value) || 7200), min: 300, className: "w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-500" })
+      ),
+      h("div", { className: "grid grid-cols-2 gap-3" },
+        h("div", { className: "flex items-center gap-2" },
+          h("input", { type: "checkbox", checked: singleForm.skip_nfo, onChange: (e) => updateSingleForm('skip_nfo', e.target.checked), className: "rounded border-slate-300" }),
+          h("label", { className: "text-sm text-slate-600" }, "跳过 NFO")
+        ),
+        h("div", { className: "flex items-center gap-2" },
+          h("input", { type: "checkbox", checked: singleForm.skip_poster, onChange: (e) => updateSingleForm('skip_poster', e.target.checked), className: "rounded border-slate-300" }),
+          h("label", { className: "text-sm text-slate-600" }, "跳过封面")
+        )
       ),
       h("div", { className: "flex items-center justify-between" },
         h("div", null,
@@ -356,18 +403,14 @@ function ImportFollowTab({ onDone }) {
           h("div", { className: "text-xs text-slate-400 mt-0.5" }, "风控概率更低，但可能不包含部分旧视频")
         ),
         h("button", {
-          onClick: () => updateBatchForm('use_dynamic_api', !batchForm.use_dynamic_api),
-          className: cn("w-10 h-6 rounded-full transition-colors flex-shrink-0", batchForm.use_dynamic_api ? "bg-blue-500" : "bg-slate-300")
-        }, h("div", { className: cn("w-4 h-4 rounded-full bg-white transition-transform mx-1", batchForm.use_dynamic_api ? "translate-x-4" : "translate-x-0") }))
+          onClick: () => updateSingleForm('use_dynamic_api', !singleForm.use_dynamic_api),
+          className: cn("w-10 h-6 rounded-full transition-colors flex-shrink-0", singleForm.use_dynamic_api ? "bg-blue-500" : "bg-slate-300")
+        }, h("div", { className: cn("w-4 h-4 rounded-full bg-white transition-transform mx-1", singleForm.use_dynamic_api ? "translate-x-4" : "translate-x-0") }))
       ),
       h("div", { className: "flex justify-end gap-2 pt-1" },
-        h(Button, { onClick: () => setShowConfig(false), variant: "ghost", size: "sm" }, "取消"),
-        h(Button, { onClick: handleSubscribe, disabled: subscribing, size: "sm" }, subscribing ? "订阅中..." : `确认订阅 ${selected.size} 个`)
+        h(Button, { onClick: () => setPendingUpper(null), variant: "ghost", size: "sm" }, "取消"),
+        h(Button, { onClick: handleConfirmAdd, disabled: adding, size: "sm" }, adding ? "添加中..." : "确认添加")
       )
-    ),
-    // 订阅按钮（未展开配置时显示）
-    selected.size > 0 && !showConfig && h("div", { className: "flex justify-end" },
-      h(Button, { onClick: () => setShowConfig(true), size: "md" }, `订阅选中 ${selected.size} 个 UP 主`)
     )
   );
 }
