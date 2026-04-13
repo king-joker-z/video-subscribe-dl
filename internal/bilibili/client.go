@@ -448,7 +448,7 @@ func (c *Client) GetMedialistVideos(mid int64, lastOID int64, pageSize int) ([]M
 		req.Header.Set("Cookie", cookie)
 	}
 
-	httpResp, err := c.httpClient.Do(req)
+	httpResp, err := c.http.Do(req)
 	if err != nil {
 		return nil, false, err
 	}
