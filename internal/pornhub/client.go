@@ -16,6 +16,7 @@ import (
 
 	"github.com/dop251/goja"
 	"golang.org/x/net/html"
+	"video-subscribe-dl/internal/urlguard"
 )
 
 // phMaxHTMLBodySize HTML 页面最大读取大小（10 MB），防止无限流撑爆内存
@@ -339,6 +340,11 @@ func (c *Client) GetModelInfo(modelURL string) (*ModelInfo, error) {
 		cleanURL = cleanURL[:len(cleanURL)-len("/videos")]
 	}
 	cleanURL = strings.TrimRight(cleanURL, "/")
+	u, err := urlguard.ParsePlatformURL(cleanURL, urlguard.Pornhub)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe Pornhub model URL: %w", err)
+	}
+	cleanURL = u.String()
 
 	body, status, err := c.get(context.Background(), cleanURL)
 	if err != nil {
@@ -993,8 +999,6 @@ func (c *Client) extractBestHLSURL(defs []MediaDefinition) string {
 	}
 	return bestURL
 }
-
-
 
 // extractPlayerScript 从 HTML 中提取播放器 script 内容，兼容多种 PH 页面结构。
 // 策略（按优先级）：

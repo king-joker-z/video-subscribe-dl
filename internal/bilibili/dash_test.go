@@ -1,8 +1,67 @@
 package bilibili
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestPublishOutputDoesNotOverwriteExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := filepath.Join(dir, "video.mkv")
+	tmpPath := filepath.Join(dir, "video.mkv.part")
+	if err := os.WriteFile(finalPath, []byte("existing media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmpPath, []byte("new media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := publishOutput(tmpPath, finalPath); err == nil {
+		t.Fatal("expected publishing over an existing file to fail")
+	}
+	contents, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "existing media" {
+		t.Fatalf("existing final file was modified: %q", contents)
+	}
+}
+
+func TestPublishOutputPublishesNonEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	finalPath := filepath.Join(dir, "video.mkv")
+	tmpPath := filepath.Join(dir, "video.mkv.part")
+	if err := os.WriteFile(tmpPath, []byte("media"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := publishOutput(tmpPath, finalPath); err != nil {
+		t.Fatalf("publish output: %v", err)
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("temporary output should be removed, stat err=%v", err)
+	}
+	contents, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != "media" {
+		t.Fatalf("unexpected published content: %q", contents)
+	}
+}
+
+func TestPublishOutputRejectsEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	tmpPath := filepath.Join(dir, "video.mkv.part")
+	if err := os.WriteFile(tmpPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishOutput(tmpPath, filepath.Join(dir, "video.mkv")); err == nil {
+		t.Fatal("expected empty output to be rejected")
+	}
+}
 
 // === TestSelectBestVideo ===
 

@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"golang.org/x/net/html"
+	"video-subscribe-dl/internal/urlguard"
 )
 
 // ErrDouyinRiskControl 定义在 error.go
@@ -97,12 +98,12 @@ func setClientHints(req *http.Request, ua string) {
 
 // DouyinClient 抖音 API 客户端
 type DouyinClient struct {
-	noRedirectClient  *http.Client          // 不跟随重定向
-	normalClient      *http.Client          // 正常 client
-	downloadTransport *http.Transport       // 每实例独立的下载 Transport，Close() 时只关自己的
+	noRedirectClient  *http.Client    // 不跟随重定向
+	normalClient      *http.Client    // 正常 client
+	downloadTransport *http.Transport // 每实例独立的下载 Transport，Close() 时只关自己的
 	limiter           *RateLimiter
-	fingerprint       *BrowserFingerprint   // 会话指纹（同一 client 实例内保持一致）
-	sessionMsToken    string                // 会话级 msToken（Cookie 中的 msToken 保持一致）
+	fingerprint       *BrowserFingerprint // 会话指纹（同一 client 实例内保持一致）
+	sessionMsToken    string              // 会话级 msToken（Cookie 中的 msToken 保持一致）
 }
 
 // getSessionCookie 返回使用会话级 msToken 的 Cookie
@@ -124,12 +125,12 @@ func newDownloadTransport() *http.Transport {
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
-		MaxIdleConns:           100,
-		MaxIdleConnsPerHost:    10,
-		IdleConnTimeout:        90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout:  1 * time.Second,
-		ResponseHeaderTimeout:  30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 }
 
@@ -274,22 +275,18 @@ type ResolveResult struct {
 func (c *DouyinClient) ResolveShareURL(shareURL string) (*ResolveResult, error) {
 	c.limiter.Acquire()
 
-	if !strings.HasPrefix(shareURL, "http") {
-		shareURL = "https://" + shareURL
-	}
-
-	parsed, err := url.Parse(shareURL)
+	parsed, err := urlguard.ParsePlatformURL(shareURL, urlguard.Douyin)
 	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
+		return nil, fmt.Errorf("unsupported or unsafe douyin URL: %w", err)
 	}
 
-	switch parsed.Host {
+	switch parsed.Hostname() {
 	case "v.douyin.com":
-		return c.resolveShortURL(shareURL)
+		return c.resolveShortURL(parsed.String())
 	case "www.douyin.com", "www.iesdouyin.com":
-		return c.parseLongURL(shareURL)
+		return c.parseLongURL(parsed.String())
 	default:
-		return c.parseLongURL(shareURL)
+		return nil, fmt.Errorf("unsupported douyin host")
 	}
 }
 
@@ -310,8 +307,18 @@ func (c *DouyinClient) resolveShortURL(shortURL string) (*ResolveResult, error) 
 	if location == "" {
 		return nil, fmt.Errorf("no redirect from short url")
 	}
+	resolved, err := url.Parse(location)
+	if err != nil {
+		return nil, fmt.Errorf("invalid short-url redirect: %w", err)
+	}
+	if !resolved.IsAbs() {
+		resolved = req.URL.ResolveReference(resolved)
+	}
+	if _, err := urlguard.ValidateRedirect(resolved.String(), urlguard.Douyin); err != nil {
+		return nil, fmt.Errorf("unsafe short-url redirect: %w", err)
+	}
 
-	return c.parseLongURL(location)
+	return c.parseLongURL(resolved.String())
 }
 
 func (c *DouyinClient) parseLongURL(rawURL string) (*ResolveResult, error) {
@@ -760,13 +767,6 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	}
 	c.limiter.AcquireWithBackoff(errCount)
 
-
-
-
-
-
-
-
 	cookie := c.getSessionCookie()
 
 	// 构建完整的 query 参数（参考 f2 BaseRequestModel + UserPost）
@@ -917,8 +917,6 @@ func (c *DouyinClient) GetUserVideos(secUID string, maxCursor int64, consecutive
 	return result, nil
 }
 
-
-
 // GetUserProfile 获取抖音用户详情（头像、简介、粉丝数等）
 // 使用 /aweme/v1/web/user/profile/other/ API + X-Bogus 签名
 func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error) {
@@ -967,27 +965,27 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 	var apiResp struct {
 		StatusCode int `json:"status_code"`
 		User       struct {
-			UID              string `json:"uid"`
-			SecUID           string `json:"sec_uid"`
-			ShortID          string `json:"short_id"`
-			Nickname         string `json:"nickname"`
-			Signature        string `json:"signature"`
-			AvatarLarger     struct {
+			UID          string `json:"uid"`
+			SecUID       string `json:"sec_uid"`
+			ShortID      string `json:"short_id"`
+			Nickname     string `json:"nickname"`
+			Signature    string `json:"signature"`
+			AvatarLarger struct {
 				URLList []string `json:"url_list"`
 			} `json:"avatar_larger"`
-			AvatarMedium     struct {
+			AvatarMedium struct {
 				URLList []string `json:"url_list"`
 			} `json:"avatar_medium"`
-			AvatarThumb      struct {
+			AvatarThumb struct {
 				URLList []string `json:"url_list"`
 			} `json:"avatar_thumb"`
-			FollowerCount    int64  `json:"follower_count"`
-			FollowingCount   int64  `json:"following_count"`
-			TotalFavorited   int64  `json:"total_favorited"`
-			AwemeCount       int64  `json:"aweme_count"`
-			FavoritingCount  int64  `json:"favoriting_count"`
-			UniqueID         string `json:"unique_id"`
-			IPLocation       string `json:"ip_location"`
+			FollowerCount   int64  `json:"follower_count"`
+			FollowingCount  int64  `json:"following_count"`
+			TotalFavorited  int64  `json:"total_favorited"`
+			AwemeCount      int64  `json:"aweme_count"`
+			FavoritingCount int64  `json:"favoriting_count"`
+			UniqueID        string `json:"unique_id"`
+			IPLocation      string `json:"ip_location"`
 		} `json:"user"`
 	}
 
@@ -1001,18 +999,18 @@ func (c *DouyinClient) GetUserProfile(secUID string) (*DouyinUserProfile, error)
 
 	u := apiResp.User
 	profile := &DouyinUserProfile{
-		UID:            u.UID,
-		SecUID:         u.SecUID,
-		ShortID:        u.ShortID,
-		UniqueID:       u.UniqueID,
-		Nickname:       u.Nickname,
-		Signature:      u.Signature,
-		FollowerCount:  u.FollowerCount,
-		FollowingCount: u.FollowingCount,
-		TotalFavorited: u.TotalFavorited,
-		AwemeCount:     u.AwemeCount,
+		UID:             u.UID,
+		SecUID:          u.SecUID,
+		ShortID:         u.ShortID,
+		UniqueID:        u.UniqueID,
+		Nickname:        u.Nickname,
+		Signature:       u.Signature,
+		FollowerCount:   u.FollowerCount,
+		FollowingCount:  u.FollowingCount,
+		TotalFavorited:  u.TotalFavorited,
+		AwemeCount:      u.AwemeCount,
 		FavoritingCount: u.FavoritingCount,
-		IPLocation:     u.IPLocation,
+		IPLocation:      u.IPLocation,
 	}
 
 	// 选择头像 URL（优先大图）
@@ -1169,7 +1167,7 @@ func ExtractSecUID(rawURL string) (string, error) {
 }
 
 func IsDouyinURL(rawURL string) bool {
-	return strings.Contains(rawURL, "douyin.com") || strings.Contains(rawURL, "iesdouyin.com")
+	return urlguard.IsPlatformURL(rawURL, urlguard.Douyin)
 }
 
 // douyinSpaceCollapser 用于合并连续空格
@@ -1274,7 +1272,8 @@ func pickNonWebpURL(urls []interface{}) string {
 func pickNonWebpURLStr(urls []string) string {
 	var first string
 	for _, s := range urls {
-		if s == "" {			continue
+		if s == "" {
+			continue
 		}
 		if first == "" {
 			first = s

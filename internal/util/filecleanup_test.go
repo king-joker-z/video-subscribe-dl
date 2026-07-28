@@ -80,6 +80,24 @@ func TestRemoveAssociatedFiles_AISubtitle(t *testing.T) {
 	}
 }
 
+func TestRemoveEmptyDirs_RejectsSamePrefixOutsideBoundary(t *testing.T) {
+	root := t.TempDir()
+	boundary := filepath.Join(root, "downloads")
+	outside := filepath.Join(root, "downloads-evil", "nested")
+	if err := os.MkdirAll(boundary, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	RemoveEmptyDirs(outside, boundary, 3)
+
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("directory outside boundary must not be removed: %v", err)
+	}
+}
+
 func TestRemoveEmptyDirs_NonEmpty(t *testing.T) {
 	boundary := t.TempDir()
 	nested := filepath.Join(boundary, "a", "b")

@@ -863,12 +863,8 @@ func TestResolveShareURL_WithoutHTTPS(t *testing.T) {
 	c := NewClient()
 	defer c.Close()
 
-	result, err := c.ResolveShareURL("www.douyin.com/video/7234567890123456789")
-	if err != nil {
-		t.Fatalf("ResolveShareURL() error: %v", err)
-	}
-	if result.Type != URLTypeVideo {
-		t.Errorf("Type = %d, want URLTypeVideo", result.Type)
+	if _, err := c.ResolveShareURL("www.douyin.com/video/7234567890123456789"); err == nil {
+		t.Fatal("expected URL without HTTPS scheme to be rejected")
 	}
 }
 

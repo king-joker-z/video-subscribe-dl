@@ -71,9 +71,16 @@ func RemoveAssociatedFiles(videoPath string) {
 func RemoveEmptyDirs(dir, boundary string, maxLevels int) {
 	for i := 0; i < maxLevels; i++ {
 		// 安全检查: 不超出 boundary
-		absDir, _ := filepath.Abs(dir)
-		absBoundary, _ := filepath.Abs(boundary)
-		if absDir == absBoundary || !strings.HasPrefix(absDir, absBoundary) {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			return
+		}
+		absBoundary, err := filepath.Abs(boundary)
+		if err != nil {
+			return
+		}
+		rel, err := filepath.Rel(absBoundary, absDir)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return
 		}
 

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	_ "github.com/glebarez/sqlite"
@@ -20,6 +21,73 @@ func initMemoryDB(t testing.TB) *DB {
 		t.Fatalf("create schema: %v", err)
 	}
 	return &DB{sqlDB}
+}
+
+func TestInitMigratesExistingDatabase(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "video-subscribe-dl.db")
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacy.Exec(`
+		CREATE TABLE sources (id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL, name TEXT, cookies_file TEXT, check_interval INTEGER DEFAULT 1800, download_quality TEXT DEFAULT 'best', enabled INTEGER DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+		CREATE TABLE downloads (id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER, video_id TEXT NOT NULL, title TEXT, filename TEXT, status TEXT DEFAULT 'pending', file_path TEXT, file_size INTEGER DEFAULT 0, error_message TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(source_id, video_id));
+		CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+		CREATE TABLE people (id INTEGER PRIMARY KEY AUTOINCREMENT, mid TEXT UNIQUE, name TEXT, avatar TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+		INSERT INTO sources (id, url, name) VALUES (7, 'https://example.test/u', 'legacy source');
+		INSERT INTO downloads (id, source_id, video_id, title, status, file_path) VALUES (11, 7, 'legacy-video', 'legacy title', 'completed', '/media/legacy.mkv');
+	`); err != nil {
+		t.Fatalf("create legacy downloads: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	d, err := Init(dataDir)
+	if err != nil {
+		t.Fatalf("init migrated db: %v", err)
+	}
+	defer d.Close()
+
+	var nextRetryAt int64
+	if err := d.QueryRow("SELECT next_retry_at FROM downloads WHERE id = 11").Scan(&nextRetryAt); err != nil {
+		t.Fatalf("next_retry_at column missing or unreadable: %v", err)
+	}
+	if nextRetryAt != 0 {
+		t.Fatalf("expected migrated next_retry_at default 0, got %d", nextRetryAt)
+	}
+	var sourceID, downloadID int64
+	var filePath string
+	if err := d.QueryRow("SELECT id FROM sources WHERE id = 7").Scan(&sourceID); err != nil || sourceID != 7 {
+		t.Fatalf("legacy source changed during migration: id=%d err=%v", sourceID, err)
+	}
+	if err := d.QueryRow("SELECT id, file_path FROM downloads WHERE id = 11").Scan(&downloadID, &filePath); err != nil || downloadID != 11 || filePath != "/media/legacy.mkv" {
+		t.Fatalf("legacy download changed during migration: id=%d path=%q err=%v", downloadID, filePath, err)
+	}
+	var indexName string
+	if err := d.QueryRow("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_downloads_uploader'").Scan(&indexName); err != nil || indexName != "idx_downloads_uploader" {
+		t.Fatalf("uploader index missing after migration: %v", err)
+	}
+}
+
+func TestInitFailsWhenSchemaCannotBeApplied(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "video-subscribe-dl.db")
+	legacy, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacy.Exec(`CREATE VIEW downloads AS SELECT 1 AS id`); err != nil {
+		t.Fatalf("create incompatible downloads view: %v", err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	if _, err := Init(dataDir); err == nil {
+		t.Fatal("expected Init to fail rather than continue with an incompatible database object")
+	}
 }
 
 // === TestSourceCRUD ===

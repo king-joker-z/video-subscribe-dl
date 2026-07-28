@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -98,9 +99,19 @@ func indexOf(b []byte, c byte) int {
 	return -1
 }
 
+var (
+	sensitiveKVPattern = regexp.MustCompile(`(?i)\b(auth_token|authorization|cookie|sessdata|bili_jct|refresh_token|mstoken|ttwid|ph_cookie|token)\s*[:=]\s*([^\s,;]+)`)
+	bearerPattern      = regexp.MustCompile(`(?i)\bbearer\s+[^\s,;]+`)
+)
+
+func redactSensitive(message string) string {
+	message = sensitiveKVPattern.ReplaceAllString(message, "$1=[REDACTED]")
+	return bearerPattern.ReplaceAllString(message, "Bearer [REDACTED]")
+}
+
 func parseLine(line string) LogEntry {
 	level := "info"
-	msg := line
+	msg := redactSensitive(line)
 
 	// Try to detect level from common patterns
 	lower := strings.ToLower(line)
@@ -140,7 +151,7 @@ func (l *RingLogger) add(entry LogEntry) {
 
 // Info logs an info level message
 func (l *RingLogger) Info(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
+	msg := redactSensitive(fmt.Sprintf(format, args...))
 	entry := LogEntry{
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   "info",
@@ -153,7 +164,7 @@ func (l *RingLogger) Info(format string, args ...interface{}) {
 
 // Warn logs a warn level message
 func (l *RingLogger) Warn(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
+	msg := redactSensitive(fmt.Sprintf(format, args...))
 	entry := LogEntry{
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   "warn",
@@ -165,7 +176,7 @@ func (l *RingLogger) Warn(format string, args ...interface{}) {
 
 // Error logs an error level message
 func (l *RingLogger) Error(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
+	msg := redactSensitive(fmt.Sprintf(format, args...))
 	entry := LogEntry{
 		Time:    time.Now().Format("2006-01-02 15:04:05"),
 		Level:   "error",

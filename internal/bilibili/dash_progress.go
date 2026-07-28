@@ -3,12 +3,12 @@ package bilibili
 import (
 	"context"
 	"fmt"
-	"sync"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"errors"
@@ -33,11 +33,23 @@ func DownloadDashWithProgress(ctx context.Context, video, audio *DashStream, out
 // numChunks: 并行分块数（仅大文件生效）
 // 视频和音频流并行下载，完成后 ffmpeg 合并
 func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStream, outputDir, filename string, onProgress ProgressCallback, rateLimitBps int64, numChunks int) (string, error) {
-	os.MkdirAll(outputDir, 0755)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
 
-	videoTmp := filepath.Join(outputDir, ".video.m4s")
-	audioTmp := filepath.Join(outputDir, ".audio.m4s")
 	outputPath := filepath.Join(outputDir, filename+".mkv")
+	if err := ensureOutputDoesNotExist(outputPath); err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp(outputDir, ".vsd-dash-*")
+	if err != nil {
+		return "", fmt.Errorf("create DASH temporary directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	videoTmp := filepath.Join(tmpDir, "video.m4s")
+	audioTmp := filepath.Join(tmpDir, "audio.m4s")
+	outputTmp := filepath.Join(tmpDir, "output.mkv.part")
 
 	// 并行下载视频和音频流
 	var videoErr, audioErr error
@@ -48,7 +60,7 @@ func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStre
 	audioRateLimit := rateLimitBps
 	if rateLimitBps > 0 {
 		videoRateLimit = rateLimitBps * 3 / 4 // 视频分 75%
-		audioRateLimit = rateLimitBps / 4      // 音频分 25%
+		audioRateLimit = rateLimitBps / 4     // 音频分 25%
 	}
 
 	wg.Add(1)
@@ -85,14 +97,12 @@ func DownloadDashWithProgressChunked(ctx context.Context, video, audio *DashStre
 		onProgress("merge", 0, 0, 0)
 	}
 	log.Printf("Merging: %s", outputPath)
-	err := mergeStreams(videoTmp, audioTmp, outputPath)
-
-	// 清理临时文件
-	os.Remove(videoTmp)
-	os.Remove(audioTmp)
-
+	err = mergeStreams(videoTmp, audioTmp, outputTmp)
 	if err != nil {
 		return "", fmt.Errorf("merge: %w", err)
+	}
+	if err := publishOutput(outputTmp, outputPath); err != nil {
+		return "", err
 	}
 
 	return outputPath, nil

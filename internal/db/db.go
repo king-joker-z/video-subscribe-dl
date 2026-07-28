@@ -3,9 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "github.com/glebarez/sqlite"
@@ -55,6 +53,7 @@ CREATE TABLE IF NOT EXISTS downloads (
     retry_count INTEGER DEFAULT 0,
     detail_status INTEGER DEFAULT 0,
     last_error TEXT,
+    next_retry_at INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
     UNIQUE(source_id, video_id)
@@ -73,6 +72,9 @@ CREATE TABLE IF NOT EXISTS people (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+`
+
+var indexes = `
 CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status);
 CREATE INDEX IF NOT EXISTS idx_downloads_source ON downloads(source_id);
 CREATE INDEX IF NOT EXISTS idx_downloads_uploader ON downloads(uploader);
@@ -151,45 +153,104 @@ func Init(dataDir string) (*DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	_, err = db.Exec(schema)
-	if err != nil {
+	if _, err = db.Exec(schema); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
-	// 迁移
-	migrations := []string{
-		"ALTER TABLE sources ADD COLUMN type TEXT DEFAULT 'channel'",
-		"ALTER TABLE sources ADD COLUMN last_check DATETIME",
-		"ALTER TABLE downloads ADD COLUMN uploader TEXT",
-		"ALTER TABLE downloads ADD COLUMN description TEXT",
-		"ALTER TABLE downloads ADD COLUMN thumbnail TEXT",
-		"ALTER TABLE downloads ADD COLUMN duration INTEGER DEFAULT 0",
-		"ALTER TABLE sources ADD COLUMN download_codec TEXT DEFAULT 'all'",
-		"ALTER TABLE sources ADD COLUMN download_danmaku INTEGER DEFAULT 0",
-		"ALTER TABLE downloads ADD COLUMN thumb_path TEXT",
-		"ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0",
-		"ALTER TABLE downloads ADD COLUMN last_error TEXT",
-		"ALTER TABLE sources ADD COLUMN download_filter TEXT DEFAULT ''",
-		"ALTER TABLE sources ADD COLUMN download_quality_min TEXT DEFAULT ''",
-		"ALTER TABLE sources ADD COLUMN skip_nfo INTEGER DEFAULT 0",
-		"ALTER TABLE sources ADD COLUMN skip_poster INTEGER DEFAULT 0",
-		"ALTER TABLE sources ADD COLUMN latest_video_at INTEGER DEFAULT 0",
-		"ALTER TABLE sources ADD COLUMN use_dynamic_api INTEGER DEFAULT 0",
-		"ALTER TABLE sources ADD COLUMN filter_rules TEXT DEFAULT ''",
-		"ALTER TABLE sources ADD COLUMN download_subtitle INTEGER DEFAULT 0",
-		"ALTER TABLE downloads ADD COLUMN detail_status INTEGER DEFAULT 0",
-		`ALTER TABLE downloads ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0`,
+	// 迁移与索引创建必须分阶段进行：旧库的表不会被 CREATE TABLE IF NOT
+	// EXISTS 补列，若索引先引用新列会使迁移永远无法开始。
+	migrations := []migration{
+		{"sources", "type", "ALTER TABLE sources ADD COLUMN type TEXT DEFAULT 'channel'"},
+		{"sources", "last_check", "ALTER TABLE sources ADD COLUMN last_check DATETIME"},
+		{"downloads", "uploader", "ALTER TABLE downloads ADD COLUMN uploader TEXT"},
+		{"downloads", "description", "ALTER TABLE downloads ADD COLUMN description TEXT"},
+		{"downloads", "thumbnail", "ALTER TABLE downloads ADD COLUMN thumbnail TEXT"},
+		{"downloads", "duration", "ALTER TABLE downloads ADD COLUMN duration INTEGER DEFAULT 0"},
+		{"sources", "download_codec", "ALTER TABLE sources ADD COLUMN download_codec TEXT DEFAULT 'all'"},
+		{"sources", "download_danmaku", "ALTER TABLE sources ADD COLUMN download_danmaku INTEGER DEFAULT 0"},
+		{"downloads", "thumb_path", "ALTER TABLE downloads ADD COLUMN thumb_path TEXT"},
+		{"downloads", "retry_count", "ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0"},
+		{"downloads", "last_error", "ALTER TABLE downloads ADD COLUMN last_error TEXT"},
+		{"sources", "download_filter", "ALTER TABLE sources ADD COLUMN download_filter TEXT DEFAULT ''"},
+		{"sources", "download_quality_min", "ALTER TABLE sources ADD COLUMN download_quality_min TEXT DEFAULT ''"},
+		{"sources", "skip_nfo", "ALTER TABLE sources ADD COLUMN skip_nfo INTEGER DEFAULT 0"},
+		{"sources", "skip_poster", "ALTER TABLE sources ADD COLUMN skip_poster INTEGER DEFAULT 0"},
+		{"sources", "latest_video_at", "ALTER TABLE sources ADD COLUMN latest_video_at INTEGER DEFAULT 0"},
+		{"sources", "use_dynamic_api", "ALTER TABLE sources ADD COLUMN use_dynamic_api INTEGER DEFAULT 0"},
+		{"sources", "filter_rules", "ALTER TABLE sources ADD COLUMN filter_rules TEXT DEFAULT ''"},
+		{"sources", "download_subtitle", "ALTER TABLE sources ADD COLUMN download_subtitle INTEGER DEFAULT 0"},
+		{"downloads", "detail_status", "ALTER TABLE downloads ADD COLUMN detail_status INTEGER DEFAULT 0"},
+		{"downloads", "next_retry_at", `ALTER TABLE downloads ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0`},
 	}
-	// [FIXED: P2-13] 区分「列已存在」（预期的幂等错误，可忽略）与真实错误（应记录日志）
 	for _, m := range migrations {
-		if _, err := db.Exec(m); err != nil {
-			if !strings.Contains(err.Error(), "duplicate column") {
-				log.Printf("[migration] warning: %v — sql: %s", err, m)
-			}
+		exists, err := columnExists(db, m.table, m.column)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("inspect database column %s.%s: %w", m.table, m.column, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(m.sql); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate database %s.%s: %w", m.table, m.column, err)
 		}
 	}
 
+	if _, err := db.Exec(indexes); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create indexes: %w", err)
+	}
+	if err := validateSchema(db, migrations); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return &DB{db}, nil
+}
+
+type migration struct {
+	table  string
+	column string
+	sql    string
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	if table != "sources" && table != "downloads" {
+		return false, fmt.Errorf("unsupported schema table %q", table)
+	}
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func validateSchema(db *sql.DB, migrations []migration) error {
+	for _, m := range migrations {
+		exists, err := columnExists(db, m.table, m.column)
+		if err != nil {
+			return fmt.Errorf("validate database column %s.%s: %w", m.table, m.column, err)
+		}
+		if !exists {
+			return fmt.Errorf("validate database column %s.%s: missing after migration", m.table, m.column)
+		}
+	}
+	return nil
 }
 
 // GetSourcesDueForCheck 返回到期需要检查的 enabled sources

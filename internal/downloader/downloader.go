@@ -45,12 +45,12 @@ type ProgressInfo struct {
 
 // DownloadEvent 描述一个下载完成/失败事件，用于 SSE 推送给前端
 type DownloadEvent struct {
-	Type         string `json:"type"`          // "completed", "failed"
+	Type         string `json:"type"` // "completed", "failed"
 	BvID         string `json:"bvid"`
 	Title        string `json:"title"`
-	FileSize     int64  `json:"file_size"`      // bytes, 0 for failed
-	Error        string `json:"error"`          // 失败原因
-	DownloadedAt string `json:"downloaded_at"`  // RFC3339，完成时间，失败时为空
+	FileSize     int64  `json:"file_size"`     // bytes, 0 for failed
+	Error        string `json:"error"`         // 失败原因
+	DownloadedAt string `json:"downloaded_at"` // RFC3339，完成时间，失败时为空
 }
 
 // Downloader manages a pool of download workers.
@@ -59,19 +59,19 @@ type DownloadEvent struct {
 // because pausing does not signal workers — workers check the paused flag
 // when they pick up a job and block on resumeCh if true.
 type Downloader struct {
-	config         Config
-	bili           *bilibili.Client
-	queue          chan *Job
-	paused         bool
-	stopped        bool // true after Stop() is called; guarded by mu
+	config  Config
+	bili    *bilibili.Client
+	queue   chan *Job
+	paused  bool
+	stopped bool // true after Stop() is called; guarded by mu
 	// P2-3: pauseCh was created but never consumed; removed. Pause/resume is
 	// handled exclusively via the paused flag + resumeCh.
 	resumeCh       chan struct{}
 	activeJobs     int64
 	mu             sync.Mutex
 	wg             sync.WaitGroup // tracks all running workers
-	rateLimitBps   int64 // bytes per second, 0 = unlimited
-	downloadChunks int   // parallel chunks for large files, 0 = use default (4)
+	rateLimitBps   int64          // bytes per second, 0 = unlimited
+	downloadChunks int            // parallel chunks for large files, 0 = use default (4)
 
 	// 优雅关闭
 	rootCtx    context.Context
@@ -90,8 +90,8 @@ type Downloader struct {
 	progress   map[string]*ProgressInfo // key = bvid
 
 	// 下载事件订阅（SSE 推送）
-	eventMu     sync.RWMutex
-	eventSubs   []chan DownloadEvent
+	eventMu   sync.RWMutex
+	eventSubs []chan DownloadEvent
 }
 
 type Job struct {
@@ -172,8 +172,15 @@ func (d *Downloader) UpdateClient(client *bilibili.Client) {
 }
 
 func (d *Downloader) worker(id int) {
-	for job := range d.queue {
-		d.processOneJob(id, job)
+	for {
+		select {
+		case <-d.rootCtx.Done():
+			return
+		case job := <-d.queue:
+			if job != nil {
+				d.processOneJob(id, job)
+			}
+		}
 	}
 }
 
@@ -257,23 +264,18 @@ func (d *Downloader) processOneJob(id int, job *Job) {
 }
 
 func (d *Downloader) Submit(job *Job) error {
-	// 持锁期间发送，与 Stop() 的 stopped=true + close(queue) 互斥，
-	// 避免 stopped 检查和 send 之间出现 close(queue) 导致的 panic。
-	d.mu.Lock()
-	if d.stopped {
-		d.mu.Unlock()
-		return fmt.Errorf("downloader is stopped, could not submit %s", job.BvID)
+	if job == nil {
+		return fmt.Errorf("cannot submit nil job")
 	}
-	// 在持锁状态下尝试非阻塞发送；队列满时释放锁后等待。
 	select {
-	case d.queue <- job:
-		d.mu.Unlock()
-		return nil
+	case <-d.rootCtx.Done():
+		return fmt.Errorf("downloader is stopped, could not submit %s", job.BvID)
 	default:
 	}
-	d.mu.Unlock()
 
-	// 队列满：锁外等待（此时 Stop() 若触发，queue 被关闭，select 会走 rootCtx.Done 分支）
+	// The queue is intentionally never closed: rootCtx is the one shutdown
+	// signal for both workers and blocked submitters. This removes the
+	// send-on-closed-channel race between a full-queue Submit and Stop.
 	select {
 	case d.queue <- job:
 		return nil
@@ -294,11 +296,17 @@ func (d *Downloader) Pause() {
 // Stop 优雅关闭下载器：取消所有进行中的下载任务，并等待所有 worker 退出
 func (d *Downloader) Stop() {
 	d.mu.Lock()
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
 	d.stopped = true
 	d.mu.Unlock()
 	d.rootCancel()
-	close(d.queue) // 关闭队列让 worker 退出
-	d.wg.Wait()    // 等待所有 worker goroutine 完全退出
+	// Do not close queue: a concurrent Submit may be selecting on it. Workers
+	// and submitters observe rootCtx cancellation and exit without a channel
+	// close race.
+	d.wg.Wait() // 等待所有 worker goroutine 完全退出
 }
 
 func (d *Downloader) Resume() {

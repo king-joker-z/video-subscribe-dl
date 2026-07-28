@@ -66,19 +66,19 @@ type Server struct {
 	apiRouter   *newapi.Router
 
 	// Callbacks
-	getCooldownInfo    func() (bool, int)
-	getPHCooldownInfo  func() (bool, int)
-	onCheckNow         func()
-	onCookieUpdate     func(string)
-	onCredentialUpdate func(*bilibili.Credential)
-	onRetryDownload    func(int64)
-	onSyncSource       func(int64)
-	onFullScanSource   func(int64)
-	onProcessPending   func()
-	onSyncAll          func()
-	onRedownload       func(int64)
-	getBiliClient      func() *bilibili.Client
-	onConfigReload     func()
+	getCooldownInfo       func() (bool, int)
+	getPHCooldownInfo     func() (bool, int)
+	onCheckNow            func()
+	onCookieUpdate        func(string)
+	onCredentialUpdate    func(*bilibili.Credential)
+	onRetryDownload       func(int64)
+	onSyncSource          func(int64)
+	onFullScanSource      func(int64)
+	onProcessPending      func()
+	onSyncAll             func()
+	onRedownload          func(int64)
+	getBiliClient         func() *bilibili.Client
+	onConfigReload        func()
 	onDouyinCookieUpdate  func(string)
 	getDouyinPauseStatus  func() (bool, string, time.Time)
 	onDouyinResume        func()
@@ -407,7 +407,7 @@ func (s *Server) ensureAuthToken() {
 	}
 	// 检查 DB 是否已有 token
 	if token, err := s.db.GetSetting("auth_token"); err == nil && token != "" {
-		log.Printf("[auth] Web UI 认证已启用，token: %s", token)
+		log.Printf("[auth] Web UI 认证已启用（Token 已配置）")
 		return
 	}
 	// 自动生成随机 token
@@ -422,8 +422,8 @@ func (s *Server) ensureAuthToken() {
 		return
 	}
 	log.Printf("============================================")
-	log.Printf("[auth] Web UI 认证 Token（首次生成）: %s", token)
-	log.Printf("[auth] 请妥善保存此 Token，用于登录 Web 界面")
+	log.Printf("[auth] Web UI 认证 Token 已首次生成；请通过环境变量 AUTH_TOKEN 或设置页面管理")
+	log.Printf("[auth] Token 不会写入日志、SSE 或 WebSocket")
 	log.Printf("[auth] 可通过设置页面修改或设置环境变量 AUTH_TOKEN")
 	log.Printf("[auth] 设置 NO_AUTH=1 可禁用认证")
 	log.Printf("============================================")
@@ -671,5 +671,3 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
-
-

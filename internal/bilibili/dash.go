@@ -35,21 +35,21 @@ type DashStream struct {
 
 // 视频质量 ID
 const (
-	QN360P     = 16
-	QN480P     = 32
-	QN720P     = 64
-	QN1080P    = 80
+	QN360P      = 16
+	QN480P      = 32
+	QN720P      = 64
+	QN1080P     = 80
 	QN1080PHigh = 112
-	QN4K       = 120
+	QN4K        = 120
 )
 
 // 音频质量 ID
 const (
-	Audio64K    = 30216
-	Audio132K   = 30232
-	Audio192K   = 30280
-	AudioDolby  = 30250
-	AudioHiRes  = 30251
+	Audio64K   = 30216
+	Audio132K  = 30232
+	Audio192K  = 30280
+	AudioDolby = 30250
+	AudioHiRes = 30251
 )
 
 // 视频编码 ID
@@ -64,7 +64,7 @@ func (c *Client) GetDashStreams(bvid string, cid int64) (*DashResult, error) {
 	params := url.Values{}
 	params.Set("bvid", bvid)
 	params.Set("cid", fmt.Sprintf("%d", cid))
-	params.Set("fnval", "4048")  // 请求全部格式（DASH+杜比+Hi-Res+AV1等）
+	params.Set("fnval", "4048") // 请求全部格式（DASH+杜比+Hi-Res+AV1等）
 	params.Set("qn", "127")     // 请求最高画质
 	params.Set("fourk", "1")    // 允许4K
 
@@ -179,11 +179,23 @@ func SelectBestAudio(streams []DashStream) *DashStream {
 // DownloadDash 下载 DASH 流并合并为视频文件
 // 返回最终视频文件路径
 func DownloadDash(ctx context.Context, video, audio *DashStream, outputDir, filename string) (string, error) {
-	os.MkdirAll(outputDir, 0755)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
 
-	videoTmp := filepath.Join(outputDir, ".video.m4s")
-	audioTmp := filepath.Join(outputDir, ".audio.m4s")
 	outputPath := filepath.Join(outputDir, filename+".mkv")
+	if err := ensureOutputDoesNotExist(outputPath); err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp(outputDir, ".vsd-dash-*")
+	if err != nil {
+		return "", fmt.Errorf("create DASH temporary directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	videoTmp := filepath.Join(tmpDir, "video.m4s")
+	audioTmp := filepath.Join(tmpDir, "audio.m4s")
+	outputTmp := filepath.Join(tmpDir, "output.mkv.part")
 
 	// 下载视频流
 	log.Printf("Downloading video: %dx%d %s (%d kbps)", video.Width, video.Height, video.Codecs, video.Bandwidth/1000)
@@ -198,16 +210,14 @@ func DownloadDash(ctx context.Context, video, audio *DashStream, outputDir, file
 		return "", fmt.Errorf("download audio: %w", err)
 	}
 
-	// ffmpeg 合并
+	// ffmpeg 合并到任务私有临时文件；成功后才原子发布，绝不覆盖已有成品。
 	log.Printf("Merging: %s", outputPath)
-	err := mergeStreams(videoTmp, audioTmp, outputPath)
-
-	// 清理临时文件
-	os.Remove(videoTmp)
-	os.Remove(audioTmp)
-
+	err = mergeStreams(videoTmp, audioTmp, outputTmp)
 	if err != nil {
 		return "", fmt.Errorf("merge: %w", err)
+	}
+	if err := publishOutput(outputTmp, outputPath); err != nil {
+		return "", err
 	}
 
 	return outputPath, nil
@@ -306,6 +316,41 @@ func downloadWithResume(ctx context.Context, rawURL, dest string) error {
 		}
 	}
 
+	return nil
+}
+
+func ensureOutputDoesNotExist(outputPath string) error {
+	if _, err := os.Stat(outputPath); err == nil {
+		return fmt.Errorf("refusing to overwrite existing output: %s", outputPath)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect output path: %w", err)
+	}
+	return nil
+}
+
+func publishOutput(tmpPath, outputPath string) error {
+	info, err := os.Stat(tmpPath)
+	if err != nil {
+		return fmt.Errorf("inspect merged output: %w", err)
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("merged output is empty")
+	}
+	if err := ensureOutputDoesNotExist(outputPath); err != nil {
+		return err
+	}
+	// Link is an atomic create-once operation on the same filesystem. Unlike
+	// Rename, it never replaces an existing completed media file if another job
+	// publishes the same name between the earlier existence check and this step.
+	if err := os.Link(tmpPath, outputPath); err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("refusing to overwrite existing output: %s", outputPath)
+		}
+		return fmt.Errorf("publish merged output: %w", err)
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return fmt.Errorf("finalize merged output: %w", err)
+	}
 	return nil
 }
 

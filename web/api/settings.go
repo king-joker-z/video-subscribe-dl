@@ -10,7 +10,7 @@ import (
 
 // SettingsHandler 设置 API
 type SettingsHandler struct {
-	db              *db.DB
+	db                   *db.DB
 	onRefreshRate        func()
 	onConfigReload       func()
 	onDouyinCookieUpdate func(string) // 抖音 Cookie 更新回调
@@ -47,7 +47,19 @@ var settingsKeys = []string{
 	"request_interval_sec",
 }
 
-// 敏感字段，不返回明文
+// 可通过通用设置接口更新的 key。读取列表与写入列表必须分离：
+// 凭据、路径和内部控制字段只能经专用流程写入。
+var writableSettings = map[string]struct{}{
+	"download_quality": {}, "max_concurrent": {}, "request_interval": {},
+	"nfo_type": {}, "download_danmaku": {}, "check_interval_minutes": {},
+	"nfo_time_type": {}, "try_upower": {}, "schedule_cron": {}, "concurrent_video": {}, "concurrent_page": {}, "notify_type": {}, "webhook_url": {}, "telegram_bot_token": {}, "telegram_chat_id": {},
+	"bark_server": {}, "bark_key": {},
+	"notify_on_complete": {}, "notify_on_error": {}, "notify_on_cookie_expire": {}, "notify_on_sync": {},
+	"download_chunks": {}, "max_download_speed_mb": {}, "min_disk_free_gb": {},
+	"rate_limit_per_minute": {}, "retention_days": {}, "auto_cleanup_on_low_disk": {},
+	"filename_template": {}, "cooldown_minutes": {}, "download_codec": {}, "request_interval_sec": {},
+}
+
 var sensitiveKeys = map[string]bool{
 	"auth_token":         true,
 	"telegram_bot_token": true,
@@ -86,15 +98,38 @@ func (h *SettingsHandler) HandleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the whole request before any DB writes. Unknown or sensitive-only
+	// keys must never result in a partial settings update.
+	for key, value := range settings {
+		if _, ok := writableSettings[key]; !ok {
+			apiError(w, CodeInvalidParam, "该设置项不受当前版本支持，未保存任何更改")
+			return
+		}
+		if len(value) > 16*1024 {
+			apiError(w, CodeInvalidParam, "设置值过长，未保存任何更改")
+			return
+		}
+	}
+
+	tx, err := h.db.Begin()
+	if err != nil {
+		apiError(w, CodeInternal, "保存设置失败")
+		return
+	}
 	for key, value := range settings {
 		// 跳过敏感字段的掩码值，防止用户误将 "***" 写回 DB
 		if sensitiveKeys[key] && value == "***" {
 			continue
 		}
-		if err := h.db.SetSetting(key, value); err != nil {
-			apiError(w, CodeInternal, "保存设置失败: "+err.Error())
+		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value); err != nil {
+			tx.Rollback()
+			apiError(w, CodeInternal, "保存设置失败")
 			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		apiError(w, CodeInternal, "保存设置失败")
+		return
 	}
 
 	// 刷新 rate limit 缓存

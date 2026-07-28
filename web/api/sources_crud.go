@@ -12,6 +12,7 @@ import (
 	"video-subscribe-dl/internal/db"
 	"video-subscribe-dl/internal/douyin"
 	"video-subscribe-dl/internal/pornhub"
+	"video-subscribe-dl/internal/urlguard"
 	"video-subscribe-dl/internal/xchina"
 )
 
@@ -171,6 +172,25 @@ func (h *SourcesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		} else if strings.Contains(source.URL, "collectiondetail") {
 			source.Type = "season"
 		}
+	}
+
+	// Explicit source.Type is user controlled. Validate adult-platform URLs
+	// before any metadata client can make an outbound request.
+	switch source.Type {
+	case "pornhub":
+		u, err := urlguard.ParsePlatformURL(source.URL, urlguard.Pornhub)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "Pornhub 来源 URL 不合法")
+			return
+		}
+		source.URL = u.String()
+	case "xchina":
+		u, err := urlguard.ParsePlatformURL(source.URL, urlguard.XChina)
+		if err != nil {
+			apiError(w, CodeInvalidParam, "XChina 来源 URL 不合法")
+			return
+		}
+		source.URL = u.String()
 	}
 
 	// 构建 client
@@ -568,7 +588,7 @@ func extractURL(input string) string {
 
 // isPornhubURL 判断 URL 是否为 Pornhub 链接
 func isPornhubURL(rawURL string) bool {
-	return strings.Contains(rawURL, "pornhub.com")
+	return urlguard.IsPlatformURL(rawURL, urlguard.Pornhub)
 }
 
 // pornhubNewClient 创建一个用于 parse 阶段的 Pornhub 客户端（匿名，无 Cookie）

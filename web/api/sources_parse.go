@@ -8,6 +8,7 @@ import (
 
 	"video-subscribe-dl/internal/bilibili"
 	"video-subscribe-dl/internal/douyin"
+	"video-subscribe-dl/internal/urlguard"
 	"video-subscribe-dl/internal/xchina"
 )
 
@@ -228,36 +229,38 @@ func (h *SourcesHandler) HandleParse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. XChina 模特主页
-	if xchina.IsXChinaURL(rawURL) {
+	if u, err := urlguard.ParsePlatformURL(rawURL, urlguard.XChina); err == nil {
+		canonicalURL := u.String()
 		result["type"] = "xchina"
-		result["url"] = rawURL
+		result["url"] = canonicalURL
 		xcClient := xchina.NewClient()
-		if info, err := xcClient.GetModelInfo(rawURL); err == nil && info.Name != "" {
+		if info, err := xcClient.GetModelInfo(canonicalURL); err == nil && info.Name != "" {
 			result["name"] = info.Name
 			result["uploader"] = info.Name
 			log.Printf("[source·parse] XChina model name: %s", info.Name)
 		} else if err != nil {
-			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
+			log.Printf("[source·parse] GetModelInfo failed for %s: %v", canonicalURL, err)
 		}
-		h.injectSubscribed(result, rawURL)
+		h.injectSubscribed(result, canonicalURL)
 		apiOK(w, result)
 		return
 	}
 
 	// 6. Pornhub 博主主页（放在 B站 ExtractMID 之前，避免被误匹配）
-	if isPornhubURL(rawURL) {
+	if u, err := urlguard.ParsePlatformURL(rawURL, urlguard.Pornhub); err == nil {
+		canonicalURL := u.String()
 		result["type"] = "pornhub"
-		result["url"] = rawURL
+		result["url"] = canonicalURL
 		phClient := pornhubNewClient()
 		defer phClient.Close()
-		if info, err := phClient.GetModelInfo(rawURL); err == nil && info.Name != "" {
+		if info, err := phClient.GetModelInfo(canonicalURL); err == nil && info.Name != "" {
 			result["name"] = info.Name
 			result["uploader"] = info.Name
 			log.Printf("[source·parse] Pornhub model name: %s", info.Name)
 		} else if err != nil {
-			log.Printf("[source·parse] GetModelInfo failed for %s: %v", rawURL, err)
+			log.Printf("[source·parse] GetModelInfo failed for %s: %v", canonicalURL, err)
 		}
-		h.injectSubscribed(result, rawURL)
+		h.injectSubscribed(result, canonicalURL)
 		apiOK(w, result)
 		return
 	}

@@ -1,17 +1,18 @@
 package downloader
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestCalculateDownloadTimeout(t *testing.T) {
 	tests := []struct {
-		name           string
-		totalBitrate   int64
-		rateLimitBps   int64
-		wantMin        time.Duration
-		wantMax        time.Duration
+		name         string
+		totalBitrate int64
+		rateLimitBps int64
+		wantMin      time.Duration
+		wantMax      time.Duration
 	}{
 		{
 			name:         "无限速返回默认1小时",
@@ -29,7 +30,7 @@ func TestCalculateDownloadTimeout(t *testing.T) {
 		},
 		{
 			name:         "低码率高限速不低于30分钟",
-			totalBitrate: 1_000_000, // 1Mbps
+			totalBitrate: 1_000_000,  // 1Mbps
 			rateLimitBps: 10_000_000, // 10MB/s
 			wantMin:      30 * time.Minute,
 			wantMax:      30 * time.Minute,
@@ -58,10 +59,10 @@ func TestCalculateDownloadTimeout(t *testing.T) {
 
 func TestJob_Flat(t *testing.T) {
 	job := &Job{
-		BvID:     "BV123",
-		Title:    "test",
-		Flat:     true,
-		Quality:  "best",
+		BvID:    "BV123",
+		Title:   "test",
+		Flat:    true,
+		Quality: "best",
 	}
 	if !job.Flat {
 		t.Error("expected Flat=true")
@@ -85,5 +86,26 @@ func TestJob_SkipOptions(t *testing.T) {
 	}
 	if !job.SkipNFO || !job.SkipPoster {
 		t.Error("expected skip options to be true")
+	}
+}
+
+func TestSubmitAndStopDoNotPanic(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		d := New(Config{MaxConcurrent: 0}, nil)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = d.Submit(&Job{BvID: "BV-race"})
+		}()
+		go func() {
+			defer wg.Done()
+			d.Stop()
+		}()
+		wg.Wait()
+
+		if err := d.Submit(&Job{BvID: "BV-after-stop"}); err == nil {
+			t.Fatal("submit after Stop must fail")
+		}
 	}
 }

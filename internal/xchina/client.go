@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/net/html"
+	"video-subscribe-dl/internal/urlguard"
 )
 
 const (
@@ -114,6 +115,11 @@ func (c *Client) GetModelInfo(modelURL string) (ModelInfo, error) {
 
 	// 规范化 URL
 	modelURL = normalizeModelURL(modelURL)
+	u, err := urlguard.ParsePlatformURL(modelURL, urlguard.XChina)
+	if err != nil {
+		return ModelInfo{}, fmt.Errorf("unsafe XChina model URL: %w", err)
+	}
+	modelURL = u.String()
 
 	body, err := c.fetchHTML(ctx, modelURL)
 	if err != nil {
@@ -487,7 +493,7 @@ func ExtractM3U8URL(body, pageURL string) (string, error) {
 
 // IsXChinaURL 判断是否为 xchina URL
 func IsXChinaURL(rawURL string) bool {
-	return strings.Contains(rawURL, "xchina.co")
+	return urlguard.IsPlatformURL(rawURL, urlguard.XChina)
 }
 
 // IsModelURL 判断是否为 model 主页 URL

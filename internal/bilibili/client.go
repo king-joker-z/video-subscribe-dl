@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"video-subscribe-dl/internal/urlguard"
 )
 
 // FlexInt64 兼容 B站 API 返回的 int64 或 string 类型数字字段
@@ -48,7 +49,7 @@ func (f *FlexInt64) UnmarshalJSON(data []byte) error {
 var ErrRateLimited = errors.New("bilibili: rate limited by risk control")
 
 type Client struct {
-	http       *http.Client
+	http *http.Client
 	// [FIXED: P2-7] mu protects concurrent reads/writes of credential and cookie.
 	mu         sync.RWMutex
 	cookie     string
@@ -401,12 +402,12 @@ func (c *Client) GetVideoTags(bvid string) ([]string, error) {
 
 // MedialistItem medialist API 单条视频
 type MedialistItem struct {
-	ID     int64  `json:"id"`     // cursor，用于翻页
-	BvID   string `json:"bv_id"`
-	Title  string `json:"title"`
-	Cover  string `json:"cover"`
-	PubTS  int64  `json:"pubtime"`
-	Intro  string `json:"intro"` // 简介
+	ID    int64  `json:"id"` // cursor，用于翻页
+	BvID  string `json:"bv_id"`
+	Title string `json:"title"`
+	Cover string `json:"cover"`
+	PubTS int64  `json:"pubtime"`
+	Intro string `json:"intro"` // 简介
 }
 
 // GetMedialistVideos 通过 medialist API 获取 UP 主投稿视频（一页，cursor 分页）
@@ -891,10 +892,13 @@ func ExtractBVID(input string) (bvid string, avid int64, err error) {
 		return "", 0, fmt.Errorf("empty input")
 	}
 
-	// 0. 短链接先解析
-	if strings.Contains(input, "b23.tv") {
+	// 0. 短链接先解析。仅精确的 b23.tv HTTPS URL 才允许发起网络请求；
+	// 裸 BV/AV 号仍在后续本地解析，不会触发出站连接。
+	if parsed, parseErr := urlguard.ParsePlatformURL(input, urlguard.Bilibili); parseErr == nil && parsed.Hostname() == "b23.tv" {
 		if resolved, resolveErr := ResolveShortURL(input); resolveErr == nil {
 			input = resolved
+		} else {
+			return "", 0, resolveErr
 		}
 	}
 
@@ -951,6 +955,9 @@ func ResolveShortURL(shortURL string) (string, error) {
 	defer resp.Body.Close()
 
 	if loc := resp.Header.Get("Location"); loc != "" {
+		if _, err := urlguard.ValidateRedirect(loc, urlguard.Bilibili); err != nil {
+			return "", fmt.Errorf("unsafe short URL redirect: %w", err)
+		}
 		return loc, nil
 	}
 	return shortURL, fmt.Errorf("no redirect found for: %s", shortURL)
