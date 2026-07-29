@@ -35,13 +35,15 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 
 	src, err := s.db.GetSource(dl.SourceID)
 	if err != nil || src == nil {
-		log.Printf("[bscheduler] Source %d not found for download %d, marking failed", dl.SourceID, dl.ID)
-		s.db.UpdateDownloadStatus(dl.ID, "failed", "", 0, "source not found")
+		log.Printf("[bscheduler] Source %d not found for download %d", dl.SourceID, dl.ID)
+		s.recordProcessingFailure(dl.ID, dl.VideoID, "source not found")
 		return
 	}
 	if !src.Enabled {
 		log.Printf("[bscheduler] Source %d (%s) is disabled, marking download %s as skipped", src.ID, src.Name, dl.VideoID)
-		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "skipped: source disabled")
+		if _, err := s.db.MarkDownloadTerminalIfProcessing(dl.ID, "skipped", "skipped: source disabled"); err != nil {
+			log.Printf("[bscheduler] mark skipped failed for %d: %v", dl.ID, err)
+		}
 		return
 	}
 
@@ -60,24 +62,29 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		if bilibili.IsRiskControl(err) {
 			log.Printf("[bscheduler] 风控触发，停止重试: %s", dl.VideoID)
 			s.TriggerCooldown()
+			s.recordProcessingFailure(dl.ID, dl.VideoID, "retry: risk control: "+err.Error())
 			return
 		}
 		log.Printf("[bscheduler] Get detail failed for %s: %v", dl.VideoID, err)
-		s.db.IncrementRetryCount(dl.ID, "retry: get detail failed: "+err.Error())
+		s.recordProcessingFailure(dl.ID, dl.VideoID, "retry: get detail failed: "+err.Error())
 		return
 	}
 
 	tryUpower, _ := s.db.GetSetting("try_upower")
 	if detail.IsChargePlus() && tryUpower != "true" {
 		log.Printf("[bscheduler] 视频 %s (%s) 为充电专属/付费内容，更新为 charge_blocked", dl.Title, dl.VideoID)
-		s.db.UpdateDownloadStatus(dl.ID, "charge_blocked", "", 0, "充电专属/付费视频")
+		if _, err := s.db.MarkDownloadTerminalIfProcessing(dl.ID, "charge_blocked", "充电专属/付费视频"); err != nil {
+			log.Printf("[bscheduler] mark charge_blocked failed for %d: %v", dl.ID, err)
+		}
 		return
 	}
 
 	// 重新校验过滤规则（用户可能在失败后更新了订阅源的过滤条件）
 	if src.DownloadFilter != "" && !filter.MatchesSimple(dl.Title, src.DownloadFilter) {
 		log.Printf("[bscheduler] retry: %s 不匹配过滤规则 '%s'，跳过", dl.VideoID, src.DownloadFilter)
-		s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "filter: not matching simple rule")
+		if _, err := s.db.MarkDownloadTerminalIfProcessing(dl.ID, "skipped", "filter: not matching simple rule"); err != nil {
+			log.Printf("[bscheduler] mark skipped failed for %d: %v", dl.ID, err)
+		}
 		return
 	}
 	if src.FilterRules != "" {
@@ -90,7 +97,9 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		}
 		if len(titleRules) > 0 && !filter.MatchesRules(titleRules, filter.VideoInfo{Title: dl.Title}) {
 			log.Printf("[bscheduler] retry: %s 不匹配高级过滤规则，跳过", dl.VideoID)
-			s.db.UpdateDownloadStatus(dl.ID, "skipped", "", 0, "filter: not matching advanced rules")
+			if _, err := s.db.MarkDownloadTerminalIfProcessing(dl.ID, "skipped", "filter: not matching advanced rules"); err != nil {
+				log.Printf("[bscheduler] mark skipped failed for %d: %v", dl.ID, err)
+			}
 			return
 		}
 	}
@@ -107,8 +116,8 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		cid = bilibili.GetVideoCID(detail)
 	}
 	if cid == 0 {
-		log.Printf("[bscheduler] No CID for %s, skipping retry", dl.VideoID)
-		s.db.IncrementRetryCount(dl.ID, "retry: no CID available")
+		log.Printf("[bscheduler] No CID for %s, scheduling retry", dl.VideoID)
+		s.recordProcessingFailure(dl.ID, dl.VideoID, "retry: no CID available")
 		return
 	}
 
@@ -225,12 +234,12 @@ func (s *BiliScheduler) retryOneDownload(dl db.Download) {
 		CookiesFile:      cookiesFile,
 		Platform:         "bilibili",
 		ResultCh:         resultCh,
-		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		// retryOneDownload already claimed failed->downloading; preserve CAS ownership.
+		OnStart: nil,
 	}); err != nil {
 		log.Printf("[bscheduler] Submit failed for %s: %v", dl.VideoID, err)
 		close(resultCh) // 通知 handleDownloadResult goroutine 退出
-		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed: "+err.Error())
-		s.db.IncrementRetryCount(capturedDlID, "submit failed: "+err.Error())
+		s.recordProcessingFailure(capturedDlID, dl.VideoID, "submit failed: "+err.Error())
 		return
 	}
 

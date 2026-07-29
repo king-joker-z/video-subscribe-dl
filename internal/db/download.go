@@ -131,6 +131,114 @@ func (d *DB) UpdateDownloadStatus(id int64, status string, filePath string, file
 	return err
 }
 
+// CompleteDownloadIfProcessing publishes a completed download only when this
+// worker still owns it. It prevents a late result from overwriting a terminal
+// state written by another recovery path.
+func (d *DB) CompleteDownloadIfProcessing(id int64, filePath string, fileSize int64) (bool, error) {
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET status='completed', file_path=?, file_size=?, downloaded_at=CURRENT_TIMESTAMP,
+		    error_message='', last_error='', next_retry_at=0
+		WHERE id=? AND status='downloading'
+	`, filePath, fileSize, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
+// MarkDownloadTerminalIfProcessing transitions a worker-owned download to a
+// non-retryable terminal state. Only explicitly supported terminal statuses
+// are accepted so callers cannot accidentally bypass the retry state machine.
+func (d *DB) MarkDownloadTerminalIfProcessing(id int64, status, errMsg string) (bool, error) {
+	switch status {
+	case "charge_blocked", "skipped", "cancelled":
+	default:
+		return false, fmt.Errorf("unsupported terminal status: %s", status)
+	}
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET status=?, error_message=?, last_error=?, next_retry_at=0
+		WHERE id=? AND status='downloading'
+	`, status, errMsg, errMsg, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
+// RetryScheduleResult describes an atomic failure transition.
+type RetryScheduleResult struct {
+	Applied     bool
+	Status      string
+	RetryCount  int
+	NextRetryAt int64
+}
+
+// FailAndScheduleRetryIfProcessing atomically records a worker failure and
+// schedules the next retry. At maxRetries the record becomes permanent_failed
+// and is never scheduled again. The caller must have claimed downloading.
+func (d *DB) FailAndScheduleRetryIfProcessing(id int64, errMsg string, maxRetries int) (RetryScheduleResult, error) {
+	if maxRetries < 1 {
+		return RetryScheduleResult{}, fmt.Errorf("maxRetries must be positive")
+	}
+
+	tx, err := d.Begin()
+	if err != nil {
+		return RetryScheduleResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var retryCount int
+	if err := tx.QueryRow(`SELECT COALESCE(retry_count,0) FROM downloads WHERE id=? AND status='downloading'`, id).Scan(&retryCount); err != nil {
+		if err == sql.ErrNoRows {
+			return RetryScheduleResult{}, nil
+		}
+		return RetryScheduleResult{}, err
+	}
+
+	newCount := retryCount + 1
+	status := "failed"
+	var nextRetryAt int64
+	if newCount >= maxRetries {
+		status = "permanent_failed"
+	} else {
+		delay := 15 * time.Minute
+		if newCount == 2 {
+			delay = 30 * time.Minute
+		}
+		nextRetryAt = time.Now().Add(delay).Unix()
+	}
+
+	result, err := tx.Exec(`
+		UPDATE downloads
+		SET status=?, retry_count=?, error_message=?, last_error=?, next_retry_at=?
+		WHERE id=? AND status='downloading'
+	`, status, newCount, errMsg, errMsg, nextRetryAt, id)
+	if err != nil {
+		return RetryScheduleResult{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return RetryScheduleResult{}, err
+	}
+	if affected != 1 {
+		return RetryScheduleResult{}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return RetryScheduleResult{}, err
+	}
+	return RetryScheduleResult{Applied: true, Status: status, RetryCount: newCount, NextRetryAt: nextRetryAt}, nil
+}
+
 // ClaimDownloadForProcessing 原子地将 download 状态从 pending/failed 改为 downloading。
 // 利用 SQLite 单写串行化特性实现 CAS，返回 true 表示抢占成功，false 表示已被其他 goroutine 抢先。
 func (d *DB) ClaimDownloadForProcessing(id int64) (bool, error) {
@@ -351,7 +459,8 @@ func (d *DB) ResetDownloadToPending(id int64) error {
 // ResetStaleDownloads 重置进程重启后残留的 downloading 状态记录为 pending
 // 容器重启后内存队列已清空，downloading 状态的记录需要重新参与调度
 // [FIXED: P1-4] 注释与实现对齐：pending 是有效的待下载状态，不删除；
-//   只将 downloading -> pending（进程重启后重新入队，由调度器统一调度）
+//
+//	只将 downloading -> pending（进程重启后重新入队，由调度器统一调度）
 func (d *DB) ResetStaleDownloads() (int64, error) {
 	// downloading -> pending（进程重启后需要重新排队）
 	result, err := d.Exec("UPDATE downloads SET status = 'pending' WHERE status = 'downloading'")
@@ -457,7 +566,6 @@ func (d *DB) GetDownloadsBySourceName(sourceName string, limit int) ([]Download,
 	}
 	return downloads, nil
 }
-
 
 // UploaderStats UP主下载统计
 type UploaderStats struct {

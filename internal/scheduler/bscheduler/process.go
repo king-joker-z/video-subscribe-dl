@@ -18,6 +18,10 @@ import (
 	"video-subscribe-dl/internal/util"
 )
 
+// downloadResultWaitTimeout is a package variable to keep the production
+// timeout explicit while allowing deterministic, short result-wait tests.
+var downloadResultWaitTimeout = time.Hour
+
 // ApplyConcurrencySettings 从 DB 读取并发配置并应用
 func (s *BiliScheduler) ApplyConcurrencySettings() {
 	if v, err := s.db.GetSetting("concurrent_video"); err == nil && v != "" {
@@ -186,13 +190,17 @@ func (s *BiliScheduler) submitDownload(src db.Source, videoID string, cid int64,
 		return
 	}
 
-	resultCh := make(chan *downloader.Result, 1)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO, skipPoster, nil)
-	}()
+	claimed, err := s.db.ClaimDownloadForProcessing(dlID)
+	if err != nil {
+		log.Printf("[bscheduler] claim download %d for %s failed: %v", dlID, videoID, err)
+		return
+	}
+	if !claimed {
+		log.Printf("[bscheduler] skip duplicate/stale submit for %s (download=%d)", videoID, dlID)
+		return
+	}
 
+	resultCh := make(chan *downloader.Result, 1)
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
 		DownloadID:       capturedDlID,
@@ -212,14 +220,20 @@ func (s *BiliScheduler) submitDownload(src db.Source, videoID string, cid int64,
 		CookiesFile:      cookiesFile,
 		Platform:         "bilibili",
 		ResultCh:         resultCh,
-		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		// The pending->downloading claim above owns this transition; OnStart must
+		// not overwrite a terminal state from a concurrent recovery path.
+		OnStart: nil,
 	}); err != nil {
-		log.Printf("[bscheduler] Queue full for %s, keeping pending for next sync", videoID)
-		// P0-4: 标记为 failed，防止记录永远卡在 downloading 状态
-		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed")
-		close(resultCh)
+		log.Printf("[bscheduler] Submit failed for %s: %v", videoID, err)
+		s.recordProcessingFailure(capturedDlID, videoID, "submit failed: "+err.Error())
 		return
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleDownloadResult(capturedDlID, videoID, detail, upInfo, resultCh, skipNFO, skipPoster, nil)
+	}()
 }
 
 // submitDownloadFlat 用于多P视频的 Season 目录模式
@@ -247,15 +261,20 @@ func (s *BiliScheduler) submitDownloadFlat(src db.Source, videoID string, cid in
 		}
 	}
 
+	claimed, err := s.db.ClaimDownloadForProcessing(dlID)
+	if err != nil {
+		log.Printf("[bscheduler] claim flat download %d for %s failed: %v", dlID, videoID, err)
+		return
+	}
+	if !claimed {
+		log.Printf("[bscheduler] skip duplicate/stale flat submit for %s (download=%d)", videoID, dlID)
+		return
+	}
+
 	resultCh := make(chan *downloader.Result, 1)
-	s.wg.Add(1)
 	skipNFO2 := src.SkipNFO
 	skipPoster2 := src.SkipPoster
 	capturedEpisodeMeta := episodeMeta
-	go func() {
-		defer s.wg.Done()
-		s.handleDownloadResult(dlID, videoID, detail, upInfo, resultCh, skipNFO2, skipPoster2, capturedEpisodeMeta)
-	}()
 
 	capturedDlID := dlID
 	if err := s.dl.Submit(&downloader.Job{
@@ -277,14 +296,20 @@ func (s *BiliScheduler) submitDownloadFlat(src db.Source, videoID string, cid in
 		CookiesFile:      cookiesFile,
 		Platform:         "bilibili",
 		ResultCh:         resultCh,
-		OnStart:          func() { s.db.UpdateDownloadStatus(capturedDlID, "downloading", "", 0, "") },
+		// The pending->downloading claim above owns this transition; OnStart must
+		// not overwrite a terminal state from a concurrent recovery path.
+		OnStart: nil,
 	}); err != nil {
-		log.Printf("[bscheduler] Queue full for %s, keeping pending for next sync", videoID)
-		// P0-4: 标记为 failed，防止记录永远卡在 downloading 状态
-		s.db.UpdateDownloadStatus(capturedDlID, "failed", "", 0, "submit failed")
-		close(resultCh)
+		log.Printf("[bscheduler] Submit failed for %s: %v", videoID, err)
+		s.recordProcessingFailure(capturedDlID, videoID, "submit failed: "+err.Error())
 		return
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.handleDownloadResult(capturedDlID, videoID, detail, upInfo, resultCh, skipNFO2, skipPoster2, capturedEpisodeMeta)
+	}()
 }
 
 // processOneVideo 处理单个视频（API 调用 + 提交下载）
@@ -450,56 +475,35 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[bscheduler][PANIC] handleDownloadResult recovered: %v (videoID=%s)", r, videoID)
-			s.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("panic: %v", r))
-			s.notifier.Send(notify.EventDownloadFailed, "下载处理异常: "+videoID, fmt.Sprintf("panic: %v", r))
+			if s.recordProcessingFailure(dlID, videoID, fmt.Sprintf("panic: %v", r)) {
+				s.notifier.Send(notify.EventDownloadFailed, "下载处理异常: "+videoID, fmt.Sprintf("panic: %v", r))
+			}
 		}
 	}()
 
-	timeout := 1 * time.Hour
+	timeout := downloadResultWaitTimeout
 	rateLimitBps := s.dl.GetRateLimit()
 	if rateLimitBps > 0 {
 		timeout = timeout + 5*time.Minute
 	}
 
 	var result *downloader.Result
-	select {
-	case result = <-ch:
-	case <-time.After(timeout):
-		if s.dl.IsPaused() {
-			log.Printf("[bscheduler][TIMEOUT] 超时但 downloader 处于暂停状态 (videoID=%s)", videoID)
-			s.db.UpdateDownloadStatus(dlID, "pending", "", 0, "timeout during pause, will retry")
-			// 确保 resultCh 被消费，避免 downloader worker 在 resume 后发送结果时无人读取
-			// 兜底超时防止 goroutine 永久阻塞（P0-3）
-			go func() {
-				select {
-				case <-ch:
-				case <-time.After(60 * time.Second):
-				}
-			}()
-			return
+	for {
+		select {
+		case result = <-ch:
+			goto resultReceived
+		case <-time.After(timeout):
+			// The downloader job may still be running. Do not rewrite its state or
+			// discard its result: a late success must remain able to complete.
+			log.Printf("[bscheduler][TIMEOUT] 仍在等待下载最终结果 (videoID=%s, paused=%t)", videoID, s.dl.IsPaused())
+			s.notifier.Send(notify.EventDownloadFailed, "下载等待超时: "+videoID, fmt.Sprintf("等待下载结果超过%v，任务仍在运行", timeout))
 		}
-		log.Printf("[bscheduler][TIMEOUT] 等待超时 (videoID=%s)", videoID)
-		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, fmt.Sprintf("download timeout (%v)", timeout))
-		s.notifier.Send(notify.EventDownloadFailed, "下载超时: "+videoID, fmt.Sprintf("等待下载结果超过%v", timeout))
-		// 同样确保 resultCh 被消费，防止 worker 阻塞（P0-3）
-		go func() {
-			select {
-			case <-ch:
-			case <-time.After(60 * time.Second):
-			}
-		}()
-		return
 	}
+
+resultReceived:
 	if result == nil {
 		log.Printf("[bscheduler] No result received for %s (channel closed)", videoID)
-		// P1-1: channel was closed (e.g. Submit timeout); if the DB record is still
-		// pending/downloading it will never be retried unless we mark it failed.
-		if dl, err := s.db.GetDownload(dlID); err == nil && dl != nil {
-			if dl.Status == "pending" || dl.Status == "downloading" {
-				s.db.UpdateDownloadStatus(dlID, "failed", "", 0, "result channel closed unexpectedly")
-				log.Printf("[bscheduler] Marked %s (id=%d) as failed due to closed result channel", videoID, dlID)
-			}
-		}
+		s.recordProcessingFailure(dlID, videoID, "result channel closed unexpectedly")
 		return
 	}
 	if !result.Success {
@@ -509,17 +513,30 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 		}
 		if strings.Contains(errMsg, "no video streams available") || strings.Contains(errMsg, "no suitable video stream") {
 			log.Printf("[bscheduler] 充电专属/付费视频（无流）: %s - %s", videoID, errMsg)
-			s.db.UpdateDownloadStatus(dlID, "charge_blocked", "", 0, "充电专属/付费视频（无可用流）")
+			if applied, err := s.db.MarkDownloadTerminalIfProcessing(dlID, "charge_blocked", "充电专属/付费视频（无可用流）"); err != nil {
+				log.Printf("[bscheduler] mark charge_blocked failed for %d: %v", dlID, err)
+			} else if !applied {
+				log.Printf("[bscheduler] skip stale charge_blocked result for %d", dlID)
+			}
 			return
 		}
-		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, errMsg)
-		s.db.IncrementRetryCount(dlID, errMsg)
+		if !s.recordProcessingFailure(dlID, videoID, errMsg) {
+			return
+		}
 		log.Printf("[bscheduler] Failed: %s - %s", videoID, errMsg)
 		s.notifier.Send(notify.EventDownloadFailed, "下载失败: "+videoID, errMsg)
 		return
 	}
 
-	s.db.UpdateDownloadStatus(dlID, "completed", result.FilePath, result.FileSize, "")
+	completed, err := s.db.CompleteDownloadIfProcessing(dlID, result.FilePath, result.FileSize)
+	if err != nil {
+		log.Printf("[bscheduler] complete download %d failed: %v", dlID, err)
+		return
+	}
+	if !completed {
+		log.Printf("[bscheduler] skip stale completed result for %d", dlID)
+		return
+	}
 
 	uploaderName := ""
 	if upInfo != nil {
@@ -545,7 +562,10 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 	// reference is not threaded through to this goroutine, so getBili() is the best we
 	// can do without a larger refactor. The real fix for processOneVideo's tvshow path
 	// is above where we have access to `client`.
-	tags, _ := s.getBili().GetVideoTags(actualBvID)
+	var tags []string
+	if detail != nil {
+		tags, _ = s.getBili().GetVideoTags(actualBvID)
+	}
 
 	if skipNFO || detail == nil {
 		if detail == nil {
@@ -633,17 +653,28 @@ func (s *BiliScheduler) handleDownloadResult(dlID int64, videoID string, detail 
 	s.notifier.Send(notify.EventDownloadComplete, "下载完成: "+detailTitle, result.FilePath)
 }
 
-// markFailed 标记下载失败并设置退避重试时间
-// 若 retry_count+1 >= 3，升级为 permanent_failed，不再自动重试
-func (s *BiliScheduler) markFailed(dlID int64, retryCount int, videoID string, errMsg string) {
-	newCount := retryCount + 1
-	if newCount >= 3 {
-		s.db.UpdateDownloadStatus(dlID, "permanent_failed", "", 0, errMsg)
-		log.Printf("[bscheduler] Video %s marked permanent_failed after %d retries", videoID, newCount)
-	} else {
-		s.db.UpdateDownloadStatus(dlID, "failed", "", 0, errMsg)
-		s.db.IncrementRetryCount(dlID, errMsg)
-		s.db.SetNextRetryAt(dlID, retryCount)
-		log.Printf("[bscheduler] Video %s failed, next retry in ~%dm (retry_count=%d)", videoID, []int{15, 30, 60}[retryCount], newCount)
+// recordProcessingFailure atomically closes a claimed downloading job into the
+// retry state machine. A late/stale caller is intentionally a no-op.
+func (s *BiliScheduler) recordProcessingFailure(dlID int64, videoID, errMsg string) bool {
+	outcome, err := s.db.FailAndScheduleRetryIfProcessing(dlID, errMsg, 3)
+	if err != nil {
+		log.Printf("[bscheduler] record failure for %d failed: %v", dlID, err)
+		return false
 	}
+	if !outcome.Applied {
+		log.Printf("[bscheduler] skip stale failure result for %d", dlID)
+		return false
+	}
+	if outcome.Status == "permanent_failed" {
+		log.Printf("[bscheduler] Video %s marked permanent_failed after %d attempts", videoID, outcome.RetryCount)
+		return true
+	}
+	log.Printf("[bscheduler] Video %s failed; retry #%d scheduled at %d", videoID, outcome.RetryCount, outcome.NextRetryAt)
+	return true
+}
+
+// markFailed is retained for callers that already know the previous retry
+// count. The database owns the actual count and schedule atomically.
+func (s *BiliScheduler) markFailed(dlID int64, retryCount int, videoID string, errMsg string) {
+	s.recordProcessingFailure(dlID, videoID, errMsg)
 }
