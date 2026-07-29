@@ -25,6 +25,10 @@ func (s *Scheduler) retryOneDownload(dl db.Download) {
 		log.Printf("[retry-scheduler] Source %d not found for download %d, skipping", dl.SourceID, dl.ID)
 		return
 	}
+	if !src.Enabled {
+		log.Printf("[retry-scheduler] Source %d is disabled; skipping download %d", src.ID, dl.ID)
+		return
+	}
 
 	// 抖音类型委托给 dscheduler
 	if src.Type == "douyin" || src.Type == "douyin_mix" {
