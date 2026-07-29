@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"golang.org/x/net/html"
+	"video-subscribe-dl/internal/mediahttp"
 	"video-subscribe-dl/internal/urlguard"
 )
 
@@ -98,12 +99,13 @@ func setClientHints(req *http.Request, ua string) {
 
 // DouyinClient 抖音 API 客户端
 type DouyinClient struct {
-	noRedirectClient  *http.Client    // 不跟随重定向
-	normalClient      *http.Client    // 正常 client
-	downloadTransport *http.Transport // 每实例独立的下载 Transport，Close() 时只关自己的
-	limiter           *RateLimiter
-	fingerprint       *BrowserFingerprint // 会话指纹（同一 client 实例内保持一致）
-	sessionMsToken    string              // 会话级 msToken（Cookie 中的 msToken 保持一致）
+	noRedirectClient      *http.Client    // 不跟随页面短链重定向
+	normalClient          *http.Client    // 正常页面/API client
+	mediaNoRedirectClient *http.Client    // guarded media redirect resolver
+	downloadTransport     *http.Transport // 每实例独立的下载 Transport，Close() 时只关自己的
+	limiter               *RateLimiter
+	fingerprint           *BrowserFingerprint // 会话指纹（同一 client 实例内保持一致）
+	sessionMsToken        string              // 会话级 msToken（Cookie 中的 msToken 保持一致）
 }
 
 // getSessionCookie 返回使用会话级 msToken 的 Cookie
@@ -147,6 +149,7 @@ func NewClient() *DouyinClient {
 				return http.ErrUseLastResponse
 			},
 		},
+		mediaNoRedirectClient: mediahttp.NewNoRedirectClient(mediahttp.Options{Policy: mediahttp.DouyinPolicy, Timeout: 30 * time.Second}),
 		normalClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -1034,26 +1037,44 @@ func (c *DouyinClient) ResolveVideoURL(videoURL string) (string, error) {
 		return "", fmt.Errorf("empty video url")
 	}
 
-	req, err := http.NewRequest("HEAD", videoURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", pickUA())
-
-	resp, err := c.noRedirectClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("resolve video url: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 302 || resp.StatusCode == 301 {
-		loc := resp.Header.Get("Location")
-		if loc != "" {
-			return loc, nil
+	currentURL := videoURL
+	for redirects := 0; ; redirects++ {
+		if _, err := mediahttp.ValidateURL(currentURL, mediahttp.DouyinPolicy); err != nil {
+			return "", fmt.Errorf("unsafe video URL: %w", err)
 		}
+		req, err := http.NewRequest("HEAD", currentURL, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("User-Agent", pickUA())
+
+		resp, err := c.mediaNoRedirectClient.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("resolve video url: %w", err)
+		}
+		location := resp.Header.Get("Location")
+		status := resp.StatusCode
+		resp.Body.Close()
+
+		if status != http.StatusMovedPermanently && status != http.StatusFound && status != http.StatusSeeOther && status != http.StatusTemporaryRedirect && status != http.StatusPermanentRedirect {
+			return currentURL, nil
+		}
+		if location == "" {
+			return currentURL, nil
+		}
+		if redirects >= mediahttp.MaxRedirects {
+			return "", fmt.Errorf("video redirect limit exceeded")
+		}
+		resolved, err := req.URL.Parse(location)
+		if err != nil {
+			return "", fmt.Errorf("invalid video redirect: %w", err)
+		}
+		if _, err := mediahttp.ValidateURL(resolved.String(), mediahttp.DouyinPolicy); err != nil {
+			return "", fmt.Errorf("unsafe video redirect: %w", err)
+		}
+		currentURL = resolved.String()
 	}
 
-	return videoURL, nil
 }
 
 // GetUserByUniqueID 通过抖音号（uniqueID/unique_id）查询用户，返回 DouyinUserProfile

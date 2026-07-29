@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"video-subscribe-dl/internal/mediahttp"
 )
 
 // =====================================================================
@@ -208,6 +211,20 @@ func TestGetNoteDetail_ViaOgURL(t *testing.T) {
 // DownloadFile / DownloadThumb tests
 // =====================================================================
 
+func useMediaClientForTest(t *testing.T, serverURL string) {
+	t.Helper()
+	old := newDouyinMediaClient
+	newDouyinMediaClient = func(timeout time.Duration) *http.Client {
+		return mediahttp.NewClient(mediahttp.Options{
+			Policy:                mediahttp.DouyinPolicy,
+			Timeout:               timeout,
+			TestRoundTripper:      &rewriteTransport{targetURL: serverURL},
+			AllowTestRoundTripper: true,
+		})
+	}
+	t.Cleanup(func() { newDouyinMediaClient = old })
+}
+
 func TestDownloadFile_Success(t *testing.T) {
 	content := "fake video data here 1234567890"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,11 +232,12 @@ func TestDownloadFile_Success(t *testing.T) {
 		w.Write([]byte(content))
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "sub", "video.mp4")
 
-	written, err := DownloadFile(srv.URL+"/video.mp4", dest)
+	written, err := DownloadFile("https://v3-dy-o.douyinvod.com/video.mp4", dest)
 	if err != nil {
 		t.Fatalf("DownloadFile() error: %v", err)
 	}
@@ -243,12 +261,13 @@ func TestDownloadFile_SkipExisting(t *testing.T) {
 		w.Write([]byte("new data"))
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "existing.mp4")
 	os.WriteFile(dest, []byte("old data"), 0644)
 
-	written, err := DownloadFile(srv.URL+"/video.mp4", dest)
+	written, err := DownloadFile("https://v3-dy-o.douyinvod.com/video.mp4", dest)
 	if err != nil {
 		t.Fatalf("DownloadFile() error: %v", err)
 	}
@@ -269,11 +288,12 @@ func TestDownloadFile_HTTP404(t *testing.T) {
 		w.Write([]byte("not found"))
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "notfound.mp4")
 
-	_, err := DownloadFile(srv.URL+"/missing.mp4", dest)
+	_, err := DownloadFile("https://v3-dy-o.douyinvod.com/missing.mp4", dest)
 	if err == nil {
 		t.Fatal("expected error for 404, got nil")
 	}
@@ -288,11 +308,12 @@ func TestDownloadFile_EmptyBody(t *testing.T) {
 		// Empty body
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "empty.mp4")
 
-	_, err := DownloadFile(srv.URL+"/empty.mp4", dest)
+	_, err := DownloadFile("https://v3-dy-o.douyinvod.com/empty.mp4", dest)
 	if err == nil {
 		t.Fatal("expected error for empty body, got nil")
 	}
@@ -308,11 +329,12 @@ func TestDownloadThumb_Success(t *testing.T) {
 		w.Write([]byte(content))
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "thumb.jpg")
 
-	err := DownloadThumb(srv.URL+"/thumb.jpg", dest)
+	err := DownloadThumb("https://p3.douyinpic.com/thumb.jpg", dest)
 	if err != nil {
 		t.Fatalf("DownloadThumb() error: %v", err)
 	}
@@ -328,12 +350,13 @@ func TestDownloadThumb_SkipExisting(t *testing.T) {
 		t.Error("server should not be called for existing thumb")
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "existing.jpg")
 	os.WriteFile(dest, []byte("old thumb"), 0644)
 
-	err := DownloadThumb(srv.URL+"/thumb.jpg", dest)
+	err := DownloadThumb("https://p3.douyinpic.com/thumb.jpg", dest)
 	if err != nil {
 		t.Fatalf("DownloadThumb() error: %v", err)
 	}
@@ -349,11 +372,12 @@ func TestDownloadThumb_HTTP500(t *testing.T) {
 		w.WriteHeader(500)
 	}))
 	defer srv.Close()
+	useMediaClientForTest(t, srv.URL)
 
 	tmpDir := t.TempDir()
 	dest := filepath.Join(tmpDir, "fail.jpg")
 
-	err := DownloadThumb(srv.URL+"/fail.jpg", dest)
+	err := DownloadThumb("https://p3.douyinpic.com/fail.jpg", dest)
 	if err == nil {
 		t.Fatal("expected error for 500, got nil")
 	}

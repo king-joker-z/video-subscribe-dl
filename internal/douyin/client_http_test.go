@@ -1,12 +1,17 @@
 package douyin
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"video-subscribe-dl/internal/mediahttp"
 )
 
 // rewriteTransport intercepts HTTP requests and redirects them to a test server.
@@ -15,15 +20,31 @@ type rewriteTransport struct {
 }
 
 func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.URL.Scheme = "http"
-	req.URL.Host = strings.TrimPrefix(t.targetURL, "http://")
-	return http.DefaultTransport.RoundTrip(req)
+	clone := req.Clone(req.Context())
+	clone.URL = cloneURL(req.URL)
+	clone.URL.Scheme = "http"
+	clone.URL.Host = strings.TrimPrefix(t.targetURL, "http://")
+	return http.DefaultTransport.RoundTrip(clone)
+}
+
+func cloneURL(in *url.URL) *url.URL {
+	out := *in
+	return &out
 }
 
 // newTestClient creates a DouyinClient whose HTTP clients point to a test server.
 func newTestClient(serverURL string) *DouyinClient {
 	transport := &rewriteTransport{targetURL: serverURL}
 	c := NewClient()
+	c.mediaNoRedirectClient = mediahttp.NewNoRedirectClient(mediahttp.Options{
+		Policy:                mediahttp.DouyinPolicy,
+		Timeout:               30 * time.Second,
+		TestRoundTripper:      &rewriteTransport{targetURL: serverURL},
+		AllowTestRoundTripper: true,
+		Resolver: func(ctx context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		},
+	})
 	c.normalClient = &http.Client{Transport: transport, Timeout: c.normalClient.Timeout}
 	c.noRedirectClient = &http.Client{
 		Transport: transport,
@@ -698,7 +719,11 @@ func TestGetUserProfile_InvalidJSON(t *testing.T) {
 
 func TestResolveVideoURL_302Redirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", "https://final-video-url.com/video.mp4")
+		if r.URL.Path == "/video.mp4" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Location", "https://v3-dy-o.douyinvod.com/video.mp4")
 		w.WriteHeader(302)
 	}))
 	defer srv.Close()
@@ -706,30 +731,38 @@ func TestResolveVideoURL_302Redirect(t *testing.T) {
 	c := newTestClient(srv.URL)
 	defer c.Close()
 
-	resolved, err := c.ResolveVideoURL("https://play.com/playwm/video.mp4")
+	resolved, err := c.ResolveVideoURL("https://v3-dy-o.douyinvod.com/playwm/video.mp4")
 	if err != nil {
 		t.Fatalf("ResolveVideoURL() error: %v", err)
 	}
-	if resolved != "https://final-video-url.com/video.mp4" {
+	if resolved != "https://v3-dy-o.douyinvod.com/video.mp4" {
 		t.Errorf("resolved = %q, want final URL", resolved)
 	}
 }
 
 func TestResolveVideoURL_301Redirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", "https://moved-permanently.com/v.mp4")
-		w.WriteHeader(301)
+		if r.URL.Path == "/v.mp4" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.URL.Path == "/start.mp4" {
+			w.Header().Set("Location", "https://p3.douyinpic.com/v.mp4")
+			w.WriteHeader(301)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
 
 	c := newTestClient(srv.URL)
 	defer c.Close()
 
-	resolved, err := c.ResolveVideoURL("https://original.com/v.mp4")
+	resolved, err := c.ResolveVideoURL("https://v3-dy-o.douyinvod.com/start.mp4")
 	if err != nil {
 		t.Fatalf("ResolveVideoURL() error: %v", err)
 	}
-	if resolved != "https://moved-permanently.com/v.mp4" {
+	if resolved != "https://p3.douyinpic.com/v.mp4" {
 		t.Errorf("resolved = %q, want moved URL", resolved)
 	}
 }
@@ -743,7 +776,7 @@ func TestResolveVideoURL_NoRedirect(t *testing.T) {
 	c := newTestClient(srv.URL)
 	defer c.Close()
 
-	original := "https://direct.com/video.mp4"
+	original := "https://v3-dy-o.douyinvod.com/video.mp4"
 	resolved, err := c.ResolveVideoURL(original)
 	if err != nil {
 		t.Fatalf("ResolveVideoURL() error: %v", err)
