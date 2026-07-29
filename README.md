@@ -37,7 +37,7 @@
 version: '3'
 services:
   video-subscribe-dl:
-    image: video-subscribe-dl:latest
+    image: jokermelove/video-subscribe-dl:latest
     container_name: video-subscribe-dl
     restart: unless-stopped
     ports:
@@ -69,7 +69,7 @@ docker run -d \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/downloads:/app/downloads \
   -v $(pwd)/cookies:/app/cookies \
-  video-subscribe-dl:latest
+  jokermelove/video-subscribe-dl:latest
 ```
 
 ## 📖 使用说明
