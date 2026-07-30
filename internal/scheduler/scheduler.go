@@ -42,6 +42,13 @@ type Scheduler struct {
 	// workerAdmissionHook is test-only synchronization invoked while a public
 	// task admission holds lifecycleMu.
 	workerAdmissionHook func()
+	// The following hooks are test-only seams for deterministic scheduler waits
+	// and side-effect assertions. Production uses the concrete methods below.
+	waitHook              func(time.Duration) bool
+	credentialRefreshHook func() bool
+	verifyCookieHook      func(string)
+	checkSourceHook       func(db.Source)
+	processPendingHook    func()
 
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
@@ -351,19 +358,81 @@ func (s *Scheduler) Stop() {
 	<-s.stopDone
 }
 
+func (s *Scheduler) waitOrStop(d time.Duration) bool {
+	if s.waitHook != nil {
+		return s.waitHook(d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-s.stopCh:
+		return false
+	}
+}
+
+func (s *Scheduler) checkCredentialRefresh() bool {
+	if s.credentialRefreshHook != nil {
+		return s.credentialRefreshHook()
+	}
+	return s.bili.CheckAndRefreshCredential()
+}
+
+func (s *Scheduler) verifyCookie(reason string) {
+	if s.verifyCookieHook != nil {
+		s.verifyCookieHook(reason)
+		return
+	}
+	s.bili.VerifyCookie(reason)
+}
+
+func (s *Scheduler) checkScheduledSource(src db.Source) {
+	if s.checkSourceHook != nil {
+		s.checkSourceHook(src)
+		return
+	}
+	s.safeCheckSource(src)
+}
+
+func (s *Scheduler) processAllPending() {
+	if s.processPendingHook != nil {
+		s.processPendingHook()
+		return
+	}
+	s.ProcessAllPending()
+}
+
+func (s *Scheduler) stoppedNow() bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
 // ─── 检查逻辑 ──────────────────────────────────────────────────────────────────
 
 func (s *Scheduler) checkAll() {
 	// 先检查 Credential 是否需要刷新（委托给 bscheduler）
 	// 刷新后等待 30s：B站新 session 需要时间建立信任，立即请求必然触发 -352
-	if refreshed := s.bili.CheckAndRefreshCredential(); refreshed {
+	if refreshed := s.checkCredentialRefresh(); refreshed {
 		log.Printf("[scheduler] Cookie 已刷新，等待 30s 让新 session 热身后再开始检查...")
-		time.Sleep(30 * time.Second)
+		if !s.waitOrStop(30 * time.Second) {
+			return
+		}
 	}
-	s.bili.VerifyCookie("scheduled sync")
+	if s.stoppedNow() {
+		return
+	}
+	s.verifyCookie("scheduled sync")
 
 	// Retry failed downloads
 	s.retryFailedDownloads()
+	if s.stoppedNow() {
+		return
+	}
 
 	globalInterval := 0
 	if val, err := s.db.GetSetting("check_interval_minutes"); err == nil && val != "" {
@@ -378,12 +447,18 @@ func (s *Scheduler) checkAll() {
 		return
 	}
 	s.checkSourceList(sources)
-	s.ProcessAllPending()
+	if s.stoppedNow() {
+		return
+	}
+	s.processAllPending()
 }
 
 // checkSourceList 检查一组 source，按平台级冷却跳过对应源
 func (s *Scheduler) checkSourceList(sources []db.Source) {
 	for i, src := range sources {
+		if s.stoppedNow() {
+			return
+		}
 		switch src.Type {
 		case "douyin", "douyin_mix":
 			if s.isDouyinInCooldown() {
@@ -399,11 +474,14 @@ func (s *Scheduler) checkSourceList(sources []db.Source) {
 			}
 		}
 
-		s.safeCheckSource(src)
+		s.checkScheduledSource(src)
+		if s.stoppedNow() {
+			return
+		}
 		s.db.UpdateSourceLastCheck(src.ID)
 
-		if i < len(sources)-1 {
-			time.Sleep(5 * time.Second)
+		if i < len(sources)-1 && !s.waitOrStop(5*time.Second) {
+			return
 		}
 	}
 }
@@ -420,13 +498,19 @@ func (s *Scheduler) safeCheckSource(src db.Source) {
 
 func (s *Scheduler) checkAllForce() {
 	log.Println("Manual sync triggered")
-	s.bili.VerifyCookie("manual sync")
+	if s.stoppedNow() {
+		return
+	}
+	s.verifyCookie("manual sync")
 	sources, err := s.db.GetEnabledSources()
 	if err != nil {
 		log.Printf("Get sources failed: %v", err)
 		return
 	}
 	for i, src := range sources {
+		if s.stoppedNow() {
+			return
+		}
 		switch src.Type {
 		case "douyin", "douyin_mix":
 			if s.isDouyinInCooldown() {
@@ -442,14 +526,20 @@ func (s *Scheduler) checkAllForce() {
 			}
 		}
 
-		s.safeCheckSource(src)
+		s.checkScheduledSource(src)
+		if s.stoppedNow() {
+			return
+		}
 		s.db.UpdateSourceLastCheck(src.ID)
 
-		if i < len(sources)-1 {
-			time.Sleep(5 * time.Second)
+		if i < len(sources)-1 && !s.waitOrStop(5*time.Second) {
+			return
 		}
 	}
-	s.ProcessAllPending()
+	if s.stoppedNow() {
+		return
+	}
+	s.processAllPending()
 	log.Println("Manual sync completed")
 }
 
