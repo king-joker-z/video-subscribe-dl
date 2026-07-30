@@ -52,6 +52,10 @@ type Scheduler struct {
 	getDueSourcesHook     func(int) ([]db.Source, error)
 	getEnabledSourcesHook func() ([]db.Source, error)
 	retryFailedHook       func()
+	// cronCallbackHook and beforeChildStopHook are test-only lifecycle seams.
+	// Production runs the normal cron callback and child shutdown sequence.
+	cronCallbackHook    func()
+	beforeChildStopHook func()
 
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
@@ -158,6 +162,10 @@ func (s *Scheduler) Start() {
 		if cronExpr != "" {
 			s.cronScheduler = cron.New(cron.WithSeconds())
 			_, err := s.cronScheduler.AddFunc(cronExpr, func() {
+				if s.cronCallbackHook != nil {
+					s.cronCallbackHook()
+					return
+				}
 				s.bili.PeriodicCookieCheck()
 				s.checkAll()
 			})
@@ -167,7 +175,7 @@ func (s *Scheduler) Start() {
 				log.Printf("[scheduler] 使用 Cron 调度: %s", cronExpr)
 				s.cronScheduler.Start()
 				<-s.stopCh
-				s.cronScheduler.Stop()
+				<-s.cronScheduler.Stop().Done()
 				return
 			}
 		}
@@ -342,6 +350,9 @@ func (s *Scheduler) Stop() {
 		// schedulers so their resources are only released after parent goroutines
 		// have finished using them.
 		s.wg.Wait()
+		if s.beforeChildStopHook != nil {
+			s.beforeChildStopHook()
+		}
 
 		s.bili.Stop()
 		if s.douyin != nil {

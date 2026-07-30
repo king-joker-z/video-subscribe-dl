@@ -147,3 +147,106 @@ func TestSchedulerStartRegistrationAndStopAreSerialized(t *testing.T) {
 	s.Start()
 	assertNotifierStopped(t, s, calls)
 }
+
+func TestSchedulerCronStopWaitsForRunningCallback(t *testing.T) {
+	s, calls, cleanup := newSchedulerLifecycleTest(t)
+	defer cleanup()
+
+	if err := s.db.SetSetting("schedule_cron", "*/1 * * * * *"); err != nil {
+		t.Fatalf("SetSetting(schedule_cron): %v", err)
+	}
+	// Keep Start's initial check deterministic and fast so this test only exercises
+	// the cron lifecycle.
+	s.credentialRefreshHook = func() bool { return false }
+	s.retryFailedHook = func() {}
+	s.getDueSourcesHook = func(int) ([]db.Source, error) { return nil, nil }
+	s.processPendingHook = func() {}
+
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	var callbackCalls atomic.Int32
+	s.cronCallbackHook = func() {
+		callbackCalls.Add(1)
+		close(callbackStarted)
+		<-releaseCallback
+	}
+
+	beforeChildStop := make(chan struct{})
+	s.beforeChildStopHook = func() { close(beforeChildStop) }
+
+	s.Start()
+	select {
+	case <-callbackStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cron callback did not start")
+	}
+
+	stopReturned := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopReturned)
+	}()
+	select {
+	case <-s.stopCh:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not close stopCh")
+	}
+
+	select {
+	case <-stopReturned:
+		t.Fatal("Stop returned before the running cron callback completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case <-s.stopDone:
+		t.Fatal("stopDone closed before the running cron callback completed")
+	default:
+	}
+	select {
+	case <-beforeChildStop:
+		t.Fatal("Stop entered child scheduler/notifier shutdown before cron callback completed")
+	default:
+	}
+
+	close(releaseCallback)
+	select {
+	case <-stopReturned:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after the cron callback was released")
+	}
+	select {
+	case <-beforeChildStop:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not proceed to child shutdown after the cron callback was released")
+	}
+	assertNotifierStopped(t, s, calls)
+
+	before := callbackCalls.Load()
+	time.Sleep(1100 * time.Millisecond)
+	if got := callbackCalls.Load(); got != before {
+		t.Fatalf("cron callback ran after Stop: before=%d after=%d", before, got)
+	}
+}
+
+func TestSchedulerFixedIntervalStopStillReturns(t *testing.T) {
+	s, calls, cleanup := newSchedulerLifecycleTest(t)
+	defer cleanup()
+
+	s.credentialRefreshHook = func() bool { return false }
+	s.retryFailedHook = func() {}
+	s.getDueSourcesHook = func(int) ([]db.Source, error) { return nil, nil }
+	s.processPendingHook = func() {}
+
+	s.Start()
+	returned := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("fixed-interval Stop did not return")
+	}
+	assertNotifierStopped(t, s, calls)
+}
