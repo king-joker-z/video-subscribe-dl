@@ -38,6 +38,9 @@ type Scheduler struct {
 
 	// startRegisterHook is test-only synchronization invoked while Start holds lifecycleMu.
 	startRegisterHook func()
+	// workerAdmissionHook is test-only synchronization invoked while a public
+	// task admission holds lifecycleMu.
+	workerAdmissionHook func()
 
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
@@ -468,11 +471,26 @@ func (s *Scheduler) checkSource(src db.Source) {
 	}
 }
 
+func (s *Scheduler) tryAddWorker() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped {
+		return false
+	}
+	if s.workerAdmissionHook != nil {
+		s.workerAdmissionHook()
+	}
+	s.wg.Add(1)
+	return true
+}
+
 // ─── 公开 API 方法 ─────────────────────────────────────────────────────────────
 
 // CheckNow 触发一次立即全量检查
 func (s *Scheduler) CheckNow() {
-	s.wg.Add(1)
+	if !s.tryAddWorker() {
+		return
+	}
 	go func() {
 		defer s.wg.Done()
 		s.checkAllForce()
@@ -490,7 +508,10 @@ func (s *Scheduler) ProcessAllPending() {
 		log.Printf("[process-pending] Already running, skip")
 		return
 	}
-	s.wg.Add(1)
+	if !s.tryAddWorker() {
+		atomic.StoreInt32(&s.processPendingRunning, 0)
+		return
+	}
 	go func() {
 		defer s.wg.Done()
 		defer atomic.StoreInt32(&s.processPendingRunning, 0)
@@ -550,12 +571,15 @@ func (s *Scheduler) submitDownload(dl db.Download) error {
 
 // CheckOneSource 只同步指定 source
 func (s *Scheduler) CheckOneSource(sourceID int64) {
+	if !s.tryAddWorker() {
+		return
+	}
 	src, err := s.db.GetSource(sourceID)
 	if err != nil || src == nil {
+		s.wg.Done()
 		log.Printf("[scheduler] Source %d not found", sourceID)
 		return
 	}
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.checkSource(*src)
@@ -567,40 +591,41 @@ func (s *Scheduler) CheckOneSource(sourceID int64) {
 
 // FullScanSource 触发单个 source 的全量补漏扫描
 func (s *Scheduler) FullScanSource(sourceID int64) {
+	if !s.tryAddWorker() {
+		return
+	}
 	src, err := s.db.GetSource(sourceID)
 	if err != nil || src == nil {
+		s.wg.Done()
 		log.Printf("[scheduler] FullScanSource: source %d not found", sourceID)
 		return
 	}
+	go func() {
+		defer s.wg.Done()
+		s.fullScanSource(*src)
+	}()
+}
+
+func (s *Scheduler) fullScanSource(src db.Source) {
 	switch src.Type {
 	case "douyin", "douyin_mix":
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.douyin.FullScanDouyin(*src)
-		}()
+		s.douyin.FullScanDouyin(src)
 	case "pornhub":
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.ph.FullScanPHModel(*src)
-			s.ProcessAllPending()
-		}()
+		s.ph.FullScanPHModel(src)
+		s.ProcessAllPending()
 	case "xchina":
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.xc.FullScanXChinaModel(*src)
-			s.ProcessAllPending()
-		}()
+		s.xc.FullScanXChinaModel(src)
+		s.ProcessAllPending()
 	default:
-		s.bili.FullScanSource(sourceID)
+		s.bili.FullScanSource(src.ID)
 	}
 }
 
 // SyncAll 触发全部源检查（供 API 调用）
 func (s *Scheduler) SyncAll() {
-	s.wg.Add(1)
+	if !s.tryAddWorker() {
+		return
+	}
 	go func() {
 		defer s.wg.Done()
 		s.checkAllForce()

@@ -69,8 +69,12 @@ func (s *Scheduler) retryFailedDownloads() {
 
 // RetryByID 手动重试指定下载记录（由 Web API 调用）
 func (s *Scheduler) RetryByID(dlID int64) {
+	if !s.tryAddWorker() {
+		return
+	}
 	dl, err := s.db.GetDownload(dlID)
 	if err != nil || dl == nil {
+		s.wg.Done()
 		log.Printf("[manual-retry] Download %d not found", dlID)
 		return
 	}
@@ -80,10 +84,9 @@ func (s *Scheduler) RetryByID(dlID int64) {
 	// 重新读取，保证 retryOneDownload 拿到最新状态
 	dl, err = s.db.GetDownload(dlID)
 	if err != nil || dl == nil {
+		s.wg.Done()
 		return
 	}
-	// 用 wg 包装，确保 Stop() 时能优雅等待完成
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.retryOneDownload(*dl)
@@ -92,16 +95,20 @@ func (s *Scheduler) RetryByID(dlID int64) {
 
 // RedownloadByID 重新下载指定记录（由 Web API redownload 调用）
 func (s *Scheduler) RedownloadByID(dlID int64) {
+	if !s.tryAddWorker() {
+		return
+	}
 	dl, err := s.db.GetDownload(dlID)
 	if err != nil || dl == nil {
+		s.wg.Done()
 		log.Printf("[redownload] Download %d not found", dlID)
 		return
 	}
 	if dl.Status != "pending" {
+		s.wg.Done()
 		log.Printf("[redownload] Download %d status is %s, expected pending", dlID, dl.Status)
 		return
 	}
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		s.retryOneDownload(*dl)
