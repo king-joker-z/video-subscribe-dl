@@ -49,6 +49,9 @@ type Scheduler struct {
 	verifyCookieHook      func(string)
 	checkSourceHook       func(db.Source)
 	processPendingHook    func()
+	getDueSourcesHook     func(int) ([]db.Source, error)
+	getEnabledSourcesHook func() ([]db.Source, error)
+	retryFailedHook       func()
 
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
@@ -403,6 +406,33 @@ func (s *Scheduler) processAllPending() {
 	s.ProcessAllPending()
 }
 
+func (s *Scheduler) getDueSources(globalInterval int) ([]db.Source, error) {
+	if s.getDueSourcesHook != nil {
+		return s.getDueSourcesHook(globalInterval)
+	}
+	return s.db.GetSourcesDueForCheck(globalInterval)
+}
+
+func (s *Scheduler) getEnabledSources() ([]db.Source, error) {
+	if s.getEnabledSourcesHook != nil {
+		return s.getEnabledSourcesHook()
+	}
+	return s.db.GetEnabledSources()
+}
+
+func (s *Scheduler) retryFailed() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.stopped {
+		return
+	}
+	if s.retryFailedHook != nil {
+		s.retryFailedHook()
+		return
+	}
+	s.retryFailedDownloads()
+}
+
 func (s *Scheduler) stoppedNow() bool {
 	select {
 	case <-s.stopCh:
@@ -427,9 +457,12 @@ func (s *Scheduler) checkAll() {
 		return
 	}
 	s.verifyCookie("scheduled sync")
+	if s.stoppedNow() {
+		return
+	}
 
 	// Retry failed downloads
-	s.retryFailedDownloads()
+	s.retryFailed()
 	if s.stoppedNow() {
 		return
 	}
@@ -441,7 +474,10 @@ func (s *Scheduler) checkAll() {
 		}
 	}
 
-	sources, err := s.db.GetSourcesDueForCheck(globalInterval)
+	sources, err := s.getDueSources(globalInterval)
+	if s.stoppedNow() {
+		return
+	}
 	if err != nil {
 		log.Printf("Get due sources failed: %v", err)
 		return
@@ -502,7 +538,13 @@ func (s *Scheduler) checkAllForce() {
 		return
 	}
 	s.verifyCookie("manual sync")
-	sources, err := s.db.GetEnabledSources()
+	if s.stoppedNow() {
+		return
+	}
+	sources, err := s.getEnabledSources()
+	if s.stoppedNow() {
+		return
+	}
 	if err != nil {
 		log.Printf("Get sources failed: %v", err)
 		return

@@ -171,3 +171,162 @@ func TestSchedulerWaitOrStopCompletesNormally(t *testing.T) {
 		t.Fatalf("normal manual pending calls = %d, want 1", pendingCalls.Load())
 	}
 }
+
+func addFailedDownloadForRetryTest(t *testing.T, database *db.DB) int64 {
+	t.Helper()
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count) VALUES (?, ?, 'failed', ?)`, sourceID, "failed-video", 3)
+	if err != nil {
+		t.Fatalf("insert failed download: %v", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId: %v", err)
+	}
+	return id
+}
+
+func downloadStatus(t *testing.T, database *db.DB, id int64) string {
+	t.Helper()
+	var status string
+	if err := database.QueryRow("SELECT status FROM downloads WHERE id = ?", id).Scan(&status); err != nil {
+		t.Fatalf("query download status: %v", err)
+	}
+	return status
+}
+
+func TestSchedulerStopAfterScheduledVerifySkipsFollowUpWork(t *testing.T) {
+	s, _, cleanup := newSchedulerLifecycleTest(t)
+	defer cleanup()
+	failedID := addFailedDownloadForRetryTest(t, s.db)
+
+	verifyEntered := make(chan struct{})
+	releaseVerify := make(chan struct{})
+	s.verifyCookieHook = func(string) {
+		close(verifyEntered)
+		<-releaseVerify
+	}
+	var retryCalls, dueCalls, pendingCalls atomic.Int32
+	s.retryFailedHook = func() { retryCalls.Add(1) }
+	s.getDueSourcesHook = func(int) ([]db.Source, error) {
+		dueCalls.Add(1)
+		return nil, nil
+	}
+	s.processPendingHook = func() { pendingCalls.Add(1) }
+
+	done := make(chan struct{})
+	go func() {
+		s.checkAll()
+		close(done)
+	}()
+	select {
+	case <-verifyEntered:
+	case <-time.After(time.Second):
+		t.Fatal("scheduled VerifyCookie did not start")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-s.stopCh:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not close stopCh")
+	}
+	close(releaseVerify)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("checkAll did not return after Stop during VerifyCookie")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after VerifyCookie was released")
+	}
+	if retryCalls.Load() != 0 || dueCalls.Load() != 0 || pendingCalls.Load() != 0 {
+		t.Fatalf("Stop after scheduled verify dispatched follow-up work: retry=%d due=%d pending=%d", retryCalls.Load(), dueCalls.Load(), pendingCalls.Load())
+	}
+	if got := downloadStatus(t, s.db, failedID); got != "failed" {
+		t.Fatalf("failed download status = %q, want failed", got)
+	}
+}
+
+func TestSchedulerStopAfterManualVerifySkipsSourceLookupAndDispatch(t *testing.T) {
+	s, _, cleanup := newSchedulerLifecycleTest(t)
+	defer cleanup()
+
+	verifyEntered := make(chan struct{})
+	releaseVerify := make(chan struct{})
+	s.verifyCookieHook = func(string) {
+		close(verifyEntered)
+		<-releaseVerify
+	}
+	var sourceLookups, pendingCalls atomic.Int32
+	s.getEnabledSourcesHook = func() ([]db.Source, error) {
+		sourceLookups.Add(1)
+		return nil, nil
+	}
+	s.processPendingHook = func() { pendingCalls.Add(1) }
+
+	done := make(chan struct{})
+	go func() {
+		s.checkAllForce()
+		close(done)
+	}()
+	select {
+	case <-verifyEntered:
+	case <-time.After(time.Second):
+		t.Fatal("manual VerifyCookie did not start")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		s.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-s.stopCh:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not close stopCh")
+	}
+	close(releaseVerify)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("checkAllForce did not return after Stop during VerifyCookie")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after manual VerifyCookie was released")
+	}
+	if sourceLookups.Load() != 0 || pendingCalls.Load() != 0 {
+		t.Fatalf("Stop after manual verify dispatched follow-up work: sources=%d pending=%d", sourceLookups.Load(), pendingCalls.Load())
+	}
+}
+
+func TestSchedulerRetryAndSourceChecksRunWithoutStop(t *testing.T) {
+	s, _, cleanup := newSchedulerLifecycleTest(t)
+	defer cleanup()
+	failedID := addFailedDownloadForRetryTest(t, s.db)
+	addWaitTestSources(t, s.db, 1)
+
+	var verifyCalls, sourceChecks atomic.Int32
+	s.verifyCookieHook = func(string) { verifyCalls.Add(1) }
+	s.checkSourceHook = func(db.Source) { sourceChecks.Add(1) }
+	s.processPendingHook = func() {}
+
+	s.checkAll()
+	if got := downloadStatus(t, s.db, failedID); got != "permanent_failed" {
+		t.Fatalf("normal retry status = %q, want permanent_failed", got)
+	}
+	if verifyCalls.Load() != 1 || sourceChecks.Load() != 2 {
+		t.Fatalf("normal checkAll calls: verify=%d sources=%d, want 1/2", verifyCalls.Load(), sourceChecks.Load())
+	}
+}
