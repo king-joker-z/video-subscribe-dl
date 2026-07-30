@@ -31,6 +31,7 @@ type Scheduler struct {
 	notifier    *notify.Notifier
 	stopCh      chan struct{}
 	lifecycleMu sync.Mutex
+	started     bool
 	stopped     bool
 	stopOnce    sync.Once
 	stopDone    chan struct{}
@@ -113,10 +114,11 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 
 func (s *Scheduler) Start() {
 	s.lifecycleMu.Lock()
-	if s.stopped {
+	if s.stopped || s.started {
 		s.lifecycleMu.Unlock()
 		return
 	}
+	s.started = true
 	if s.startRegisterHook != nil {
 		s.startRegisterHook()
 	}
