@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -262,10 +261,9 @@ func (n *Notifier) sendTelegram(event EventType, title, message string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		log.Printf("[notify/telegram] API returned %d: %s", resp.StatusCode, string(respBody))
-		return fmt.Errorf("telegram API returned %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[notify/telegram] API returned status=%d", resp.StatusCode)
+		return fmt.Errorf("telegram API returned status %d", resp.StatusCode)
 	}
 
 	log.Printf("[notify/telegram] Sent: event=%s, title=%s, chat=%s", event, title, chatID)
@@ -319,10 +317,9 @@ func (n *Notifier) sendBark(event EventType, title, message string) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
-		log.Printf("[notify/bark] API returned %d: %s", resp.StatusCode, string(respBody))
-		return fmt.Errorf("bark API returned %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[notify/bark] API returned status=%d", resp.StatusCode)
+		return fmt.Errorf("bark API returned status %d", resp.StatusCode)
 	}
 
 	log.Printf("[notify/bark] Sent: event=%s, title=%s", event, title)
