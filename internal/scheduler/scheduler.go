@@ -30,7 +30,14 @@ type Scheduler struct {
 	downloadDir string
 	notifier    *notify.Notifier
 	stopCh      chan struct{}
+	lifecycleMu sync.Mutex
+	stopped     bool
+	stopOnce    sync.Once
+	stopDone    chan struct{}
 	wg          sync.WaitGroup
+
+	// startRegisterHook is test-only synchronization invoked while Start holds lifecycleMu.
+	startRegisterHook func()
 
 	// B 站子调度器（负责所有 B 站平台逻辑）
 	bili *bscheduler.BiliScheduler
@@ -91,6 +98,7 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 		downloadDir: downloadDir,
 		notifier:    notifier,
 		stopCh:      make(chan struct{}),
+		stopDone:    make(chan struct{}),
 		bili:        bili,
 		douyin:      douyinSched,
 		ph:          phSched,
@@ -101,6 +109,15 @@ func New(database *db.DB, dl *downloader.Downloader, downloadDir, cookiePath str
 // ─── 生命周期 ─────────────────────────────────────────────────────────────────
 
 func (s *Scheduler) Start() {
+	s.lifecycleMu.Lock()
+	if s.stopped {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	if s.startRegisterHook != nil {
+		s.startRegisterHook()
+	}
+
 	// 初始化热配置监视器（通过 bscheduler 的启动流程）
 	s.wg.Add(1)
 	go func() {
@@ -293,29 +310,40 @@ func (s *Scheduler) Start() {
 		}
 	}()
 
+	s.lifecycleMu.Unlock()
 	log.Println("Scheduler started (interval: 5min)")
 }
 
 func (s *Scheduler) Stop() {
-	// [FIXED: P1-8] Signal all forwarding goroutines first, wait for them to
-	// exit, then stop the child schedulers so their resources are only released
-	// after all parent goroutines have finished using them.
-	close(s.stopCh)
-	s.wg.Wait()
+	s.stopOnce.Do(func() {
+		// Block Start from registering workers before beginning Wait, but do not hold
+		// lifecycleMu while waiting because worker startup may need it to return.
+		s.lifecycleMu.Lock()
+		s.stopped = true
+		close(s.stopCh)
+		s.lifecycleMu.Unlock()
 
-	s.bili.Stop()
-	if s.douyin != nil {
-		s.douyin.Stop()
-	}
-	if s.ph != nil {
-		s.ph.Stop()
-	}
-	if s.xc != nil {
-		s.xc.Stop()
-	}
-	if s.notifier != nil {
-		s.notifier.Stop()
-	}
+		// Wait for all workers registered before stopCh was closed, then stop child
+		// schedulers so their resources are only released after parent goroutines
+		// have finished using them.
+		s.wg.Wait()
+
+		s.bili.Stop()
+		if s.douyin != nil {
+			s.douyin.Stop()
+		}
+		if s.ph != nil {
+			s.ph.Stop()
+		}
+		if s.xc != nil {
+			s.xc.Stop()
+		}
+		if s.notifier != nil {
+			s.notifier.Stop()
+		}
+		close(s.stopDone)
+	})
+	<-s.stopDone
 }
 
 // ─── 检查逻辑 ──────────────────────────────────────────────────────────────────
