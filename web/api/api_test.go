@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	_ "github.com/glebarez/sqlite"
@@ -416,5 +418,127 @@ func TestVideoSearchByUploader(t *testing.T) {
 	total, _ = dataMap["total"].(float64)
 	if int(total) != 1 {
 		t.Errorf("expected 1 result for title search 'Another', got %v", total)
+	}
+}
+
+func TestVideoCancelOnlyCancelsPendingTask(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status) VALUES (?, 'pending-video', 'pending')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert pending download: %v", err)
+	}
+	pendingID, _ := result.LastInsertId()
+	result, err = database.Exec(`INSERT INTO downloads (source_id, video_id, status) VALUES (?, 'downloading-video', 'downloading')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert downloading download: %v", err)
+	}
+	downloadingID, _ := result.LastInsertId()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/1/cancel", nil)
+	rec := httptest.NewRecorder()
+	h.HandleCancel(rec, req, pendingID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pending cancel HTTP status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	resp := parseResponse(t, rec)
+	if resp.Code != CodeOK {
+		t.Fatalf("pending cancel code = %d, want %d", resp.Code, CodeOK)
+	}
+	if !strings.Contains(resp.Message, "ok") {
+		t.Fatalf("pending cancel response message = %q", resp.Message)
+	}
+
+	var status string
+	if err := database.QueryRow("SELECT status FROM downloads WHERE id = ?", pendingID).Scan(&status); err != nil {
+		t.Fatalf("query pending status: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("pending status = %q, want cancelled", status)
+	}
+
+	rec = httptest.NewRecorder()
+	h.HandleCancel(rec, req, downloadingID)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("downloading cancel HTTP status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	resp = parseResponse(t, rec)
+	if resp.Code != CodeTaskBusy {
+		t.Fatalf("downloading cancel code = %d, want %d", resp.Code, CodeTaskBusy)
+	}
+	if !strings.Contains(resp.Message, "排队任务") {
+		t.Fatalf("downloading cancel message = %q", resp.Message)
+	}
+	if err := database.QueryRow("SELECT status FROM downloads WHERE id = ?", downloadingID).Scan(&status); err != nil {
+		t.Fatalf("query downloading status: %v", err)
+	}
+	if status != "downloading" {
+		t.Fatalf("downloading status changed to %q", status)
+	}
+}
+
+func TestVideoBatchCancelOnlyAffectsPendingTasks(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status) VALUES (?, ?, ?)`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	pendingID := insert("pending-video", "pending")
+	downloadingID := insert("downloading-video", "downloading")
+	failedID := insert("failed-video", "failed")
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"cancel","ids":[%d,%d,%d]}`, pendingID, downloadingID, failedID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch cancel HTTP status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	resp := parseResponse(t, rec)
+	if resp.Code != CodeOK {
+		t.Fatalf("batch cancel code = %d, want %d", resp.Code, CodeOK)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("batch cancel response data = %T, want map", resp.Data)
+	}
+	if affected := int(data["affected"].(float64)); affected != 1 {
+		t.Fatalf("batch cancel affected = %d, want 1", affected)
+	}
+
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{
+		{pendingID, "cancelled"},
+		{downloadingID, "downloading"},
+		{failedID, "failed"},
+	} {
+		var status string
+		if err := database.QueryRow("SELECT status FROM downloads WHERE id = ?", tc.id).Scan(&status); err != nil {
+			t.Fatalf("query status for %d: %v", tc.id, err)
+		}
+		if status != tc.want {
+			t.Fatalf("status for %d = %q, want %q", tc.id, status, tc.want)
+		}
 	}
 }

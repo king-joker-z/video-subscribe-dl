@@ -190,11 +190,33 @@ func (h *VideosHandler) HandleRetry(w http.ResponseWriter, r *http.Request, id i
 	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重试"})
 }
 
-// POST /api/videos/:id/cancel — 取消下载
+// POST /api/videos/:id/cancel — 仅取消尚未开始的排队任务
 func (h *VideosHandler) HandleCancel(w http.ResponseWriter, r *http.Request, id int64) {
-	h.db.UpdateDownloadStatus(id, "cancelled", "", 0, "手动取消")
-	log.Printf("[video] Cancelled download %d", id)
-	apiOK(w, map[string]interface{}{"id": id, "message": "已取消"})
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
+	}
+	if dl.Status != "pending" {
+		apiError(w, CodeTaskBusy, "只能取消尚未开始的排队任务")
+		return
+	}
+	result, err := h.db.Exec(`UPDATE downloads SET status = 'cancelled', error_message = '', retry_count = 0, last_error = '手动取消排队任务' WHERE id = ? AND status = 'pending'`, id)
+	if err != nil {
+		apiError(w, CodeInternal, "取消任务失败: "+err.Error())
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		apiError(w, CodeInternal, "取消任务失败: "+err.Error())
+		return
+	}
+	if affected != 1 {
+		apiError(w, CodeTaskBusy, "任务已开始，不能取消")
+		return
+	}
+	log.Printf("[video] Cancelled pending download %d", id)
+	apiOK(w, map[string]interface{}{"id": id, "message": "已取消排队任务"})
 }
 
 // POST /api/videos/:id/redownload — 重新下载（删除旧文件，重置为 pending）
@@ -243,7 +265,6 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 	log.Printf("[video] Redownload %d (%s)", id, dl.Title)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重新下载"})
 }
-
 
 // DELETE /api/videos/:id — 软删除下载记录（标记为 deleted，删除本地文件）
 func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
@@ -400,8 +421,17 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 				affected++
 			}
 		case "cancel":
-			h.db.UpdateDownloadStatus(id, "cancelled", "", 0, "批量取消")
-			affected++
+			result, err := h.db.Exec(`UPDATE downloads SET status = 'cancelled', error_message = '', retry_count = 0, last_error = '批量取消排队任务' WHERE id = ? AND status = 'pending'`, id)
+			if err != nil {
+				log.Printf("[video] Batch cancel %d failed: %v", id, err)
+				continue
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				log.Printf("[video] Batch cancel %d affected count failed: %v", id, err)
+				continue
+			}
+			affected += int(changed)
 		case "delete":
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
@@ -535,7 +565,6 @@ func (h *VideosHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		apiError(w, CodeMethodNotAllow, "method not allowed")
 	}
 }
-
 
 // POST /api/videos/detect-charge — 手动触发全量充电检测
 func (h *VideosHandler) HandleDetectCharge(w http.ResponseWriter, r *http.Request) {
@@ -861,7 +890,3 @@ func (h *VideosHandler) HandleThumb(w http.ResponseWriter, r *http.Request) {
 	}
 	apiError(w, CodeNotFound, "无封面图")
 }
-
-
-
-

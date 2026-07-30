@@ -169,7 +169,10 @@ export function VideosPage({ params = {} } = {}) {
     try {
       const res = await api.batchVideos(action, Array.from(selected));
       const count = res?.data?.affected ?? selected.size;
-      toast.success(`批量${labels[action] || action}成功，共 ${count} 项`);
+      const message = action === 'cancel'
+        ? (count > 0 ? `已取消排队任务，共 ${count} 项` : '没有可取消的排队任务')
+        : `批量${labels[action] || action}成功，共 ${count} 项`;
+      toast.success(message);
       setSelected(new Set()); load();
     } catch (err) { toast.error(err.message); }
     finally { setBatchLoading(false); }
@@ -396,8 +399,8 @@ export function VideosPage({ params = {} } = {}) {
       h(Button, { onClick: () => handleBatch('redownload'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '重新下载', className: 'shrink-0' },
         h(Icon, { name: 'download', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '重下')
       ),
-      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '取消下载', className: 'shrink-0' },
-        h(Icon, { name: 'x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '取消')
+      h(Button, { onClick: () => handleBatch('cancel'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '仅取消尚未开始的排队任务', className: 'shrink-0' },
+        h(Icon, { name: 'x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '取消排队')
       ),
       h(Button, { onClick: () => handleBatch('delete_files'), variant: 'secondary', size: 'sm', disabled: batchLoading, title: '删除文件', className: 'shrink-0' },
         h(Icon, { name: 'file-x', size: 13 }), h('span', { className: 'hidden sm:inline ml-1' }, '删文件')
@@ -487,13 +490,13 @@ export function VideosPage({ params = {} } = {}) {
                       h('td', { className: 'py-3 pr-3 text-xs text-slate-500 hidden lg:table-cell' }, formatTime(v.created_at)),
                       h('td', { className: 'py-3' },
                         h('div', { className: 'flex items-center gap-1' },
-                          v.status === 'downloading' && h('button', {
+                          v.status === 'pending' && h('button', {
                             onClick: async (e) => {
                               e.stopPropagation();
-                              try { await api.cancelVideo(v.id); toast.success('已取消'); load(); }
+                              try { await api.cancelVideo(v.id); toast.success('已取消排队任务'); load(); }
                               catch (err) { toast.error(err.message); }
                             },
-                            className: 'p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600', title: '取消下载'
+                            className: 'p-1.5 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600', title: '取消排队任务'
                           }, h(Icon, { name: 'x', size: 14 })),
                           v.status === 'pending' && h('button', {
                             onClick: async (e) => { e.stopPropagation(); try { await api.redownloadVideo(v.id); toast.success('已触发下载'); load(); } catch (err) { toast.error(err.message); } },
@@ -661,10 +664,10 @@ function VideoCard({ video: v, progress: prog, onClick, isMobile = false, onActi
       ),
       // 手机端快捷操作按钮（触摸区域加大，min-h-9）
       isMobile && h('div', { className: 'flex items-center gap-2 mt-3 pt-2 border-t border-slate-200' },
-        v.status === 'downloading' && h('button', {
-          onClick: async (e) => { e.stopPropagation(); try { await api.cancelVideo(v.id); if (onAction) onAction(); } catch (err) { toast.error(err.message || '操作失败'); } },
+        v.status === 'pending' && h('button', {
+          onClick: async (e) => { e.stopPropagation(); try { await api.cancelVideo(v.id); toast.success('已取消排队任务'); if (onAction) onAction(); } catch (err) { toast.error(err.message || '操作失败'); } },
           className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-amber-50 text-amber-700 text-xs font-medium active:bg-amber-100'
-        }, h(Icon, { name: 'x', size: 14 }), '取消'),
+        }, h(Icon, { name: 'x', size: 14 }), '取消排队'),
         v.status === 'pending' && h('button', {
           onClick: async (e) => { e.stopPropagation(); try { await api.redownloadVideo(v.id); if (onAction) onAction(); } catch (err) { toast.error(err.message || '操作失败'); } },
           className: 'flex-1 flex items-center justify-center gap-1.5 min-h-[36px] rounded-lg bg-green-50 text-green-700 text-xs font-medium active:bg-green-100'
