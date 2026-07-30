@@ -313,6 +313,9 @@ func (s *Scheduler) Stop() {
 	if s.xc != nil {
 		s.xc.Stop()
 	}
+	if s.notifier != nil {
+		s.notifier.Stop()
+	}
 }
 
 // ─── 检查逻辑 ──────────────────────────────────────────────────────────────────

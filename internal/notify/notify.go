@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,45 +61,59 @@ type Notifier struct {
 	client   *http.Client
 	// [FIXED: P1-7] Use a buffered channel + single worker goroutine so that
 	// Send() is non-blocking and goroutines can be cancelled via Stop().
-	jobCh chan notifyJob
-	stopCh chan struct{}
+	jobCh      chan notifyJob
+	stopCh     chan struct{}
+	stopOnce   sync.Once
+	workerDone chan struct{}
 }
 
 // New 创建 Notifier
 func New(settings SettingsGetter) *Notifier {
 	n := &Notifier{
-		settings: settings,
-		client:   &http.Client{Timeout: 10 * time.Second},
-		jobCh:    make(chan notifyJob, 64),
-		stopCh:   make(chan struct{}),
+		settings:   settings,
+		client:     &http.Client{Timeout: 10 * time.Second},
+		jobCh:      make(chan notifyJob, 64),
+		stopCh:     make(chan struct{}),
+		workerDone: make(chan struct{}),
 	}
 	go n.worker()
 	return n
 }
 
-// Stop 停止 Notifier 后台 worker（优雅关闭）
+// Stop 停止 Notifier 后台 worker（优雅关闭）。可重复、并发调用；返回时 worker 已退出。
 func (n *Notifier) Stop() {
-	close(n.stopCh)
+	n.stopOnce.Do(func() { close(n.stopCh) })
+	<-n.workerDone
 }
 
 // worker 是唯一处理通知的 goroutine，可被 Stop() 取消。
 func (n *Notifier) worker() {
+	defer close(n.workerDone)
 	for {
 		select {
 		case <-n.stopCh:
 			return
-		case job, ok := <-n.jobCh:
-			if !ok {
-				return
-			}
+		case job := <-n.jobCh:
 			delays := []time.Duration{0, 2 * time.Second, 4 * time.Second}
 			for i, delay := range delays {
 				if delay > 0 {
+					timer := time.NewTimer(delay)
 					select {
 					case <-n.stopCh:
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
 						return
-					case <-time.After(delay):
+					case <-timer.C:
 					}
+				}
+				select {
+				case <-n.stopCh:
+					return
+				default:
 				}
 				if err := n.sendOnce(job.event, job.title, job.message); err == nil {
 					break
@@ -143,11 +158,18 @@ func (n *Notifier) sendOnce(event EventType, title, message string) error {
 // [FIXED: P1-7] Delivers to buffered channel so the caller is non-blocking and
 // the worker goroutine can be stopped cleanly via Stop().
 func (n *Notifier) Send(event EventType, title, message string) {
+	select {
+	case <-n.stopCh:
+		return
+	default:
+	}
 	if !n.shouldSend(event) {
 		return
 	}
 	job := notifyJob{event: event, title: title, message: message}
 	select {
+	case <-n.stopCh:
+		return
 	case n.jobCh <- job:
 	default:
 		log.Printf("[notify] job queue full, dropping event=%s", event)
