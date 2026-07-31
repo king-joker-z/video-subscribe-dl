@@ -137,3 +137,44 @@ func TestPrepareRedownloadOnlyAllowsCompletedOrRelocated(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareRestoreOnlyAllowsDeleted(t *testing.T) {
+	d := initMemoryDB(t)
+	defer d.Close()
+	sourceID, err := d.CreateSource(&Source{URL: "https://example.test", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"deleted", true}, {"pending", false}, {"downloading", false}, {"completed", false}, {"relocated", false}, {"failed", false}, {"permanent_failed", false}, {"cancelled", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			id, err := d.CreateDownload(&Download{SourceID: sourceID, VideoID: "restore-" + tc.status, Status: tc.status})
+			if err != nil {
+				t.Fatalf("CreateDownload: %v", err)
+			}
+			if _, err := d.Exec(`UPDATE downloads SET retry_count=2, last_error='old', error_message='old' WHERE id=?`, id); err != nil {
+				t.Fatalf("seed errors: %v", err)
+			}
+			admitted, err := d.PrepareRestore(id)
+			if err != nil || admitted != tc.allow {
+				t.Fatalf("PrepareRestore(%s) = (%v, %v), want (%v, nil)", tc.status, admitted, err, tc.allow)
+			}
+			var status, lastError, errorMessage string
+			var retryCount int
+			if err := d.QueryRow(`SELECT status, retry_count, last_error, error_message FROM downloads WHERE id=?`, id).Scan(&status, &retryCount, &lastError, &errorMessage); err != nil {
+				t.Fatalf("query state: %v", err)
+			}
+			if tc.allow {
+				if status != "pending" || retryCount != 0 || lastError != "" || errorMessage != "" {
+					t.Fatalf("restored state: status=%q retry=%d last=%q error=%q", status, retryCount, lastError, errorMessage)
+				}
+			} else if status != tc.status || retryCount != 2 || lastError != "old" || errorMessage != "old" {
+				t.Fatalf("rejected state changed: status=%q retry=%d last=%q error=%q", status, retryCount, lastError, errorMessage)
+			}
+		})
+	}
+}

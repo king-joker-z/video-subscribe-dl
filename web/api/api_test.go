@@ -943,3 +943,162 @@ func TestVideoBatchRedownloadOnlyCountsCompletedAndRelocated(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoRestoreOnlyAllowsDeleted(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"deleted", true}, {"pending", false}, {"downloading", false}, {"completed", false}, {"failed", false}, {"cancelled", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count, last_error, error_message) VALUES (?, ?, ?, 2, 'old', 'old')`, sourceID, "restore-"+tc.status, tc.status)
+			if err != nil {
+				t.Fatalf("insert: %v", err)
+			}
+			id, _ := result.LastInsertId()
+			dispatched := make(chan struct{}, 1)
+			h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+			rec := httptest.NewRecorder()
+			h.HandleRestore(rec, httptest.NewRequest(http.MethodPost, "/api/videos/1/restore", nil), id)
+			resp := parseResponse(t, rec)
+			if tc.allow {
+				if rec.Code != http.StatusOK || resp.Code != CodeOK {
+					t.Fatalf("restore %s: HTTP=%d code=%d", tc.status, rec.Code, resp.Code)
+				}
+				select {
+				case <-dispatched:
+				case <-time.After(time.Second):
+					t.Fatal("deleted restore did not dispatch")
+				}
+			} else if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy {
+				t.Fatalf("restore %s: HTTP=%d code=%d, want 400/%d", tc.status, rec.Code, resp.Code, CodeTaskBusy)
+			}
+		})
+	}
+}
+
+func TestVideoRestoreConcurrentOnlyOneAdmissionAndDispatch(t *testing.T) {
+	database := initTestDB(t)
+	database.SetMaxOpenConns(1)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count, last_error, error_message) VALUES (?, 'restore-race', 'deleted', 2, 'old', 'old')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	id, _ := result.LastInsertId()
+	dispatched := make(chan struct{}, 2)
+	h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			h.HandleRestore(rec, httptest.NewRequest(http.MethodPost, "/api/videos/1/restore", nil), id)
+			responses <- rec
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+	var success, conflict int
+	for rec := range responses {
+		switch rec.Code {
+		case http.StatusOK:
+			success++
+		case http.StatusBadRequest:
+			conflict++
+		default:
+			t.Fatalf("restore unexpected HTTP status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if success != 1 || conflict != 1 {
+		t.Fatalf("restore success=%d conflict=%d, want 1/1", success, conflict)
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("restore did not dispatch")
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("restore dispatched more than once")
+	default:
+	}
+	var status, lastError, errorMessage string
+	var retryCount int
+	if err := database.QueryRow(`SELECT status, retry_count, last_error, error_message FROM downloads WHERE id=?`, id).Scan(&status, &retryCount, &lastError, &errorMessage); err != nil {
+		t.Fatalf("query restored state: %v", err)
+	}
+	if status != "pending" || retryCount != 0 || lastError != "" || errorMessage != "" {
+		t.Fatalf("restore final state: status=%q retry=%d last=%q error=%q", status, retryCount, lastError, errorMessage)
+	}
+}
+
+func TestVideoBatchRestoreOnlyCountsDeleted(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count, last_error, error_message) VALUES (?, ?, ?, 2, 'old', 'old')`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	deletedID := insert("deleted", "deleted")
+	completedID := insert("completed", "completed")
+	failedID := insert("failed", "failed")
+	dispatched := make(chan struct{}, 1)
+	h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"restore","ids":[%d,%d,%d]}`, deletedID, completedID, failedID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	resp := parseResponse(t, rec)
+	data := resp.Data.(map[string]interface{})
+	if rec.Code != http.StatusOK || resp.Code != CodeOK || int(data["affected"].(float64)) != 1 {
+		t.Fatalf("batch restore HTTP=%d code=%d affected=%v", rec.Code, resp.Code, data["affected"])
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("batch restore did not dispatch deleted item")
+	}
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{{deletedID, "pending"}, {completedID, "completed"}, {failedID, "failed"}} {
+		var status string
+		if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, tc.id).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		if status != tc.want {
+			t.Fatalf("status for %d=%q, want %q", tc.id, status, tc.want)
+		}
+	}
+}

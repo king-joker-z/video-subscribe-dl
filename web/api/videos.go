@@ -275,29 +275,27 @@ func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request
 	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
 }
 
-// POST /api/videos/:id/restore — 恢复已删除的视频（重新下载）
+// POST /api/videos/:id/restore — restore a deleted video to pending.
 func (h *VideosHandler) HandleRestore(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, err := h.db.GetDownload(id)
 	if err != nil {
 		apiError(w, CodeVideoNotFound, "视频不存在")
 		return
 	}
-	if dl.Status != "deleted" {
-		apiError(w, CodeInvalidParam, "只能恢复已删除的视频")
+	admitted, err := h.db.PrepareRestore(id)
+	if err != nil {
+		apiError(w, CodeInternal, "恢复任务失败: "+err.Error())
 		return
 	}
-
-	// 重置为 pending
-	h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
-	h.db.ResetRetryCount(id)
-
-	// 直接提交到下载队列
+	if !admitted {
+		apiError(w, CodeTaskBusy, "只能恢复已删除的视频")
+		return
+	}
 	if h.onRedownload != nil {
 		go h.onRedownload(id)
 	} else if h.onProcessPending != nil {
 		go h.onProcessPending()
 	}
-
 	log.Printf("[video] Restored deleted video %d (%s)", id, dl.Title)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已恢复，开始重新下载"})
 }
@@ -451,13 +449,16 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
 			affected++
 		case "restore":
-			dl, _ := h.db.GetDownload(id)
-			if dl != nil && dl.Status == "deleted" {
-				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
-				h.db.ResetRetryCount(id)
-				redownloadIDs = append(redownloadIDs, id)
-				affected++
+			admitted, err := h.db.PrepareRestore(id)
+			if err != nil {
+				log.Printf("[video] Batch restore %d failed: %v", id, err)
+				continue
 			}
+			if !admitted {
+				continue
+			}
+			redownloadIDs = append(redownloadIDs, id)
+			affected++
 		case "delete_files":
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && dl.FilePath != "" {
