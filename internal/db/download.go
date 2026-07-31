@@ -303,6 +303,27 @@ func (d *DB) PrepareDelete(id int64) (bool, error) {
 	return affected == 1, nil
 }
 
+// PrepareDeleteFiles atomically admits an eligible download for local-file removal.
+// It preserves status and clears file metadata only when a stored file path exists.
+func (d *DB) PrepareDeleteFiles(id int64) (bool, error) {
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET file_path='', file_size=0, thumb_path=''
+		WHERE id=? AND file_path != '' AND status IN (
+			'pending','failed','permanent_failed','completed','relocated',
+			'cancelled','skipped','charge_blocked'
+		)
+	`, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
 // PrepareRestore atomically admits a deleted record for restore.
 func (d *DB) PrepareRestore(id int64) (bool, error) {
 	result, err := d.Exec(`

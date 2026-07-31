@@ -310,24 +310,24 @@ func (h *VideosHandler) HandleRestore(w http.ResponseWriter, r *http.Request, id
 	apiOK(w, map[string]interface{}{"id": id, "message": "已恢复，开始重新下载"})
 }
 
-// POST /api/videos/:id/delete-files — 只删除本地文件，不改数据库状态
+// POST /api/videos/:id/delete-files — atomically remove local-file metadata and files.
 func (h *VideosHandler) HandleDeleteFiles(w http.ResponseWriter, r *http.Request, id int64) {
 	dl, err := h.db.GetDownload(id)
 	if err != nil {
 		apiError(w, CodeVideoNotFound, "视频不存在")
 		return
 	}
-
-	if dl.FilePath == "" {
-		apiError(w, CodeInvalidParam, "没有关联的本地文件")
+	admitted, err := h.db.PrepareDeleteFiles(id)
+	if err != nil {
+		apiError(w, CodeInternal, "删除本地文件失败: "+err.Error())
+		return
+	}
+	if !admitted {
+		apiError(w, CodeTaskBusy, "当前任务状态或文件状态不能删除")
 		return
 	}
 
-	util.RemoveVideoDir(dl.FilePath, h.downloadDir)
-
-	// 清空文件路径和大小，但不改状态
-	h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
-
+	h.removeVideoDir(dl.FilePath)
 	log.Printf("[video] Deleted files for %d (%s): %s", id, dl.Title, dl.FilePath)
 	apiOK(w, map[string]interface{}{"id": id, "message": "本地文件已删除"})
 }
@@ -480,12 +480,20 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			redownloadIDs = append(redownloadIDs, id)
 			affected++
 		case "delete_files":
-			dl, _ := h.db.GetDownload(id)
-			if dl != nil && dl.FilePath != "" {
-				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
-				h.db.Exec("UPDATE downloads SET file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
-				affected++
+			dl, err := h.db.GetDownload(id)
+			if err != nil {
+				continue
 			}
+			admitted, err := h.db.PrepareDeleteFiles(id)
+			if err != nil {
+				log.Printf("[video] Batch delete_files %d failed: %v", id, err)
+				continue
+			}
+			if !admitted {
+				continue
+			}
+			h.removeVideoDir(dl.FilePath)
+			affected++
 		default:
 			apiError(w, CodeInvalidParam, "未知操作: "+req.Action)
 			return

@@ -1247,3 +1247,160 @@ func TestVideoBatchDeleteOnlyCountsAdmitted(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoDeleteFilesOnlyAllowsExplicitSafeStatesWithPath(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		status   string
+		filePath string
+		allow    bool
+	}{
+		{"completed", "completed", "/tmp/video.mkv", true},
+		{"pending", "pending", "/tmp/video.mkv", true},
+		{"failed", "failed", "/tmp/video.mkv", true},
+		{"permanent_failed", "permanent_failed", "/tmp/video.mkv", true},
+		{"relocated", "relocated", "/tmp/video.mkv", true},
+		{"cancelled", "cancelled", "/tmp/video.mkv", true},
+		{"skipped", "skipped", "/tmp/video.mkv", true},
+		{"charge_blocked", "charge_blocked", "/tmp/video.mkv", true},
+		{"downloading", "downloading", "/tmp/video.mkv", false},
+		{"deleted", "deleted", "/tmp/video.mkv", false},
+		{"unknown", "unknown_state", "/tmp/video.mkv", false},
+		{"no_path", "completed", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path, file_size, thumb_path) VALUES (?, ?, ?, ?, 123, '/tmp/thumb.jpg')`, sourceID, "delete-files-api-"+tc.name, tc.status, tc.filePath)
+			if err != nil {
+				t.Fatalf("insert download: %v", err)
+			}
+			id, _ := result.LastInsertId()
+			var deletes atomic.Int32
+			h.removeVideoDir = func(string) { deletes.Add(1) }
+			rec := httptest.NewRecorder()
+			h.HandleDeleteFiles(rec, httptest.NewRequest(http.MethodPost, "/api/videos/1/delete-files", nil), id)
+			resp := parseResponse(t, rec)
+			if tc.allow {
+				if rec.Code != http.StatusOK || resp.Code != CodeOK || deletes.Load() != 1 {
+					t.Fatalf("allowed %s: HTTP=%d code=%d deletes=%d body=%s", tc.name, rec.Code, resp.Code, deletes.Load(), rec.Body.String())
+				}
+			} else if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy || deletes.Load() != 0 {
+				t.Fatalf("rejected %s: HTTP=%d code=%d deletes=%d body=%s", tc.name, rec.Code, resp.Code, deletes.Load(), rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestVideoDeleteFilesConcurrentOnlyOneDeletes(t *testing.T) {
+	database := initTestDB(t)
+	database.SetMaxOpenConns(1)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path, file_size, thumb_path) VALUES (?, 'delete-files-race', 'completed', '/tmp/video.mkv', 123, '/tmp/thumb.jpg')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert download: %v", err)
+	}
+	id, _ := result.LastInsertId()
+	var deletes atomic.Int32
+	h.removeVideoDir = func(string) { deletes.Add(1) }
+
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			h.HandleDeleteFiles(rec, httptest.NewRequest(http.MethodPost, "/api/videos/1/delete-files", nil), id)
+			responses <- rec
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	var success, conflict int
+	for rec := range responses {
+		switch rec.Code {
+		case http.StatusOK:
+			success++
+		case http.StatusBadRequest:
+			conflict++
+		default:
+			t.Fatalf("concurrent delete-files unexpected HTTP status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if success != 1 || conflict != 1 || deletes.Load() != 1 {
+		t.Fatalf("concurrent delete-files success=%d conflict=%d deletes=%d, want 1/1/1", success, conflict, deletes.Load())
+	}
+	var status, filePath, thumbPath string
+	var fileSize int64
+	if err := database.QueryRow(`SELECT status, file_path, file_size, thumb_path FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath); err != nil {
+		t.Fatalf("query delete-files state: %v", err)
+	}
+	if status != "completed" || filePath != "" || fileSize != 0 || thumbPath != "" {
+		t.Fatalf("concurrent delete-files final state: status=%q path=%q size=%d thumb=%q", status, filePath, fileSize, thumbPath)
+	}
+}
+
+func TestVideoBatchDeleteFilesOnlyCountsAdmitted(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status, filePath string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path) VALUES (?, ?, ?, ?)`, sourceID, videoID, status, filePath)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	completedID := insert("delete-files-completed", "completed", "/tmp/completed.mkv")
+	failedID := insert("delete-files-failed", "failed", "/tmp/failed.mkv")
+	downloadingID := insert("delete-files-downloading", "downloading", "/tmp/downloading.mkv")
+	deletedID := insert("delete-files-deleted", "deleted", "/tmp/deleted.mkv")
+	noPathID := insert("delete-files-no-path", "completed", "")
+	var deletes atomic.Int32
+	h.removeVideoDir = func(string) { deletes.Add(1) }
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"delete_files","ids":[%d,%d,%d,%d,%d]}`, completedID, failedID, downloadingID, deletedID, noPathID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	resp := parseResponse(t, rec)
+	data := resp.Data.(map[string]interface{})
+	if rec.Code != http.StatusOK || resp.Code != CodeOK || int(data["affected"].(float64)) != 2 || deletes.Load() != 2 {
+		t.Fatalf("batch delete-files HTTP=%d code=%d affected=%v deletes=%d body=%s", rec.Code, resp.Code, data["affected"], deletes.Load(), rec.Body.String())
+	}
+	for _, tc := range []struct {
+		id       int64
+		status   string
+		filePath string
+	}{{completedID, "completed", ""}, {failedID, "failed", ""}, {downloadingID, "downloading", "/tmp/downloading.mkv"}, {deletedID, "deleted", "/tmp/deleted.mkv"}, {noPathID, "completed", ""}} {
+		var status, filePath string
+		if err := database.QueryRow(`SELECT status, file_path FROM downloads WHERE id=?`, tc.id).Scan(&status, &filePath); err != nil {
+			t.Fatalf("query state: %v", err)
+		}
+		if status != tc.status || filePath != tc.filePath {
+			t.Fatalf("state for %d: status=%q path=%q, want %q/%q", tc.id, status, filePath, tc.status, tc.filePath)
+		}
+	}
+}

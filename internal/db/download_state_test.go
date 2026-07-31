@@ -223,3 +223,58 @@ func TestPrepareDeleteOnlyAllowsExplicitSafeStates(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareDeleteFilesOnlyAllowsExplicitSafeStatesWithPath(t *testing.T) {
+	d := initMemoryDB(t)
+	defer d.Close()
+	sourceID, err := d.CreateSource(&Source{URL: "https://example.test", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		status   string
+		filePath string
+		allow    bool
+	}{
+		{"pending", "pending", "/tmp/video.mkv", true},
+		{"failed", "failed", "/tmp/video.mkv", true},
+		{"permanent_failed", "permanent_failed", "/tmp/video.mkv", true},
+		{"completed", "completed", "/tmp/video.mkv", true},
+		{"relocated", "relocated", "/tmp/video.mkv", true},
+		{"cancelled", "cancelled", "/tmp/video.mkv", true},
+		{"skipped", "skipped", "/tmp/video.mkv", true},
+		{"charge_blocked", "charge_blocked", "/tmp/video.mkv", true},
+		{"downloading", "downloading", "/tmp/video.mkv", false},
+		{"deleted", "deleted", "/tmp/video.mkv", false},
+		{"unknown", "unknown_state", "/tmp/video.mkv", false},
+		{"no_path", "completed", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id, err := d.CreateDownload(&Download{SourceID: sourceID, VideoID: "delete-files-" + tc.name, Status: tc.status})
+			if err != nil {
+				t.Fatalf("CreateDownload: %v", err)
+			}
+			if _, err := d.Exec(`UPDATE downloads SET file_path=?, file_size=123, thumb_path='/tmp/thumb.jpg' WHERE id=?`, tc.filePath, id); err != nil {
+				t.Fatalf("seed metadata: %v", err)
+			}
+			admitted, err := d.PrepareDeleteFiles(id)
+			if err != nil || admitted != tc.allow {
+				t.Fatalf("PrepareDeleteFiles(%s) = (%v, %v), want (%v, nil)", tc.name, admitted, err, tc.allow)
+			}
+			var status, filePath, thumbPath string
+			var fileSize int64
+			if err := d.QueryRow(`SELECT status, file_path, file_size, thumb_path FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath); err != nil {
+				t.Fatalf("query state: %v", err)
+			}
+			if tc.allow {
+				if status != tc.status || filePath != "" || fileSize != 0 || thumbPath != "" {
+					t.Fatalf("admitted delete-files state: status=%q path=%q size=%d thumb=%q", status, filePath, fileSize, thumbPath)
+				}
+			} else if status != tc.status || filePath != tc.filePath || fileSize != 123 || thumbPath != "/tmp/thumb.jpg" {
+				t.Fatalf("rejected %s changed: status=%q path=%q size=%d thumb=%q", tc.name, status, filePath, fileSize, thumbPath)
+			}
+		})
+	}
+}
