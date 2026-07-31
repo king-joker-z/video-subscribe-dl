@@ -68,29 +68,31 @@ func (s *Scheduler) retryFailedDownloads() {
 }
 
 // RetryByID 手动重试指定下载记录（由 Web API 调用）
-func (s *Scheduler) RetryByID(dlID int64) {
+func (s *Scheduler) RetryByID(dlID int64) bool {
 	if !s.tryAddWorker() {
-		return
+		return false
+	}
+	applied, err := s.db.PrepareManualRetry(dlID)
+	if err != nil || !applied {
+		s.wg.Done()
+		if err != nil {
+			log.Printf("[manual-retry] Prepare manual retry for %d failed: %v", dlID, err)
+		} else {
+			log.Printf("[manual-retry] Download %d is not failed or permanent_failed", dlID)
+		}
+		return false
 	}
 	dl, err := s.db.GetDownload(dlID)
 	if err != nil || dl == nil {
 		s.wg.Done()
-		log.Printf("[manual-retry] Download %d not found", dlID)
-		return
-	}
-	// 重置状态（包括 permanent_failed）和重试计数，确保 retryOneDownload 状态检查可通过
-	s.db.ResetRetryCount(dlID)
-	s.db.UpdateDownloadStatus(dlID, "failed", "", 0, "")
-	// 重新读取，保证 retryOneDownload 拿到最新状态
-	dl, err = s.db.GetDownload(dlID)
-	if err != nil || dl == nil {
-		s.wg.Done()
-		return
+		log.Printf("[manual-retry] Download %d disappeared after retry admission", dlID)
+		return false
 	}
 	go func() {
 		defer s.wg.Done()
 		s.retryOneDownload(*dl)
 	}()
+	return true
 }
 
 // RedownloadByID 重新下载指定记录（由 Web API redownload 调用）

@@ -542,3 +542,226 @@ func TestVideoBatchCancelOnlyAffectsPendingTasks(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoRetryOnlyAllowsFailedStates(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count, last_error) VALUES (?, ?, ?, 2, 'previous error')`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"failed", true},
+		{"permanent_failed", true},
+		{"downloading", false},
+		{"pending", false},
+		{"completed", false},
+		{"cancelled", false},
+		{"deleted", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			id := insert("retry-"+tc.status, tc.status)
+			req := httptest.NewRequest(http.MethodPost, "/api/videos/1/retry", nil)
+			rec := httptest.NewRecorder()
+			h.HandleRetry(rec, req, id)
+			resp := parseResponse(t, rec)
+			if tc.allow {
+				if rec.Code != http.StatusOK || resp.Code != CodeOK {
+					t.Fatalf("retry %s = HTTP %d code %d, body=%s", tc.status, rec.Code, resp.Code, rec.Body.String())
+				}
+				var status string
+				var retryCount int
+				if err := database.QueryRow(`SELECT status, retry_count FROM downloads WHERE id=?`, id).Scan(&status, &retryCount); err != nil {
+					t.Fatalf("query retried download: %v", err)
+				}
+				if status != "pending" || retryCount != 0 {
+					t.Fatalf("retry %s produced status=%q retry_count=%d, want pending/0", tc.status, status, retryCount)
+				}
+				return
+			}
+			if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy {
+				t.Fatalf("retry %s = HTTP %d code %d, want 400/%d; body=%s", tc.status, rec.Code, resp.Code, CodeTaskBusy, rec.Body.String())
+			}
+			var status string
+			var retryCount int
+			if err := database.QueryRow(`SELECT status, retry_count FROM downloads WHERE id=?`, id).Scan(&status, &retryCount); err != nil {
+				t.Fatalf("query rejected download: %v", err)
+			}
+			if status != tc.status || retryCount != 2 {
+				t.Fatalf("rejected %s changed to status=%q retry_count=%d", tc.status, status, retryCount)
+			}
+		})
+	}
+}
+
+func TestVideoBatchRetryOnlyCountsAllowedStates(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count) VALUES (?, ?, ?, 2)`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	failedID := insert("failed", "failed")
+	permanentID := insert("permanent", "permanent_failed")
+	downloadingID := insert("downloading", "downloading")
+	completedID := insert("completed", "completed")
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"retry","ids":[%d,%d,%d,%d]}`, failedID, permanentID, downloadingID, completedID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch retry HTTP status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	resp := parseResponse(t, rec)
+	data := resp.Data.(map[string]interface{})
+	if got := int(data["affected"].(float64)); got != 2 {
+		t.Fatalf("batch retry affected = %d, want 2", got)
+	}
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{
+		{failedID, "pending"},
+		{permanentID, "pending"},
+		{downloadingID, "downloading"},
+		{completedID, "completed"},
+	} {
+		var status string
+		if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, tc.id).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		if status != tc.want {
+			t.Fatalf("status for %d = %q, want %q", tc.id, status, tc.want)
+		}
+	}
+}
+
+func TestVideoRetryCallbackContract(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, retry_count) VALUES (?, ?, 'completed', 2)`, sourceID, videoID)
+		if err != nil {
+			t.Fatalf("insert download: %v", err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+
+	falseID := insert("callback-false")
+	var calls int
+	h.SetRetryDownloadFunc(func(id int64) bool {
+		calls++
+		return false
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/1/retry", nil)
+	rec := httptest.NewRecorder()
+	h.HandleRetry(rec, req, falseID)
+	resp := parseResponse(t, rec)
+	if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy || calls != 1 {
+		t.Fatalf("false callback = HTTP %d code %d calls %d, want 400/%d/1", rec.Code, resp.Code, calls, CodeTaskBusy)
+	}
+	var status string
+	if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, falseID).Scan(&status); err != nil {
+		t.Fatalf("query false callback record: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("false callback fell through to DB fallback: status=%q", status)
+	}
+
+	trueID := insert("callback-true")
+	h.SetRetryDownloadFunc(func(id int64) bool { return id == trueID })
+	rec = httptest.NewRecorder()
+	h.HandleRetry(rec, req, trueID)
+	resp = parseResponse(t, rec)
+	if rec.Code != http.StatusOK || resp.Code != CodeOK {
+		t.Fatalf("true callback = HTTP %d code %d, want 200/0", rec.Code, resp.Code)
+	}
+	if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, trueID).Scan(&status); err != nil {
+		t.Fatalf("query true callback record: %v", err)
+	}
+	if status != "completed" {
+		t.Fatalf("true callback unexpectedly changed DB status to %q", status)
+	}
+}
+
+func TestVideoBatchRetryCallbackCountsOnlyTrue(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status) VALUES (?, ?, 'completed')`, sourceID, videoID)
+		if err != nil {
+			t.Fatalf("insert download: %v", err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	trueID := insert("callback-true")
+	falseID := insert("callback-false")
+	h.SetRetryDownloadFunc(func(id int64) bool { return id == trueID })
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"retry","ids":[%d,%d]}`, trueID, falseID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	resp := parseResponse(t, rec)
+	if rec.Code != http.StatusOK || resp.Code != CodeOK {
+		t.Fatalf("batch callback retry = HTTP %d code %d", rec.Code, resp.Code)
+	}
+	data := resp.Data.(map[string]interface{})
+	if got := int(data["affected"].(float64)); got != 1 {
+		t.Fatalf("batch callback affected = %d, want 1", got)
+	}
+	for _, id := range []int64{trueID, falseID} {
+		var status string
+		if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, id).Scan(&status); err != nil {
+			t.Fatalf("query callback record: %v", err)
+		}
+		if status != "completed" {
+			t.Fatalf("callback batch fell through to DB fallback: id=%d status=%q", id, status)
+		}
+	}
+}

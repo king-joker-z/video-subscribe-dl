@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -356,4 +357,147 @@ func TestRedownloadByID_PendingStatus(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	// 由于 douyin 已暂停，下载被跳过，不应 panic
+}
+
+func TestRetryByIDOnlyAllowsFailedStates(t *testing.T) {
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"failed", true},
+		{"permanent_failed", true},
+		{"downloading", false},
+		{"pending", false},
+		{"completed", false},
+		{"cancelled", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			s := newTestScheduler(t, nil)
+			s.douyin.Pause("prevent dispatch")
+			src := createTestSource(t, s.db, "retry-state", "https://www.douyin.com/user/retry-state")
+			id, err := s.db.CreateDownload(&db.Download{SourceID: src.ID, VideoID: "retry-" + tc.status, Status: tc.status})
+			if err != nil {
+				t.Fatalf("CreateDownload: %v", err)
+			}
+			if _, err := s.db.Exec(`UPDATE downloads SET retry_count=2 WHERE id=?`, id); err != nil {
+				t.Fatalf("set retry count: %v", err)
+			}
+
+			if got := s.RetryByID(id); got != tc.allow {
+				t.Fatalf("RetryByID(%s) = %v, want %v", tc.status, got, tc.allow)
+			}
+			current, err := s.db.GetDownload(id)
+			if err != nil || current == nil {
+				t.Fatalf("GetDownload: %v, %v", err, current)
+			}
+			if tc.allow {
+				if current.RetryCount != 0 {
+					t.Fatalf("accepted %s retry count = %d, want 0", tc.status, current.RetryCount)
+				}
+				return
+			}
+			if current.Status != tc.status || current.RetryCount != 2 {
+				t.Fatalf("rejected %s changed to status=%q retry_count=%d", tc.status, current.Status, current.RetryCount)
+			}
+		})
+	}
+}
+
+func TestConcurrentManualRetriesOnlyOneAdmissionWins(t *testing.T) {
+	s := newTestScheduler(t, nil)
+	src := createTestSource(t, s.db, "race", "https://www.douyin.com/user/race")
+	id, err := s.db.CreateDownload(&db.Download{SourceID: src.ID, VideoID: "race-retry", Status: "failed"})
+	if err != nil {
+		t.Fatalf("CreateDownload: %v", err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			<-start
+			applied, err := s.db.PrepareManualRetry(id)
+			if err != nil {
+				t.Errorf("PrepareManualRetry: %v", err)
+			}
+			results <- applied
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if (first && second) || (!first && !second) {
+		t.Fatalf("concurrent manual retry results = %v, %v; want exactly one true", first, second)
+	}
+	claimed, err := s.db.ClaimDownloadForProcessing(id)
+	if err != nil || !claimed {
+		t.Fatalf("ClaimDownloadForProcessing after the winning retry = %v, %v; want true, nil", claimed, err)
+	}
+	current, err := s.db.GetDownload(id)
+	if err != nil || current == nil {
+		t.Fatalf("GetDownload: %v, %v", err, current)
+	}
+	if current.Status != "downloading" {
+		t.Fatalf("final status = %q, want downloading", current.Status)
+	}
+}
+
+func TestRetryByIDInterleavedClaimHasSingleAdmissionAndClaimWinner(t *testing.T) {
+	s := newTestScheduler(t, nil)
+	src := createTestSource(t, s.db, "interleaved", "https://www.douyin.com/user/interleaved")
+	id, err := s.db.CreateDownload(&db.Download{SourceID: src.ID, VideoID: "interleaved-retry", Status: "failed"})
+	if err != nil {
+		t.Fatalf("CreateDownload: %v", err)
+	}
+
+	claimEntered := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	claimedDone := make(chan struct{})
+	var claimCount atomic.Int32
+	s.douyin.SetTestClaimHooks(func(dl db.Download) {
+		if dl.ID != id {
+			t.Fatalf("claim hook download id = %d, want %d", dl.ID, id)
+		}
+		close(claimEntered)
+		<-releaseClaim
+	}, func(dl db.Download) bool {
+		claimCount.Add(1)
+		close(claimedDone)
+		return false // Network-isolated test ends after the real platform claim.
+	})
+
+	firstResult := make(chan bool, 1)
+	go func() { firstResult <- s.RetryByID(id) }()
+	select {
+	case <-claimEntered:
+	case <-time.After(time.Second):
+		t.Fatal("first RetryByID did not reach the platform claim hook")
+	}
+
+	if got := s.RetryByID(id); got {
+		t.Fatal("second RetryByID was admitted after first retry prepared the record")
+	}
+	close(releaseClaim)
+	select {
+	case got := <-firstResult:
+		if !got {
+			t.Fatal("first RetryByID was not admitted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first RetryByID did not return after claim was released")
+	}
+	select {
+	case <-claimedDone:
+	case <-time.After(time.Second):
+		t.Fatal("real platform ClaimDownloadForProcessing did not complete")
+	}
+	if got := claimCount.Load(); got != 1 {
+		t.Fatalf("platform claim winner count = %d, want 1", got)
+	}
+	current, err := s.db.GetDownload(id)
+	if err != nil || current == nil {
+		t.Fatalf("GetDownload: %v, %v", err, current)
+	}
+	if current.Status != "downloading" {
+		t.Fatalf("final status = %q, want downloading", current.Status)
+	}
 }

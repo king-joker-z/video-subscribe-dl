@@ -66,7 +66,7 @@ func NewRouter(database *db.DB, dl *downloader.Downloader, downloadDir string) *
 func (rt *Router) SetCallbacks(
 	onCheckNow func(),
 	onCredentialUpdate func(*bilibili.Credential),
-	onRetryDownload func(int64),
+	onRetryDownload func(int64) bool,
 	onSyncSource func(int64),
 	onProcessPending func(),
 	onRefreshRate func(),

@@ -71,7 +71,7 @@ type Server struct {
 	onCheckNow            func()
 	onCookieUpdate        func(string)
 	onCredentialUpdate    func(*bilibili.Credential)
-	onRetryDownload       func(int64)
+	onRetryDownload       func(int64) bool
 	onSyncSource          func(int64)
 	onFullScanSource      func(int64)
 	onProcessPending      func()
@@ -175,10 +175,11 @@ func (s *Server) setupRoutes() {
 				}
 			},
 			s.onCredentialUpdate,
-			func(id int64) {
+			func(id int64) bool {
 				if s.onRetryDownload != nil {
-					s.onRetryDownload(id)
+					return s.onRetryDownload(id)
 				}
+				return false
 			},
 			func(id int64) {
 				if s.onSyncSource != nil {
@@ -293,7 +294,7 @@ func (s *Server) SetCredentialUpdateFunc(fn func(*bilibili.Credential)) {
 	s.onCredentialUpdate = fn
 }
 
-func (s *Server) SetRetryDownloadFunc(fn func(int64)) {
+func (s *Server) SetRetryDownloadFunc(fn func(int64) bool) {
 	s.onRetryDownload = fn
 }
 

@@ -262,6 +262,25 @@ func (d *DB) IncrementRetryCount(id int64, lastError string) error {
 	return err
 }
 
+// PrepareManualRetry atomically resets a failed download for a user-requested retry.
+// Only failed and permanent_failed records are eligible; successful callers own the
+// transition to pending and may submit the record to a scheduler exactly once.
+func (d *DB) PrepareManualRetry(id int64) (bool, error) {
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET status='pending', retry_count=0, last_error='', error_message=''
+		WHERE id=? AND status IN ('failed','permanent_failed')
+	`, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
 // ResetRetryCount resets retry count (for manual retry)
 func (d *DB) ResetRetryCount(id int64) error {
 	_, err := d.Exec(`UPDATE downloads SET retry_count = 0, last_error = '' WHERE id = ?`, id)

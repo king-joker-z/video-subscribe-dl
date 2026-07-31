@@ -24,6 +24,9 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	}
 
 	// CAS：原子抢占，防止 ProcessAllPending 和 retry-worker 双路投递同一任务时重复执行
+	if s.beforeClaimHook != nil {
+		s.beforeClaimHook(dl)
+	}
 	claimed, err := s.db.ClaimDownloadForProcessing(dl.ID)
 	if err != nil {
 		log.Printf("[dscheduler] ClaimDownloadForProcessing failed for %d: %v", dl.ID, err)
@@ -31,6 +34,9 @@ func (s *DouyinScheduler) RetryOneDownload(dl db.Download) {
 	}
 	if !claimed {
 		log.Printf("[dscheduler] Download %d already claimed by another goroutine, skip", dl.ID)
+		return
+	}
+	if s.afterClaimHook != nil && !s.afterClaimHook(dl) {
 		return
 	}
 

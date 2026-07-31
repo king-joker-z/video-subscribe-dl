@@ -20,7 +20,7 @@ import (
 type VideosHandler struct {
 	db               *db.DB
 	downloadDir      string
-	onRetryDownload  func(int64)
+	onRetryDownload  func(int64) bool
 	onProcessPending func()
 	onRedownload     func(int64)
 	onRepairThumb    func(videoPath, thumbPath string) error
@@ -30,7 +30,7 @@ func NewVideosHandler(database *db.DB, downloadDir string) *VideosHandler {
 	return &VideosHandler{db: database, downloadDir: downloadDir}
 }
 
-func (h *VideosHandler) SetRetryDownloadFunc(fn func(int64)) {
+func (h *VideosHandler) SetRetryDownloadFunc(fn func(int64) bool) {
 	h.onRetryDownload = fn
 }
 
@@ -174,18 +174,28 @@ func (h *VideosHandler) HandleGet(w http.ResponseWriter, r *http.Request, id int
 	apiOK(w, dl)
 }
 
-// POST /api/videos/:id/retry — 重试下载
+// POST /api/videos/:id/retry — 重试失败下载
 func (h *VideosHandler) HandleRetry(w http.ResponseWriter, r *http.Request, id int64) {
+	var applied bool
+	var err error
 	if h.onRetryDownload != nil {
-		h.onRetryDownload(id)
-		log.Printf("[video] Retry download %d via API", id)
+		applied = h.onRetryDownload(id)
+		if applied {
+			log.Printf("[video] Retry download %d via API", id)
+		}
 	} else {
-		// fallback：直接改 DB 状态并触发 pending 处理
-		h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
-		h.db.ResetRetryCount(id)
-		if h.onProcessPending != nil {
+		applied, err = h.db.PrepareManualRetry(id)
+		if err == nil && applied && h.onProcessPending != nil {
 			go h.onProcessPending()
 		}
+	}
+	if err != nil {
+		apiError(w, CodeInternal, "重试任务失败: "+err.Error())
+		return
+	}
+	if !applied {
+		apiError(w, CodeTaskBusy, "只能重试失败或永久失败的任务")
+		return
 	}
 	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重试"})
 }
@@ -400,14 +410,23 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 	for _, id := range req.IDs {
 		switch req.Action {
 		case "retry":
+			var retried bool
+			var err error
 			if h.onRetryDownload != nil {
-				// P1-9: call asynchronously so a large batch doesn't block the HTTP handler
-				go h.onRetryDownload(id)
+				retried = h.onRetryDownload(id)
 			} else {
-				h.db.UpdateDownloadStatus(id, "pending", "", 0, "")
-				h.db.ResetRetryCount(id)
+				retried, err = h.db.PrepareManualRetry(id)
+				if err == nil && retried && h.onProcessPending != nil {
+					go h.onProcessPending()
+				}
 			}
-			affected++
+			if err != nil {
+				log.Printf("[video] Batch retry %d failed: %v", id, err)
+				continue
+			}
+			if retried {
+				affected++
+			}
 		case "redownload":
 			dl, _ := h.db.GetDownload(id)
 			if dl != nil && (dl.Status == "completed" || dl.Status == "relocated") {

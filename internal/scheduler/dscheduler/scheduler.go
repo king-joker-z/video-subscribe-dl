@@ -55,7 +55,7 @@ type DownloadEvent struct {
 // DouyinCookieStatus 抖音 Cookie 有效性状态
 type DouyinCookieStatus struct {
 	Valid bool
-	Msg  string
+	Msg   string
 }
 
 // DouyinScheduler 封装抖音专属的调度状态与逻辑
@@ -82,6 +82,10 @@ type DouyinScheduler struct {
 
 	// 自定义 sleep（便于测试）
 	sleepFn func(time.Duration)
+	// beforeClaimHook and afterClaimHook are test-only seams. Production leaves
+	// them nil, preserving the normal ClaimDownloadForProcessing path.
+	beforeClaimHook func(db.Download)
+	afterClaimHook  func(db.Download) bool
 
 	// Cookie 检测时间戳（cookieCheckMu 保护并发读写）
 	cookieCheckMu   sync.Mutex
@@ -150,6 +154,13 @@ func New(cfg Config) *DouyinScheduler {
 		httpClient: defaultDouyinDownloadClient,
 	}
 	return s
+}
+
+// SetTestClaimHooks configures test-only synchronization around the production
+// atomic claim. Production callers leave both hooks nil.
+func (s *DouyinScheduler) SetTestClaimHooks(before func(db.Download), after func(db.Download) bool) {
+	s.beforeClaimHook = before
+	s.afterClaimHook = after
 }
 
 // Start 在调度器启动时调用，重置崩溃遗留的僵死 "downloading" 记录为 "pending"
