@@ -1102,3 +1102,148 @@ func TestVideoBatchRestoreOnlyCountsDeleted(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoDeleteOnlyAllowsExplicitSafeStates(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"pending", true}, {"failed", true}, {"permanent_failed", true}, {"completed", true},
+		{"relocated", true}, {"cancelled", true}, {"skipped", true}, {"charge_blocked", true},
+		{"downloading", false}, {"deleted", false}, {"unknown_state", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path, file_size, thumb_path) VALUES (?, ?, ?, '/tmp/video.mkv', 123, '/tmp/thumb.jpg')`, sourceID, "delete-api-"+tc.status, tc.status)
+			if err != nil {
+				t.Fatalf("insert download: %v", err)
+			}
+			id, _ := result.LastInsertId()
+			var deletes atomic.Int32
+			h.removeVideoDir = func(string) { deletes.Add(1) }
+			rec := httptest.NewRecorder()
+			h.HandleDeleteVideo(rec, httptest.NewRequest(http.MethodDelete, "/api/videos/1", nil), id)
+			resp := parseResponse(t, rec)
+			if tc.allow {
+				if rec.Code != http.StatusOK || resp.Code != CodeOK || deletes.Load() != 1 {
+					t.Fatalf("allowed %s: HTTP=%d code=%d deletes=%d body=%s", tc.status, rec.Code, resp.Code, deletes.Load(), rec.Body.String())
+				}
+			} else if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy || deletes.Load() != 0 {
+				t.Fatalf("rejected %s: HTTP=%d code=%d deletes=%d body=%s", tc.status, rec.Code, resp.Code, deletes.Load(), rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestVideoDeleteConcurrentOnlyOneDeletes(t *testing.T) {
+	database := initTestDB(t)
+	database.SetMaxOpenConns(1)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path, file_size, thumb_path) VALUES (?, 'delete-race', 'completed', '/tmp/video.mkv', 123, '/tmp/thumb.jpg')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert download: %v", err)
+	}
+	id, _ := result.LastInsertId()
+	var deletes atomic.Int32
+	h.removeVideoDir = func(string) { deletes.Add(1) }
+
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			h.HandleDeleteVideo(rec, httptest.NewRequest(http.MethodDelete, "/api/videos/1", nil), id)
+			responses <- rec
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	var success, conflict int
+	for rec := range responses {
+		switch rec.Code {
+		case http.StatusOK:
+			success++
+		case http.StatusBadRequest:
+			conflict++
+		default:
+			t.Fatalf("concurrent delete unexpected HTTP status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if success != 1 || conflict != 1 || deletes.Load() != 1 {
+		t.Fatalf("concurrent delete success=%d conflict=%d deletes=%d, want 1/1/1", success, conflict, deletes.Load())
+	}
+	var status, filePath, thumbPath string
+	var fileSize int64
+	if err := database.QueryRow(`SELECT status, file_path, file_size, thumb_path FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath); err != nil {
+		t.Fatalf("query delete state: %v", err)
+	}
+	if status != "deleted" || filePath != "" || fileSize != 0 || thumbPath != "" {
+		t.Fatalf("concurrent delete final state: status=%q path=%q size=%d thumb=%q", status, filePath, fileSize, thumbPath)
+	}
+}
+
+func TestVideoBatchDeleteOnlyCountsAdmitted(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path) VALUES (?, ?, ?, '/tmp/video.mkv')`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	completedID := insert("delete-completed", "completed")
+	failedID := insert("delete-failed", "failed")
+	downloadingID := insert("delete-downloading", "downloading")
+	deletedID := insert("delete-deleted", "deleted")
+	unknownID := insert("delete-unknown", "unknown_state")
+	var deletes atomic.Int32
+	h.removeVideoDir = func(string) { deletes.Add(1) }
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"delete","ids":[%d,%d,%d,%d,%d]}`, completedID, failedID, downloadingID, deletedID, unknownID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	resp := parseResponse(t, rec)
+	data := resp.Data.(map[string]interface{})
+	if rec.Code != http.StatusOK || resp.Code != CodeOK || int(data["affected"].(float64)) != 2 || deletes.Load() != 2 {
+		t.Fatalf("batch delete HTTP=%d code=%d affected=%v deletes=%d body=%s", rec.Code, resp.Code, data["affected"], deletes.Load(), rec.Body.String())
+	}
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{{completedID, "deleted"}, {failedID, "deleted"}, {downloadingID, "downloading"}, {deletedID, "deleted"}, {unknownID, "unknown_state"}} {
+		var status string
+		if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, tc.id).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		if status != tc.want {
+			t.Fatalf("status for %d=%q, want %q", tc.id, status, tc.want)
+		}
+	}
+}

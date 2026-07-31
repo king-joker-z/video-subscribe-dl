@@ -178,3 +178,48 @@ func TestPrepareRestoreOnlyAllowsDeleted(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareDeleteOnlyAllowsExplicitSafeStates(t *testing.T) {
+	d := initMemoryDB(t)
+	defer d.Close()
+	sourceID, err := d.CreateSource(&Source{URL: "https://example.test", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"pending", true}, {"failed", true}, {"permanent_failed", true}, {"completed", true},
+		{"relocated", true}, {"cancelled", true}, {"skipped", true}, {"charge_blocked", true},
+		{"downloading", false}, {"deleted", false}, {"unknown_state", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			id, err := d.CreateDownload(&Download{SourceID: sourceID, VideoID: "delete-" + tc.status, Status: tc.status})
+			if err != nil {
+				t.Fatalf("CreateDownload: %v", err)
+			}
+			if _, err := d.Exec(`UPDATE downloads SET file_path='/tmp/video.mkv', file_size=123, thumb_path='/tmp/thumb.jpg' WHERE id=?`, id); err != nil {
+				t.Fatalf("seed metadata: %v", err)
+			}
+
+			admitted, err := d.PrepareDelete(id)
+			if err != nil || admitted != tc.allow {
+				t.Fatalf("PrepareDelete(%s) = (%v, %v), want (%v, nil)", tc.status, admitted, err, tc.allow)
+			}
+			var status, filePath, thumbPath string
+			var fileSize int64
+			if err := d.QueryRow(`SELECT status, file_path, file_size, thumb_path FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath); err != nil {
+				t.Fatalf("query state: %v", err)
+			}
+			if tc.allow {
+				if status != "deleted" || filePath != "" || fileSize != 0 || thumbPath != "" {
+					t.Fatalf("admitted delete state: status=%q path=%q size=%d thumb=%q", status, filePath, fileSize, thumbPath)
+				}
+			} else if status != tc.status || filePath != "/tmp/video.mkv" || fileSize != 123 || thumbPath != "/tmp/thumb.jpg" {
+				t.Fatalf("rejected %s changed: status=%q path=%q size=%d thumb=%q", tc.status, status, filePath, fileSize, thumbPath)
+			}
+		})
+	}
+}

@@ -262,15 +262,25 @@ func (h *VideosHandler) HandleRedownload(w http.ResponseWriter, r *http.Request,
 	apiOK(w, map[string]interface{}{"id": id, "message": "已提交重新下载"})
 }
 
-// DELETE /api/videos/:id — 软删除下载记录（标记为 deleted，删除本地文件）
+// DELETE /api/videos/:id — atomically soft-delete an eligible download record.
 func (h *VideosHandler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request, id int64) {
-	dl, _ := h.db.GetDownload(id)
-	if dl != nil && dl.FilePath != "" {
-		util.RemoveVideoDir(dl.FilePath, h.downloadDir)
+	dl, err := h.db.GetDownload(id)
+	if err != nil {
+		apiError(w, CodeVideoNotFound, "视频不存在")
+		return
 	}
-
-	// 软删除：标记状态为 deleted，清空文件信息
-	h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+	admitted, err := h.db.PrepareDelete(id)
+	if err != nil {
+		apiError(w, CodeInternal, "删除任务失败: "+err.Error())
+		return
+	}
+	if !admitted {
+		apiError(w, CodeTaskBusy, "当前任务状态不能删除")
+		return
+	}
+	if dl.FilePath != "" {
+		h.removeVideoDir(dl.FilePath)
+	}
 	log.Printf("[video] Soft-deleted record %d", id)
 	apiOK(w, map[string]interface{}{"id": id, "message": "已删除"})
 }
@@ -442,11 +452,21 @@ func (h *VideosHandler) HandleBatch(w http.ResponseWriter, r *http.Request) {
 			}
 			affected += int(changed)
 		case "delete":
-			dl, _ := h.db.GetDownload(id)
-			if dl != nil && dl.FilePath != "" {
-				util.RemoveVideoDir(dl.FilePath, h.downloadDir)
+			dl, err := h.db.GetDownload(id)
+			if err != nil {
+				continue
 			}
-			h.db.Exec("UPDATE downloads SET status = 'deleted', file_path = '', file_size = 0, thumb_path = '' WHERE id = ?", id)
+			admitted, err := h.db.PrepareDelete(id)
+			if err != nil {
+				log.Printf("[video] Batch delete %d failed: %v", id, err)
+				continue
+			}
+			if !admitted {
+				continue
+			}
+			if dl.FilePath != "" {
+				h.removeVideoDir(dl.FilePath)
+			}
 			affected++
 		case "restore":
 			admitted, err := h.db.PrepareRestore(id)

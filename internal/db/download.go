@@ -281,6 +281,28 @@ func (d *DB) PrepareRedownload(id int64) (bool, error) {
 	return affected == 1, nil
 }
 
+// PrepareDelete atomically admits a download for soft deletion. Only explicitly
+// allowed non-processing states can transition to deleted; the rows-affected
+// result is the sole admission decision for callers that remove local files.
+func (d *DB) PrepareDelete(id int64) (bool, error) {
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET status='deleted', file_path='', file_size=0, thumb_path=''
+		WHERE id=? AND status IN (
+			'pending','failed','permanent_failed','completed','relocated',
+			'cancelled','skipped','charge_blocked'
+		)
+	`, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
 // PrepareRestore atomically admits a deleted record for restore.
 func (d *DB) PrepareRestore(id int64) (bool, error) {
 	result, err := d.Exec(`
