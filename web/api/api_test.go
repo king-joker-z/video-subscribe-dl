@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	_ "github.com/glebarez/sqlite"
 	"video-subscribe-dl/internal/db"
@@ -762,6 +765,181 @@ func TestVideoBatchRetryCallbackCountsOnlyTrue(t *testing.T) {
 		}
 		if status != "completed" {
 			t.Fatalf("callback batch fell through to DB fallback: id=%d status=%q", id, status)
+		}
+	}
+}
+
+func TestVideoRedownloadOnlyAllowsCompletedOrRelocated(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"completed", true}, {"relocated", true}, {"pending", false}, {"downloading", false}, {"failed", false}, {"permanent_failed", false}, {"cancelled", false}, {"deleted", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path, file_size, retry_count) VALUES (?, ?, ?, '/tmp/video.mkv', 123, 2)`, sourceID, "redownload-"+tc.status, tc.status)
+			if err != nil {
+				t.Fatalf("insert download: %v", err)
+			}
+			id, _ := result.LastInsertId()
+			var deletes atomic.Int32
+			dispatched := make(chan struct{}, 1)
+			h.removeVideoDir = func(string) { deletes.Add(1) }
+			h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+			req := httptest.NewRequest(http.MethodPost, "/api/videos/1/redownload", nil)
+			rec := httptest.NewRecorder()
+			h.HandleRedownload(rec, req, id)
+			resp := parseResponse(t, rec)
+			if tc.allow {
+				select {
+				case <-dispatched:
+				case <-time.After(time.Second):
+					t.Fatalf("allowed %s did not dispatch", tc.status)
+				}
+				if rec.Code != http.StatusOK || resp.Code != CodeOK || deletes.Load() != 1 {
+					t.Fatalf("allowed %s: HTTP=%d code=%d deletes=%d", tc.status, rec.Code, resp.Code, deletes.Load())
+				}
+			} else if rec.Code != http.StatusBadRequest || resp.Code != CodeTaskBusy || deletes.Load() != 0 {
+				t.Fatalf("rejected %s: HTTP=%d code=%d deletes=%d", tc.status, rec.Code, resp.Code, deletes.Load())
+			}
+		})
+	}
+}
+
+func TestVideoRedownloadConcurrentOnlyOneDeletesAndDispatches(t *testing.T) {
+	database := initTestDB(t)
+	database.SetMaxOpenConns(1)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path) VALUES (?, 'redownload-race', 'completed', '/tmp/video.mkv')`, sourceID)
+	if err != nil {
+		t.Fatalf("insert download: %v", err)
+	}
+	id, _ := result.LastInsertId()
+	var deletes atomic.Int32
+	dispatched := make(chan struct{}, 2)
+	h.removeVideoDir = func(string) { deletes.Add(1) }
+	h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			h.HandleRedownload(rec, httptest.NewRequest(http.MethodPost, "/api/videos/1/redownload", nil), id)
+			responses <- rec
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+	var success, conflict int
+	for rec := range responses {
+		switch rec.Code {
+		case http.StatusOK:
+			success++
+		case http.StatusBadRequest:
+			conflict++
+		default:
+			t.Fatalf("concurrent redownload unexpected HTTP status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if success != 1 || conflict != 1 || deletes.Load() != 1 {
+		t.Fatalf("concurrent redownload success=%d conflict=%d deletes=%d, want 1/1/1", success, conflict, deletes.Load())
+	}
+	var status, filePath, thumbPath string
+	var fileSize int64
+	var retryCount int
+	if err := database.QueryRow(`SELECT status, file_path, file_size, thumb_path, retry_count FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath, &retryCount); err != nil {
+		t.Fatalf("query concurrent redownload state: %v", err)
+	}
+	if status != "pending" || filePath != "" || fileSize != 0 || thumbPath != "" || retryCount != 0 {
+		t.Fatalf("concurrent redownload final state: status=%q file_path=%q file_size=%d thumb_path=%q retry_count=%d, want pending/empty/0/empty/0", status, filePath, fileSize, thumbPath, retryCount)
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent redownload did not dispatch")
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("concurrent redownload dispatched more than once")
+	default:
+	}
+}
+
+func TestVideoBatchRedownloadOnlyCountsCompletedAndRelocated(t *testing.T) {
+	database := initTestDB(t)
+	defer database.Close()
+	h := NewVideosHandler(database, t.TempDir())
+	sourceID, err := database.CreateSource(&db.Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	insert := func(videoID, status string) int64 {
+		t.Helper()
+		result, err := database.Exec(`INSERT INTO downloads (source_id, video_id, status, file_path) VALUES (?, ?, ?, '/tmp/video.mkv')`, sourceID, videoID, status)
+		if err != nil {
+			t.Fatalf("insert %s: %v", status, err)
+		}
+		id, _ := result.LastInsertId()
+		return id
+	}
+	completedID := insert("completed", "completed")
+	relocatedID := insert("relocated", "relocated")
+	failedID := insert("failed", "failed")
+	cancelledID := insert("cancelled", "cancelled")
+	dispatched := make(chan struct{}, 2)
+	h.removeVideoDir = func(string) {}
+	h.SetRedownloadFunc(func(int64) { dispatched <- struct{}{} })
+	body := bytes.NewBufferString(fmt.Sprintf(`{"action":"redownload","ids":[%d,%d,%d,%d]}`, completedID, relocatedID, failedID, cancelledID))
+	req := httptest.NewRequest(http.MethodPost, "/api/videos/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBatch(rec, req)
+	resp := parseResponse(t, rec)
+	data := resp.Data.(map[string]interface{})
+	if rec.Code != http.StatusOK || resp.Code != CodeOK || int(data["affected"].(float64)) != 2 {
+		t.Fatalf("batch redownload HTTP=%d code=%d affected=%v", rec.Code, resp.Code, data["affected"])
+	}
+	for range 2 {
+		select {
+		case <-dispatched:
+		case <-time.After(time.Second):
+			t.Fatal("batch redownload did not dispatch every admitted item")
+		}
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("batch redownload dispatched more than admitted items")
+	default:
+	}
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{{completedID, "pending"}, {relocatedID, "pending"}, {failedID, "failed"}, {cancelledID, "cancelled"}} {
+		var status string
+		if err := database.QueryRow(`SELECT status FROM downloads WHERE id=?`, tc.id).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		if status != tc.want {
+			t.Fatalf("status for %d = %q, want %q", tc.id, status, tc.want)
 		}
 	}
 }

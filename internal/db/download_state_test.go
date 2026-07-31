@@ -86,3 +86,54 @@ func TestFailAndScheduleRetryIfProcessing(t *testing.T) {
 		t.Fatalf("final row = status=%s retry=%d next=%d error=%q last=%q", status, retryCount, nextRetryAt, errorMessage, lastError)
 	}
 }
+
+func TestPrepareRedownloadOnlyAllowsCompletedOrRelocated(t *testing.T) {
+	d := initMemoryDB(t)
+	sourceID, err := d.CreateSource(&Source{Type: "channel", URL: "https://example.test/source", Name: "source", Enabled: true})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	for _, tc := range []struct {
+		status string
+		allow  bool
+	}{
+		{"completed", true},
+		{"relocated", true},
+		{"pending", false},
+		{"downloading", false},
+		{"failed", false},
+		{"permanent_failed", false},
+		{"cancelled", false},
+		{"deleted", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			id, err := d.CreateDownload(&Download{SourceID: sourceID, VideoID: "redownload-" + tc.status, Status: tc.status})
+			if err != nil {
+				t.Fatalf("CreateDownload: %v", err)
+			}
+			if _, err := d.Exec(`UPDATE downloads SET file_path='/tmp/video.mkv', file_size=123, thumb_path='/tmp/thumb.jpg', retry_count=2, last_error='old', error_message='old' WHERE id=?`, id); err != nil {
+				t.Fatalf("seed download metadata: %v", err)
+			}
+			admitted, err := d.PrepareRedownload(id)
+			if err != nil {
+				t.Fatalf("PrepareRedownload: %v", err)
+			}
+			if admitted != tc.allow {
+				t.Fatalf("PrepareRedownload(%s) = %v, want %v", tc.status, admitted, tc.allow)
+			}
+			var status, filePath, thumbPath, lastError, errorMessage string
+			var fileSize int64
+			var retryCount int
+			if err := d.QueryRow(`SELECT status, file_path, file_size, thumb_path, retry_count, last_error, error_message FROM downloads WHERE id=?`, id).Scan(&status, &filePath, &fileSize, &thumbPath, &retryCount, &lastError, &errorMessage); err != nil {
+				t.Fatalf("query download: %v", err)
+			}
+			if tc.allow {
+				if status != "pending" || filePath != "" || fileSize != 0 || thumbPath != "" || retryCount != 0 || lastError != "" || errorMessage != "" {
+					t.Fatalf("admitted redownload not fully reset: status=%q path=%q size=%d thumb=%q retry=%d last=%q err=%q", status, filePath, fileSize, thumbPath, retryCount, lastError, errorMessage)
+				}
+			} else if status != tc.status || filePath != "/tmp/video.mkv" || fileSize != 123 || retryCount != 2 {
+				t.Fatalf("rejected %s changed: status=%q path=%q size=%d retry=%d", tc.status, status, filePath, fileSize, retryCount)
+			}
+		})
+	}
+}

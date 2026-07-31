@@ -262,6 +262,25 @@ func (d *DB) IncrementRetryCount(id int64, lastError string) error {
 	return err
 }
 
+// PrepareRedownload atomically admits a completed or relocated record for redownload.
+// It clears retry, error, and file metadata only when the status transition succeeds.
+func (d *DB) PrepareRedownload(id int64) (bool, error) {
+	result, err := d.Exec(`
+		UPDATE downloads
+		SET status='pending', retry_count=0, last_error='', error_message='',
+		    file_path='', file_size=0, thumb_path='', downloaded_at=NULL
+		WHERE id=? AND status IN ('completed','relocated')
+	`, id)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
 // PrepareManualRetry atomically resets a failed download for a user-requested retry.
 // Only failed and permanent_failed records are eligible; successful callers own the
 // transition to pending and may submit the record to a scheduler exactly once.
